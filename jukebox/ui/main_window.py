@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QFileDialog,
     QMainWindow,
@@ -28,6 +29,12 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.config = config
         self.player = AudioPlayer()
+
+        # Timer for updating position slider
+        self.position_timer = QTimer()
+        self.position_timer.setInterval(100)  # Update every 100ms
+        self.position_timer.timeout.connect(self._update_position)
+
         self._init_ui()
         self._connect_signals()
 
@@ -66,9 +73,9 @@ class MainWindow(QMainWindow):
         self.track_list.track_selected.connect(self._load_and_play)
 
         # Player controls
-        self.controls.play_clicked.connect(self.player.play)
-        self.controls.pause_clicked.connect(self.player.pause)
-        self.controls.stop_clicked.connect(self.player.stop)
+        self.controls.play_clicked.connect(self._on_play)
+        self.controls.pause_clicked.connect(self._on_pause)
+        self.controls.stop_clicked.connect(self._on_stop)
         self.controls.volume_changed.connect(self.player.set_volume)
         self.controls.position_changed.connect(self.player.set_position)
 
@@ -99,3 +106,26 @@ class MainWindow(QMainWindow):
         if self.player.load(filepath):
             self.player.play()
             self.setWindowTitle(f"{self.config.ui.window_title} - {filepath.name}")
+            self.position_timer.start()
+
+    def _on_play(self) -> None:
+        """Handle play button click."""
+        self.player.play()
+        self.position_timer.start()
+
+    def _on_pause(self) -> None:
+        """Handle pause button click."""
+        self.player.pause()
+        self.position_timer.stop()
+
+    def _on_stop(self) -> None:
+        """Handle stop button click."""
+        self.player.stop()
+        self.position_timer.stop()
+        self.controls.set_position(0.0)
+
+    def _update_position(self) -> None:
+        """Update position slider based on player position."""
+        if self.player.is_playing():
+            position = self.player.get_position()
+            self.controls.set_position(position)
