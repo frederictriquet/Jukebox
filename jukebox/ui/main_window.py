@@ -1,5 +1,6 @@
 """Main application window."""
 
+import logging
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
@@ -18,9 +19,12 @@ from PySide6.QtWidgets import (
 from jukebox.core.audio_player import AudioPlayer
 from jukebox.core.config import JukeboxConfig
 from jukebox.core.database import Database
+from jukebox.core.event_bus import EventBus
+from jukebox.core.plugin_manager import PluginContext, PluginManager
 from jukebox.ui.components.player_controls import PlayerControls
 from jukebox.ui.components.search_bar import SearchBar
 from jukebox.ui.components.track_list import TrackList
+from jukebox.ui.ui_builder import UIBuilder
 from jukebox.utils.metadata import MetadataExtractor
 from jukebox.utils.scanner import FileScanner
 
@@ -46,6 +50,9 @@ class MainWindow(QMainWindow):
         # Audio player
         self.player = AudioPlayer()
 
+        # Event bus
+        self.event_bus = EventBus()
+
         # Timer for updating position slider
         self.position_timer = QTimer()
         self.position_timer.setInterval(100)
@@ -53,6 +60,7 @@ class MainWindow(QMainWindow):
 
         self._init_ui()
         self._connect_signals()
+        self._load_plugins()
         self._load_tracks_from_db()
 
     def _init_ui(self) -> None:
@@ -198,3 +206,16 @@ class MainWindow(QMainWindow):
         if self.player.is_playing():
             position = self.player.get_position()
             self.controls.set_position(position)
+
+    def _load_plugins(self) -> None:
+        """Load all plugins."""
+        plugins_dir = Path(__file__).parent.parent.parent / "plugins"
+        context = PluginContext(self)
+        self.plugin_manager = PluginManager(plugins_dir, context)
+        ui_builder = UIBuilder(self)
+
+        loaded = self.plugin_manager.load_all_plugins()
+        logging.info(f"Loaded {loaded} plugins")
+
+        for plugin in self.plugin_manager.get_all_plugins():
+            plugin.register_ui(ui_builder)
