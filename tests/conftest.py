@@ -1,20 +1,10 @@
 """Pytest configuration and fixtures."""
 
-import sys
-
 import pytest
 from PySide6.QtWidgets import QApplication
 
-
-# Mock VLC module before any imports
-@pytest.fixture(scope="session", autouse=True)
-def mock_vlc():
-    """Mock VLC module for tests without VLC installed."""
-    if "vlc" not in sys.modules:
-        from tests.mocks.mock_vlc import mock_vlc_module
-
-        sys.modules["vlc"] = mock_vlc_module()
-    return sys.modules["vlc"]
+# Register pytest plugin for VLC mocking
+pytest_plugins = ["tests.pytest_vlc_mock"]
 
 
 @pytest.fixture(scope="session")
