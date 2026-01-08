@@ -47,7 +47,9 @@ class PlayerControls(QWidget):
         layout.addWidget(QLabel("Position:"))
         self.position_slider = QSlider(Qt.Orientation.Horizontal)
         self.position_slider.setRange(0, 1000)
-        self.position_slider.sliderMoved.connect(lambda val: self.position_changed.emit(val / 1000.0))
+        self.position_slider.sliderMoved.connect(
+            lambda val: self.position_changed.emit(val / 1000.0)
+        )
         layout.addWidget(self.position_slider)
 
         # Volume slider

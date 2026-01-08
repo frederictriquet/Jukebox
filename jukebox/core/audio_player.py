@@ -1,7 +1,6 @@
 """Audio player wrapper for python-vlc."""
 
 from pathlib import Path
-from typing import Optional
 
 import vlc
 from PySide6.QtCore import QObject, Signal
@@ -21,7 +20,7 @@ class AudioPlayer(QObject):
         super().__init__()
         self._instance = vlc.Instance()
         self._player = self._instance.media_player_new()
-        self._current_file: Optional[Path] = None
+        self._current_file: Path | None = None
 
     def load(self, filepath: Path) -> bool:
         """Load an audio file.
@@ -74,7 +73,8 @@ class AudioPlayer(QObject):
         Returns:
             Current volume level
         """
-        return self._player.audio_get_volume()
+        volume = self._player.audio_get_volume()
+        return int(volume) if volume is not None else 0
 
     def set_position(self, position: float) -> None:
         """Set playback position (0.0-1.0).
@@ -92,7 +92,8 @@ class AudioPlayer(QObject):
         Returns:
             Current position in track
         """
-        return self._player.get_position()
+        position = self._player.get_position()
+        return float(position) if position is not None else 0.0
 
     def is_playing(self) -> bool:
         """Check if currently playing.
@@ -100,10 +101,11 @@ class AudioPlayer(QObject):
         Returns:
             True if playing, False otherwise
         """
-        return self._player.is_playing() == 1
+        playing = self._player.is_playing()
+        return bool(playing == 1) if playing is not None else False
 
     @property
-    def current_file(self) -> Optional[Path]:
+    def current_file(self) -> Path | None:
         """Get currently loaded file.
 
         Returns:

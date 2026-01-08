@@ -1,7 +1,9 @@
 """Tests for audio player module."""
 
-import pytest
 from pathlib import Path
+
+import pytest
+
 from jukebox.core.audio_player import AudioPlayer
 
 

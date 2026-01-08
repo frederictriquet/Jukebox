@@ -1,12 +1,14 @@
 """Tests for configuration module."""
 
-import pytest
 from pathlib import Path
+
+import pytest
+
 from jukebox.core.config import (
     AudioConfig,
-    UIConfig,
-    LoggingConfig,
     JukeboxConfig,
+    LoggingConfig,
+    UIConfig,
     load_config,
 )
 

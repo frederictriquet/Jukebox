@@ -1,6 +1,7 @@
 """Logging utilities."""
 
 import logging
+
 from jukebox.core.config import LoggingConfig
 
 

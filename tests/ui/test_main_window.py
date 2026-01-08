@@ -1,9 +1,11 @@
 """Tests for main window."""
 
-import pytest
 from pathlib import Path
+
+import pytest
+
+from jukebox.core.config import AudioConfig, JukeboxConfig, LoggingConfig, UIConfig
 from jukebox.ui.main_window import MainWindow
-from jukebox.core.config import JukeboxConfig, AudioConfig, UIConfig, LoggingConfig
 
 
 @pytest.fixture
@@ -13,18 +15,10 @@ def test_config():
         audio=AudioConfig(
             default_volume=50,
             supported_formats=["mp3", "flac"],
-            music_directory=Path("/tmp/test_music")
+            music_directory=Path("/tmp/test_music"),
         ),
-        ui=UIConfig(
-            window_title="Test Jukebox",
-            window_width=800,
-            window_height=600,
-            theme="dark"
-        ),
-        logging=LoggingConfig(
-            level="DEBUG",
-            file="test.log"
-        )
+        ui=UIConfig(window_title="Test Jukebox", window_width=800, window_height=600, theme="dark"),
+        logging=LoggingConfig(level="DEBUG", file="test.log"),
     )
 
 

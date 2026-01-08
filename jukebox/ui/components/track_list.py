@@ -1,7 +1,6 @@
 """Track list widget."""
 
 from pathlib import Path
-from typing import List
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QListWidget, QListWidgetItem
@@ -32,7 +31,7 @@ class TrackList(QListWidget):
         item.setToolTip(str(filepath))
         self.addItem(item)
 
-    def add_tracks(self, filepaths: List[Path]) -> None:
+    def add_tracks(self, filepaths: list[Path]) -> None:
         """Add multiple tracks.
 
         Args:
@@ -53,7 +52,8 @@ class TrackList(QListWidget):
         """
         current = self.currentItem()
         if current:
-            return current.data(Qt.ItemDataRole.UserRole)
+            data = current.data(Qt.ItemDataRole.UserRole)
+            return Path(data) if data is not None else None
         return None
 
     def _on_item_double_clicked(self, item: QListWidgetItem) -> None:

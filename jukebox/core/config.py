@@ -1,7 +1,6 @@
 """Configuration management using Pydantic and YAML."""
 
 from pathlib import Path
-from typing import List
 
 import yaml
 from pydantic import BaseModel, Field
@@ -11,7 +10,7 @@ class AudioConfig(BaseModel):
     """Audio configuration."""
 
     default_volume: int = Field(ge=0, le=100, default=70)
-    supported_formats: List[str] = ["mp3", "flac", "aiff", "wav"]
+    supported_formats: list[str] = ["mp3", "flac", "aiff", "wav"]
     music_directory: Path = Field(default_factory=lambda: Path.home() / "Music")
 
 
