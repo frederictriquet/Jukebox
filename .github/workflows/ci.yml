@@ -48,6 +48,8 @@ jobs:
         run: uv sync --all-extras
 
       - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: |
           uv run pytest --cov=jukebox --cov-report=xml --cov-report=term
 
