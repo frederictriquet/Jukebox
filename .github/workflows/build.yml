@@ -1,0 +1,131 @@
+name: Build Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-pyinstaller:
+    name: Build with PyInstaller on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: jukebox-linux
+            asset_name: jukebox-linux-x86_64.tar.gz
+          - os: macos-latest
+            artifact_name: jukebox-macos
+            asset_name: jukebox-macos.dmg
+          - os: windows-latest
+            artifact_name: jukebox-windows
+            asset_name: jukebox-windows.zip
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Install PyInstaller
+        run: uv pip install pyinstaller
+
+      - name: Build with PyInstaller (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          uv run pyinstaller \
+            --name=jukebox \
+            --windowed \
+            --add-data="config:config" \
+            --hidden-import=PySide6 \
+            jukebox/main.py
+
+      - name: Build with PyInstaller (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          uv run pyinstaller `
+            --name=jukebox `
+            --windowed `
+            --add-data="config;config" `
+            --hidden-import=PySide6 `
+            jukebox/main.py
+
+      - name: Create tarball (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cd dist
+          tar -czf ${{ matrix.asset_name }} jukebox/
+
+      - name: Create DMG (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          # For now, just create a zip
+          cd dist
+          zip -r jukebox-macos.zip Jukebox.app
+
+      - name: Create zip (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd dist
+          Compress-Archive -Path jukebox -DestinationPath ${{ matrix.asset_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.asset_name }}
+
+  build-wheel:
+    name: Build Python Wheel
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Build wheel
+        run: uv build
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-wheel
+          path: dist/*.whl
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build-pyinstaller, build-wheel]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            jukebox-linux/*
+            jukebox-macos/*
+            jukebox-windows/*
+            python-wheel/*
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
