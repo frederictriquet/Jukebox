@@ -1,0 +1,187 @@
+# Jukebox
+
+A modular audio jukebox application for Mac, Linux, and Raspberry Pi.
+
+## Features (v0.1.0-alpha)
+
+- 🎵 Audio playback (MP3, FLAC, AIFF, WAV)
+- 📋 Simple track list
+- ⏯️ Playback controls (play, pause, stop)
+- 🔊 Volume control
+- 📍 Position seeking
+- ⚙️ YAML configuration with Pydantic validation
+
+## Requirements
+
+- Python 3.11+
+- VLC media player (for python-vlc backend)
+
+## Installation
+
+### Install VLC
+
+#### macOS
+```bash
+brew install vlc
+```
+
+#### Ubuntu/Debian
+```bash
+sudo apt-get install vlc libvlc-dev
+```
+
+#### Arch Linux
+```bash
+sudo pacman -S vlc
+```
+
+### Install Jukebox
+
+```bash
+# Clone repository
+git clone https://github.com/yourusername/jukebox.git
+cd jukebox
+
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install dependencies
+uv sync --all-extras
+
+# Run application
+uv run jukebox
+```
+
+## Configuration
+
+Edit `config/config.yaml` to customize settings:
+
+```yaml
+audio:
+  default_volume: 70
+  supported_formats:
+    - mp3
+    - flac
+    - aiff
+    - wav
+  music_directory: ~/Music
+
+ui:
+  window_title: "Jukebox"
+  window_width: 1024
+  window_height: 768
+  theme: "dark"
+
+logging:
+  level: "INFO"
+  file: "jukebox.log"
+```
+
+## Usage
+
+1. Launch Jukebox
+2. Click "Add Files..." to select audio files
+3. Double-click a track to play
+4. Use controls to manage playback
+
+### Keyboard Shortcuts (Coming Soon)
+
+| Shortcut | Action |
+|----------|--------|
+| Space | Play/Pause |
+| Ctrl+P | Pause |
+| Ctrl+S | Stop |
+
+## Development
+
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and guidelines.
+
+### Running Tests
+
+```bash
+uv run pytest
+# Or use make
+make test
+```
+
+### Code Quality
+
+```bash
+# Format code
+uv run black jukebox tests
+
+# Lint
+uv run ruff check jukebox tests
+
+# Type check
+uv run mypy jukebox
+
+# Or run all checks
+make ci
+```
+
+## Project Structure
+
+```
+jukebox/
+├── jukebox/
+│   ├── core/           # Core functionality
+│   │   ├── audio_player.py
+│   │   └── config.py
+│   ├── ui/             # User interface
+│   │   ├── main_window.py
+│   │   └── components/
+│   │       ├── player_controls.py
+│   │       └── track_list.py
+│   ├── utils/          # Utilities
+│   │   └── logger.py
+│   └── main.py         # Entry point
+├── tests/              # Test suite
+├── config/             # Configuration files
+└── docs/               # Documentation
+```
+
+## Roadmap
+
+See [Roadmap/00-OVERVIEW.md](Roadmap/00-OVERVIEW.md) for detailed roadmap.
+
+### Current Phase: MVP Foundation (v0.1.0-alpha)
+- ✅ Basic audio playback
+- ✅ Simple UI with track list
+- ✅ Configuration management
+- ✅ Logging
+
+### Next Phase: CI/CD Setup (v0.2.0-alpha)
+- GitHub Actions workflows
+- Automated testing
+- Code quality checks
+- Build automation
+
+### Future Phases
+- Core features (database, search)
+- Plugin system
+- Advanced features
+- Distribution packages
+
+## Contributing
+
+Contributions welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+## Acknowledgments
+
+Built with:
+- [PySide6](https://doc.qt.io/qtforpython-6/) - Qt bindings for Python
+- [python-vlc](https://github.com/oaubert/python-vlc) - VLC media player bindings
+- [mutagen](https://github.com/quodlibet/mutagen) - Audio metadata library
+- [Pydantic](https://docs.pydantic.dev/) - Data validation
+- [uv](https://github.com/astral-sh/uv) - Fast Python package installer
+
+## Status
+
+🚧 **Alpha** - Under active development
+
+Current version: **v0.1.0-alpha**

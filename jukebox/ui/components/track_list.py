@@ -1,0 +1,67 @@
+"""Track list widget."""
+
+from pathlib import Path
+from typing import List
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QListWidget, QListWidgetItem
+
+
+class TrackList(QListWidget):
+    """Widget for displaying audio tracks."""
+
+    track_selected = Signal(Path)
+
+    def __init__(self, parent=None):  # type: ignore
+        """Initialize track list.
+
+        Args:
+            parent: Parent widget
+        """
+        super().__init__(parent)
+        self.itemDoubleClicked.connect(self._on_item_double_clicked)
+
+    def add_track(self, filepath: Path) -> None:
+        """Add a track to the list.
+
+        Args:
+            filepath: Path to audio file
+        """
+        item = QListWidgetItem(filepath.name)
+        item.setData(Qt.ItemDataRole.UserRole, filepath)
+        item.setToolTip(str(filepath))
+        self.addItem(item)
+
+    def add_tracks(self, filepaths: List[Path]) -> None:
+        """Add multiple tracks.
+
+        Args:
+            filepaths: List of paths to audio files
+        """
+        for filepath in filepaths:
+            self.add_track(filepath)
+
+    def clear_tracks(self) -> None:
+        """Clear all tracks."""
+        self.clear()
+
+    def get_selected_track(self) -> Path | None:
+        """Get currently selected track.
+
+        Returns:
+            Path to selected track or None
+        """
+        current = self.currentItem()
+        if current:
+            return current.data(Qt.ItemDataRole.UserRole)
+        return None
+
+    def _on_item_double_clicked(self, item: QListWidgetItem) -> None:
+        """Handle track double-click.
+
+        Args:
+            item: Clicked list item
+        """
+        filepath = item.data(Qt.ItemDataRole.UserRole)
+        if filepath:
+            self.track_selected.emit(filepath)

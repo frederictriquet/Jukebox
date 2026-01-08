@@ -1,0 +1,18 @@
+audio:
+  default_volume: 70
+  supported_formats:
+    - mp3
+    - flac
+    - aiff
+    - wav
+  music_directory: ~/Music
+
+ui:
+  window_title: "Jukebox"
+  window_width: 1024
+  window_height: 768
+  theme: "dark"
+
+logging:
+  level: "INFO"
+  file: "jukebox.log"
