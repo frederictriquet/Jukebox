@@ -2,10 +2,14 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
+    QApplication,
     QFileDialog,
+    QHBoxLayout,
     QMainWindow,
+    QMessageBox,
+    QProgressDialog,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -13,8 +17,12 @@ from PySide6.QtWidgets import (
 
 from jukebox.core.audio_player import AudioPlayer
 from jukebox.core.config import JukeboxConfig
+from jukebox.core.database import Database
 from jukebox.ui.components.player_controls import PlayerControls
+from jukebox.ui.components.search_bar import SearchBar
 from jukebox.ui.components.track_list import TrackList
+from jukebox.utils.metadata import MetadataExtractor
+from jukebox.utils.scanner import FileScanner
 
 
 class MainWindow(QMainWindow):
@@ -28,15 +36,24 @@ class MainWindow(QMainWindow):
         """
         super().__init__()
         self.config = config
+
+        # Database
+        db_path = Path.home() / ".jukebox" / "jukebox.db"
+        self.database = Database(db_path)
+        self.database.connect()
+        self.database.initialize_schema()
+
+        # Audio player
         self.player = AudioPlayer()
 
         # Timer for updating position slider
         self.position_timer = QTimer()
-        self.position_timer.setInterval(100)  # Update every 100ms
+        self.position_timer.setInterval(100)
         self.position_timer.timeout.connect(self._update_position)
 
         self._init_ui()
         self._connect_signals()
+        self._load_tracks_from_db()
 
     def _init_ui(self) -> None:
         """Initialize UI."""
@@ -47,10 +64,21 @@ class MainWindow(QMainWindow):
         central = QWidget()
         layout = QVBoxLayout()
 
-        # Add files button
+        # Toolbar
+        toolbar = QHBoxLayout()
         self.add_files_btn = QPushButton("Add Files...")
+        self.scan_dir_btn = QPushButton("Scan Directory...")
         self.add_files_btn.clicked.connect(self._add_files)
-        layout.addWidget(self.add_files_btn)
+        self.scan_dir_btn.clicked.connect(self._scan_directory)
+        toolbar.addWidget(self.add_files_btn)
+        toolbar.addWidget(self.scan_dir_btn)
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
+
+        # Search bar
+        self.search_bar = SearchBar()
+        self.search_bar.search_triggered.connect(self._perform_search)
+        layout.addWidget(self.search_bar)
 
         # Track list
         self.track_list = TrackList()
@@ -94,8 +122,49 @@ class MainWindow(QMainWindow):
         )
 
         if files:
-            paths = [Path(f) for f in files]
-            self.track_list.add_tracks(paths)
+            for file in files:
+                filepath = Path(file)
+                metadata = MetadataExtractor.extract(filepath)
+                self.database.add_track(metadata)
+
+            self._load_tracks_from_db()
+
+    def _scan_directory(self) -> None:
+        """Scan directory for audio files."""
+        directory = QFileDialog.getExistingDirectory(
+            self, "Select Music Directory", str(self.config.audio.music_directory)
+        )
+
+        if not directory:
+            return
+
+        progress = QProgressDialog("Scanning...", "Cancel", 0, 100, self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+
+        def update_progress(current: int, total: int) -> None:
+            progress.setValue(int(current / total * 100))
+            QApplication.processEvents()
+
+        scanner = FileScanner(self.database, self.config.audio.supported_formats, update_progress)
+        added = scanner.scan_directory(Path(directory), recursive=True)
+
+        progress.close()
+        QMessageBox.information(self, "Scan Complete", f"Added {added} tracks")
+        self._load_tracks_from_db()
+
+    def _perform_search(self, query: str) -> None:
+        """Perform FTS5 search."""
+        self.track_list.clear_tracks()
+        tracks = self.database.get_all_tracks() if not query else self.database.search_tracks(query)
+        for track in tracks:
+            self.track_list.add_track(Path(track["filepath"]))
+
+    def _load_tracks_from_db(self) -> None:
+        """Load all tracks from database."""
+        self.track_list.clear_tracks()
+        tracks = self.database.get_all_tracks()
+        for track in tracks:
+            self.track_list.add_track(Path(track["filepath"]))
 
     def _load_and_play(self, filepath: Path) -> None:
         """Load and play selected track.

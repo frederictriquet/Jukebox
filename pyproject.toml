@@ -75,6 +75,7 @@ select = [
 ]
 ignore = [
     "E501",  # line too long (handled by black)
+    "SIM105",  # contextlib.suppress (prefer explicit try-except)
 ]
 
 [tool.mypy]
