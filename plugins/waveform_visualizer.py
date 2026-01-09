@@ -159,9 +159,17 @@ class WaveformWidget(QWidget):
         self.plot_widget.hideAxis("left")
         self.plot_widget.hideAxis("bottom")
 
+        # Remove all padding/margins
+        self.plot_widget.setContentsMargins(0, 0, 0, 0)
+        self.plot_widget.plotItem.setContentsMargins(0, 0, 0, 0)
+
+        # Disable auto-range padding
+        self.plot_widget.plotItem.vb.setDefaultPadding(0)
+        self.plot_widget.plotItem.vb.enableAutoRange(enable=False)
+
         height = waveform_config.height if waveform_config else 120
         self.plot_widget.setMaximumHeight(height)
-        self.plot_widget.setMinimumHeight(height)  # Keep constant height
+        self.plot_widget.setMinimumHeight(height)
 
         # Click to seek
         self.plot_widget.scene().sigMouseClicked.connect(self._on_click)
@@ -171,6 +179,15 @@ class WaveformWidget(QWidget):
 
         # Store config for rendering
         self.waveform_config = waveform_config
+
+        # Create cursor line immediately at position 0
+        cursor_color = waveform_config.cursor_color if waveform_config else "#FFFFFF"
+        self.cursor_line = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen(cursor_color, width=2))
+        self.plot_widget.addItem(self.cursor_line)
+
+        # Set initial viewport range with no padding
+        self.plot_widget.setXRange(0, 100, padding=0)
+        self.plot_widget.setYRange(0, 1, padding=0)
 
     def display_waveform(self, waveform: Any) -> None:
         """Display waveform data with 3 colors stacked (Engine DJ style)."""
@@ -216,23 +233,34 @@ class WaveformWidget(QWidget):
                 fillLevel=0, brush=pg.mkBrush(bass_color + "FF")
             )
 
-        # Create cursor line
-        cursor_color = self.waveform_config.cursor_color if self.waveform_config else "#FFFFFF"
-        self.cursor_line = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen(cursor_color, width=2))
-        self.plot_widget.addItem(self.cursor_line)
+            # Set range to fit data exactly
+            self.plot_widget.setXRange(0, len(bass), padding=0)
+            self.plot_widget.setYRange(0, np.max(treble_total) * 1.05, padding=0)
+
+        # Re-add cursor line after clear (cleared removes it)
+        if self.cursor_line:
+            self.plot_widget.addItem(self.cursor_line)
+            self.cursor_line.setPos(0)
 
     def clear_waveform(self) -> None:
         """Clear waveform display."""
         self.plot_widget.clear()
         self.waveform_data = None
-        self.cursor_line = None
-        # Keep widget visible to maintain layout space
+        # Re-add cursor line after clear
+        if self.cursor_line:
+            self.plot_widget.addItem(self.cursor_line)
+            self.cursor_line.setPos(0)
 
     def set_position(self, position: float) -> None:
         """Set playback position (0.0-1.0)."""
-        if self.cursor_line and self.waveform_data is not None:
-            x = position * len(self.waveform_data)
-            self.cursor_line.setPos(x)
+        if self.cursor_line:
+            if self.waveform_data is not None and len(self.waveform_data) > 0:
+                x = position * len(self.waveform_data)
+                self.cursor_line.setPos(x)
+            else:
+                # No waveform yet, use fixed range 0-100
+                x = position * 100
+                self.cursor_line.setPos(x)
 
     def _on_click(self, event: Any) -> None:
         """Handle click on waveform."""
