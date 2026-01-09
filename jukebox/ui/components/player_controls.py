@@ -1,7 +1,7 @@
 """Player control widgets."""
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSlider, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 from jukebox.ui.components.clickable_slider import ClickableSlider
 
@@ -56,7 +56,7 @@ class PlayerControls(QWidget):
 
         # Volume slider
         layout.addWidget(QLabel("Volume:"))
-        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.volume_slider = ClickableSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(70)
         self.volume_slider.setMaximumWidth(150)
