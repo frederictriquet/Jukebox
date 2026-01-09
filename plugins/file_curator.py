@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtWidgets import QDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QDialog, QLabel, QPushButton, QVBoxLayout
 
 
 class FileCuratorPlugin:
@@ -33,7 +33,10 @@ class FileCuratorPlugin:
         dialog.exec()
 
     def organize_file(
-        self, track_id: int, dest_root: Path, pattern: str = "{artist}/{album}/{track:02d} - {title}"
+        self,
+        track_id: int,
+        dest_root: Path,
+        pattern: str = "{artist}/{album}/{track:02d} - {title}",
     ) -> Path | None:
         """Organize a single file.
 

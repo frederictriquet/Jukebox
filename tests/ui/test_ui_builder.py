@@ -10,7 +10,7 @@ class TestUIBuilder:
         """Test UIBuilder initializes."""
 
         class MockWindow:
-            def menuBar(self):  # type: ignore
+            def menuBar(self):  # type: ignore # noqa: N802
                 from PySide6.QtWidgets import QMenuBar
 
                 return QMenuBar()

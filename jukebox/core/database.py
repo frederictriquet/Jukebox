@@ -126,6 +126,18 @@ class Database:
         """
         )
 
+        # Waveform cache
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS waveform_cache (
+                track_id INTEGER PRIMARY KEY,
+                waveform_data BLOB,
+                generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+            )
+        """
+        )
+
         self.conn.commit()
 
     def add_track(self, track_data: dict[str, Any]) -> int:

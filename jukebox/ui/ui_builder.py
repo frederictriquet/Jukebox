@@ -35,3 +35,12 @@ class UIBuilder:
             self.main_window._plugin_toolbar = QToolBar("Plugins")
             self.main_window.addToolBar(self.main_window._plugin_toolbar)
         self.main_window._plugin_toolbar.addWidget(widget)
+
+    def add_sidebar_widget(self, widget: QWidget, title: str) -> None:
+        """Add widget to sidebar (dock widget)."""
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QDockWidget
+
+        dock = QDockWidget(title, self.main_window)
+        dock.setWidget(widget)
+        self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)

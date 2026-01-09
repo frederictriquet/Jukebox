@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from jukebox.core.playlist_manager import PlaylistManager
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QDialog,
@@ -12,8 +13,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QVBoxLayout,
 )
-
-from jukebox.core.playlist_manager import PlaylistManager
 
 
 class PlaylistDialog(QDialog):

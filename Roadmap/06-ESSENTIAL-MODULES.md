@@ -433,18 +433,24 @@ class RecommendationsPlugin:
 - [x] Plugin créé
 - [x] Détection par métadonnées (title+artist)
 - [x] UI dialog
-- [ ] Tests spécifiques
+- [x] Menu Tools → Find Duplicates
 
 ### File Curator (Jours 2-3)
 - [x] Plugin créé avec organize_file()
 - [x] Patterns configurables
 - [x] Move files avec update DB
-- [ ] UI complète
-- [ ] Tests
+- [x] UI dialog placeholder
+- [ ] Tests spécifiques
+
+### Playlists (ajouté)
+- [x] Plugin complet (moved from core)
+- [x] Create/delete/view/load playlists
+- [x] Context menu integration
+- [x] UI complète
 
 ### Waveform Visualizer (Jours 3-5)
-- [ ] Génération waveforms (non fait)
-- [ ] Cache SQLite (schema créé)
+- [ ] Génération waveforms
+- [ ] Cache SQLite (schema existe)
 - [ ] PyQtGraph integration
 - [ ] Background processing
 
@@ -452,7 +458,7 @@ class RecommendationsPlugin:
 - [x] Plugin créé
 - [x] Algorithme basique (artistes/genres similaires)
 - [x] Basé sur historique play_history
-- [x] UI intégration
+- [x] Menu Discover → Get Recommendations
 - [ ] Tests spécifiques
 
 ---

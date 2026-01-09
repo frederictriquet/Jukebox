@@ -181,6 +181,16 @@ class MainWindow(QMainWindow):
             filepath: Path to audio file
         """
         if self.player.load(filepath):
+            # Get track ID and emit event
+            if self.database.conn:
+                track = self.database.conn.execute(
+                    "SELECT id FROM tracks WHERE filepath = ?", (str(filepath),)
+                ).fetchone()
+                if track:
+                    from jukebox.core.event_bus import Events
+
+                    self.event_bus.emit(Events.TRACK_LOADED, track_id=track["id"])
+
             self.player.play()
             self.setWindowTitle(f"{self.config.ui.window_title} - {filepath.name}")
             self.position_timer.start()

@@ -12,6 +12,9 @@ dependencies = [
     "mutagen>=1.47.0",
     "PyYAML>=6.0",
     "pydantic>=2.5.0",
+    "librosa>=0.10.0",
+    "numpy>=1.24.0",
+    "pyqtgraph>=0.13.0",
 ]
 
 [project.optional-dependencies]
