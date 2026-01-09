@@ -61,4 +61,3 @@ class TestFullPlayback:
         # Stop
         window._on_stop()
         assert not window.position_timer.isActive()
-        assert window.controls.position_slider.value() == 0

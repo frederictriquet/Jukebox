@@ -14,6 +14,13 @@ ui:
   window_height: 768
   theme: "dark"
 
+waveform:
+  bass_color: "#0066FF"      # Blue
+  mid_color: "#00FF00"       # Green
+  treble_color: "#FFFFFF"    # White
+  cursor_color: "#FFFFFF"    # White
+  height: 120
+
 logging:
   level: "INFO"
   file: "jukebox.log"

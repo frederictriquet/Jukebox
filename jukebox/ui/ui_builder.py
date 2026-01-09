@@ -44,3 +44,11 @@ class UIBuilder:
         dock = QDockWidget(title, self.main_window)
         dock.setWidget(widget)
         self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+
+    def add_bottom_widget(self, widget: QWidget) -> None:
+        """Add widget at bottom of main layout."""
+        # Access main layout and add widget at bottom
+        if hasattr(self.main_window, "centralWidget"):
+            central = self.main_window.centralWidget()
+            if central and central.layout():
+                central.layout().addWidget(widget)

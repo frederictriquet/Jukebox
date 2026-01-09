@@ -13,7 +13,6 @@ class PlayerControls(QWidget):
     pause_clicked = Signal()
     stop_clicked = Signal()
     volume_changed = Signal(int)
-    position_changed = Signal(float)
 
     def __init__(self, parent=None):  # type: ignore
         """Initialize player controls.
@@ -45,14 +44,7 @@ class PlayerControls(QWidget):
         layout.addWidget(self.pause_btn)
         layout.addWidget(self.stop_btn)
 
-        # Position slider
-        layout.addWidget(QLabel("Position:"))
-        self.position_slider = ClickableSlider(Qt.Orientation.Horizontal)
-        self.position_slider.setRange(0, 1000)
-        self.position_slider.sliderMoved.connect(
-            lambda val: self.position_changed.emit(val / 1000.0)
-        )
-        layout.addWidget(self.position_slider)
+        layout.addStretch()
 
         # Volume slider
         layout.addWidget(QLabel("Volume:"))
@@ -64,16 +56,6 @@ class PlayerControls(QWidget):
         layout.addWidget(self.volume_slider)
 
         self.setLayout(layout)
-
-    def set_position(self, position: float) -> None:
-        """Update position slider (0.0-1.0).
-
-        Args:
-            position: Position in track (0.0 to 1.0)
-        """
-        self.position_slider.blockSignals(True)
-        self.position_slider.setValue(int(position * 1000))
-        self.position_slider.blockSignals(False)
 
     def set_volume(self, volume: int) -> None:
         """Update volume slider (0-100).

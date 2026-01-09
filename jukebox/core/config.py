@@ -30,11 +30,22 @@ class LoggingConfig(BaseModel):
     file: str = "jukebox.log"
 
 
+class WaveformConfig(BaseModel):
+    """Waveform visualization configuration."""
+
+    bass_color: str = "#0066FF"
+    mid_color: str = "#00FF00"
+    treble_color: str = "#FFFFFF"
+    cursor_color: str = "#FFFFFF"
+    height: int = 120
+
+
 class JukeboxConfig(BaseModel):
     """Main application configuration."""
 
     audio: AudioConfig
     ui: UIConfig
+    waveform: WaveformConfig = Field(default_factory=WaveformConfig)
     logging: LoggingConfig
 
 

@@ -113,11 +113,9 @@ class MainWindow(QMainWindow):
         self.controls.pause_clicked.connect(self._on_pause)
         self.controls.stop_clicked.connect(self._on_stop)
         self.controls.volume_changed.connect(self.player.set_volume)
-        self.controls.position_changed.connect(self._on_position_seek)
 
         # Player feedback
         self.player.volume_changed.connect(self.controls.set_volume)
-        self.player.position_changed.connect(self.controls.set_position)
 
     def _add_files(self) -> None:
         """Open file dialog to add audio files."""
@@ -215,18 +213,15 @@ class MainWindow(QMainWindow):
         """Handle stop button click."""
         self.player.stop()
         self.position_timer.stop()
-        self.controls.set_position(0.0)
+        # Emit for plugins (waveform cursor)
+        self.event_bus.emit("position_update", position=0.0)
 
     def _update_position(self) -> None:
-        """Update position slider based on player position."""
-        if self.player.is_playing() and not self.controls.position_slider.isSliderDown():
+        """Update position based on player position."""
+        if self.player.is_playing():
             position = self.player.get_position()
-            self.controls.set_position(position)
-
-    def _on_position_seek(self, position: float) -> None:
-        """Handle position seek from slider."""
-        if position >= 0:  # -1 signals slider pressed (pause timer)
-            self.player.set_position(position)
+            # Emit for plugins (waveform cursor)
+            self.event_bus.emit("position_update", position=position)
 
     def _load_plugins(self) -> None:
         """Load all plugins."""
