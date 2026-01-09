@@ -563,14 +563,14 @@ def __init__(self, config: JukeboxConfig):
 
 ### Example Plugins (Jours 4-5)
 - [x] Stats plugin
-- [ ] History plugin (non fait)
+- [x] Playlists plugin (moved from core)
 - [x] Intégration automatique plugins
 
 ### Tests (Jour 5)
 - [x] Tests existants passent
-- [ ] Tests spécifiques plugin loading
-- [ ] Tests event bus
-- [ ] Tests UI injection
+- [x] Tests plugin loading
+- [x] Tests event bus
+- [x] Tests UI builder
 
 ---
 
