@@ -18,7 +18,7 @@ class TrackList(QListWidget):
             parent: Parent widget
         """
         super().__init__(parent)
-        self.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self.itemClicked.connect(self._on_item_clicked)
 
     def add_track(
         self, filepath: Path, title: str | None = None, artist: str | None = None
@@ -68,8 +68,8 @@ class TrackList(QListWidget):
             return Path(data) if data is not None else None
         return None
 
-    def _on_item_double_clicked(self, item: QListWidgetItem) -> None:
-        """Handle track double-click.
+    def _on_item_clicked(self, item: QListWidgetItem) -> None:
+        """Handle track click.
 
         Args:
             item: Clicked list item
