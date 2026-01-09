@@ -46,12 +46,13 @@ class MetadataExtractor:
                 metadata["sample_rate"] = audio.info.sample_rate
 
             # Tags
-            metadata.update(MetadataExtractor._extract_tags(audio))
+            tags = MetadataExtractor._extract_tags(audio)
+            metadata.update(tags)
 
             return metadata
 
         except Exception as e:
-            logging.error(f"Error extracting metadata from {filepath}: {e}")
+            logging.error(f"Error extracting metadata from {filepath}: {e}", exc_info=True)
             return MetadataExtractor._basic_info(filepath)
 
     @staticmethod
@@ -104,22 +105,16 @@ class MetadataExtractor:
         Returns:
             Tag value or None
         """
-        # For FLAC/Vorbis, try lowercase keys first
         for key in keys:
-            # Try exact match
-            if key in audio:
-                value = audio[key]
-                if isinstance(value, list) and value:
-                    return str(value[0])
-                return str(value)
-
-            # Try lowercase for FLAC compatibility
-            key_lower = key.lower()
-            if key_lower in audio:
-                value = audio[key_lower]
-                if isinstance(value, list) and value:
-                    return str(value[0])
-                return str(value)
+            try:
+                if key in audio:
+                    value = audio[key]
+                    if isinstance(value, list) and value:
+                        return str(value[0])
+                    return str(value)
+            except (KeyError, ValueError):
+                # Mutagen FLAC raises ValueError in __contains__ for invalid keys
+                continue
 
         return None
 
