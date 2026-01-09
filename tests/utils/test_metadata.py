@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from jukebox.utils.metadata import MetadataExtractor
 
 
@@ -24,15 +22,15 @@ class TestMetadataExtractor:
 
     def test_extract_nonexistent_file(self) -> None:
         """Test extracting from non-existent file."""
-        # Should not crash, return basic info
+        # Should not crash when file doesn't exist
         try:
-            metadata = MetadataExtractor.extract(Path("/nonexistent/file.mp3"))
-            # If file doesn't exist, stat() will fail, caught by exception handler
+            MetadataExtractor.extract(Path("/nonexistent/file.mp3"))
         except Exception:
-            pass  # Expected
+            pass  # Expected - file doesn't exist
 
     def test_get_tag_with_list_value(self) -> None:
         """Test _get_tag with list value."""
+
         # Mock audio object
         class MockAudio:
             def __contains__(self, key: str) -> bool:
@@ -50,6 +48,7 @@ class TestMetadataExtractor:
 
     def test_get_tag_not_found(self) -> None:
         """Test _get_tag when key not found."""
+
         class MockAudio:
             def __contains__(self, key: str) -> bool:
                 return False

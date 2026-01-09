@@ -2,8 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from jukebox.ui.components.track_list import TrackList
 
 

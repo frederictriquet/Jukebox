@@ -638,9 +638,9 @@ class PlaylistManager:
 
 ### Playlists (Jour 5)
 - [x] Schema playlists dans DB
-- [ ] PlaylistManager créé (non implémenté)
-- [ ] CRUD playlists UI
-- [ ] Tests playlists passent
+- [x] PlaylistManager créé avec CRUD
+- [ ] UI playlists (non fait)
+- [x] Tests playlists passent
 
 ---
 

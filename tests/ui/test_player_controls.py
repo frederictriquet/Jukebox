@@ -1,7 +1,5 @@
 """Tests for player controls."""
 
-import pytest
-
 from jukebox.ui.components.player_controls import PlayerControls
 
 
