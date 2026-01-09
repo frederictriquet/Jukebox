@@ -3,6 +3,8 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSlider, QWidget
 
+from jukebox.ui.components.clickable_slider import ClickableSlider
+
 
 class PlayerControls(QWidget):
     """Playback control widgets."""
@@ -45,7 +47,7 @@ class PlayerControls(QWidget):
 
         # Position slider
         layout.addWidget(QLabel("Position:"))
-        self.position_slider = QSlider(Qt.Orientation.Horizontal)
+        self.position_slider = ClickableSlider(Qt.Orientation.Horizontal)
         self.position_slider.setRange(0, 1000)
         self.position_slider.sliderMoved.connect(
             lambda val: self.position_changed.emit(val / 1000.0)

@@ -113,7 +113,7 @@ class MainWindow(QMainWindow):
         self.controls.pause_clicked.connect(self._on_pause)
         self.controls.stop_clicked.connect(self._on_stop)
         self.controls.volume_changed.connect(self.player.set_volume)
-        self.controls.position_changed.connect(self.player.set_position)
+        self.controls.position_changed.connect(self._on_position_seek)
 
         # Player feedback
         self.player.volume_changed.connect(self.controls.set_volume)
@@ -209,9 +209,14 @@ class MainWindow(QMainWindow):
 
     def _update_position(self) -> None:
         """Update position slider based on player position."""
-        if self.player.is_playing():
+        if self.player.is_playing() and not self.controls.position_slider.isSliderDown():
             position = self.player.get_position()
             self.controls.set_position(position)
+
+    def _on_position_seek(self, position: float) -> None:
+        """Handle position seek from slider."""
+        if position >= 0:  # -1 signals slider pressed (pause timer)
+            self.player.set_position(position)
 
     def _load_plugins(self) -> None:
         """Load all plugins."""
