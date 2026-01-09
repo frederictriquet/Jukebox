@@ -216,21 +216,18 @@ class WaveformWidget(QWidget):
             # Treble on top (white) - draw first as background
             treble_total = bass + mid + treble
             self.plot_widget.plot(
-                x, treble_total, pen=None,
-                fillLevel=0, brush=pg.mkBrush(treble_color + "FF")
+                x, treble_total, pen=None, fillLevel=0, brush=pg.mkBrush(treble_color + "FF")
             )
 
             # Mid in middle (green) - covers bass+mid
             mid_total = bass + mid
             self.plot_widget.plot(
-                x, mid_total, pen=None,
-                fillLevel=0, brush=pg.mkBrush(mid_color + "FF")
+                x, mid_total, pen=None, fillLevel=0, brush=pg.mkBrush(mid_color + "FF")
             )
 
             # Bass at bottom (blue) - drawn last, on top visually
             self.plot_widget.plot(
-                x, bass, pen=None,
-                fillLevel=0, brush=pg.mkBrush(bass_color + "FF")
+                x, bass, pen=None, fillLevel=0, brush=pg.mkBrush(bass_color + "FF")
             )
 
             # Set range to fit data exactly
@@ -320,7 +317,9 @@ class WaveformWorker(QThread):
             # Normalize each
             bass_wave = bass_wave / np.max(bass_wave) if np.max(bass_wave) > 0 else bass_wave
             mid_wave = mid_wave / np.max(mid_wave) if np.max(mid_wave) > 0 else mid_wave
-            treble_wave = treble_wave / np.max(treble_wave) if np.max(treble_wave) > 0 else treble_wave
+            treble_wave = (
+                treble_wave / np.max(treble_wave) if np.max(treble_wave) > 0 else treble_wave
+            )
 
             waveform_data = {"bass": bass_wave, "mid": mid_wave, "treble": treble_wave}
 

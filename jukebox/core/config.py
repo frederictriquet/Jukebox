@@ -40,12 +40,26 @@ class WaveformConfig(BaseModel):
     height: int = 120
 
 
+class PluginsConfig(BaseModel):
+    """Plugins configuration."""
+
+    enabled: list[str] = [
+        "stats_plugin",
+        "playlists_plugin",
+        "duplicate_finder",
+        "recommendations",
+        "file_curator",
+        "waveform_visualizer",
+    ]
+
+
 class JukeboxConfig(BaseModel):
     """Main application configuration."""
 
     audio: AudioConfig
     ui: UIConfig
     waveform: WaveformConfig = Field(default_factory=WaveformConfig)
+    plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     logging: LoggingConfig
 
 

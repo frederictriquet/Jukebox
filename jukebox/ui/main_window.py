@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
@@ -53,10 +54,13 @@ class MainWindow(QMainWindow):
         # Event bus
         self.event_bus = EventBus()
 
-        # Timer for updating position slider
+        # Timer for updating position
         self.position_timer = QTimer()
         self.position_timer.setInterval(100)
         self.position_timer.timeout.connect(self._update_position)
+
+        # Fallback position slider (if no waveform plugin)
+        self.fallback_position_slider: Any = None
 
         self._init_ui()
         self._connect_signals()
@@ -222,6 +226,11 @@ class MainWindow(QMainWindow):
             position = self.player.get_position()
             # Emit for plugins (waveform cursor)
             self.event_bus.emit("position_update", position=position)
+            # Update fallback slider if exists
+            if self.fallback_position_slider and self.fallback_position_slider.isVisible():
+                self.fallback_position_slider.blockSignals(True)
+                self.fallback_position_slider.setValue(int(position * 1000))
+                self.fallback_position_slider.blockSignals(False)
 
     def _load_plugins(self) -> None:
         """Load all plugins."""
@@ -235,3 +244,23 @@ class MainWindow(QMainWindow):
 
         for plugin in self.plugin_manager.get_all_plugins():
             plugin.register_ui(ui_builder)
+
+        # Add fallback position slider if waveform plugin not loaded
+        waveform_loaded = "waveform_visualizer" in self.plugin_manager.plugins
+        if not waveform_loaded:
+            from PySide6.QtCore import Qt
+
+            from jukebox.ui.components.clickable_slider import ClickableSlider
+
+            self.fallback_position_slider = ClickableSlider(Qt.Orientation.Horizontal)
+            self.fallback_position_slider.setRange(0, 1000)
+            self.fallback_position_slider.setMaximumHeight(120)
+            self.fallback_position_slider.setMinimumHeight(120)
+            self.fallback_position_slider.sliderMoved.connect(
+                lambda val: self.player.set_position(val / 1000.0)
+            )
+            # Add to bottom layout
+            central = self.centralWidget()
+            layout = central.layout() if central else None
+            if layout:
+                layout.addWidget(self.fallback_position_slider)

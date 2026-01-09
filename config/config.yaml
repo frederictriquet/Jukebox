@@ -15,11 +15,20 @@ ui:
   theme: "dark"
 
 waveform:
-  bass_color: "#0066FF"      # Blue
-  mid_color: "#00FF00"       # Green
-  treble_color: "#FFFFFF"    # White
-  cursor_color: "#FFFFFF"    # White
-  height: 120
+  bass_color: "#0066FF" # Blue
+  mid_color: "#00FF00" # Green
+  treble_color: "#FFFFFF" # White
+  cursor_color: "#FFFFFF" # White
+  height: 60
+
+plugins:
+  enabled:
+    - stats_plugin
+    - playlists_plugin
+    - duplicate_finder
+    - recommendations
+    - file_curator
+    - waveform_visualizer
 
 logging:
   level: "INFO"

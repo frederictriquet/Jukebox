@@ -86,7 +86,15 @@ class PluginManager:
     def load_all_plugins(self) -> int:
         """Load all plugins."""
         loaded = 0
+        enabled_plugins = getattr(self.context.config, "plugins", None)
+        enabled_list = enabled_plugins.enabled if enabled_plugins else None
+
         for plugin_name in self.discover_plugins():
+            # Check if plugin is enabled in config
+            if enabled_list and plugin_name not in enabled_list:
+                logging.info(f"Plugin {plugin_name} disabled in config")
+                continue
+
             if self.load_plugin(plugin_name):
                 loaded += 1
         return loaded
