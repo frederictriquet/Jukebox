@@ -866,39 +866,39 @@ See main README for architecture details.
 ## Checklist Phase 1
 
 ### Setup (Jour 1)
-- [ ] Repository Git initialisé et poussé sur GitHub
-- [ ] Poetry configuré avec toutes les dépendances
-- [ ] Structure de dossiers créée
-- [ ] pyproject.toml configuré avec outils de qualité
+- [x] Repository Git initialisé et poussé sur GitHub
+- [x] uv configuré avec toutes les dépendances
+- [x] Structure de dossiers créée
+- [x] pyproject.toml configuré avec outils de qualité
 
 ### Configuration (Jour 1)
-- [ ] config.yaml créé avec valeurs par défaut
-- [ ] Module config.py avec Pydantic
-- [ ] Tests de configuration passent
+- [x] config.yaml créé avec valeurs par défaut
+- [x] Module config.py avec Pydantic
+- [x] Tests de configuration passent
 
 ### Audio Player (Jours 2-3)
-- [ ] AudioPlayer implémenté avec python-vlc
-- [ ] Signals Qt pour communication
-- [ ] Tests unitaires écrits et passent
-- [ ] Load, play, pause, stop fonctionnent
+- [x] AudioPlayer implémenté avec python-vlc
+- [x] Signals Qt pour communication
+- [x] Tests unitaires écrits et passent
+- [x] Load, play, pause, stop fonctionnent
 
 ### Interface (Jours 4-5)
-- [ ] PlayerControls créé avec boutons et sliders
-- [ ] TrackList affiche les pistes
-- [ ] MainWindow intègre tous les composants
-- [ ] Signals/slots connectés
-- [ ] Application démarre et fonctionne
+- [x] PlayerControls créé avec boutons et sliders
+- [x] TrackList affiche les pistes
+- [x] MainWindow intègre tous les composants
+- [x] Signals/slots connectés
+- [x] Application démarre et fonctionne
 
 ### Documentation (Jour 5)
-- [ ] README.md écrit
-- [ ] DEVELOPMENT.md créé
-- [ ] Instructions d'installation testées
+- [x] README.md écrit
+- [x] DEVELOPMENT.md créé
+- [x] Instructions d'installation testées
 
 ### Tests & Validation
-- [ ] Tests unitaires passent tous
-- [ ] Application testée manuellement
-- [ ] Lecture audio fonctionne
-- [ ] Interface réactive
+- [x] Tests unitaires passent tous
+- [x] Application testée manuellement
+- [x] Lecture audio fonctionne
+- [x] Interface réactive
 
 ---
 

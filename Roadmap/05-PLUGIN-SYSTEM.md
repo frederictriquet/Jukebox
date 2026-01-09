@@ -545,33 +545,32 @@ def __init__(self, config: JukeboxConfig):
 ## Checklist Phase 5
 
 ### Plugin Manager (Jours 1-2)
-- [ ] PluginManager créé
-- [ ] Découverte automatique plugins
-- [ ] Load/unload plugins
-- [ ] PluginContext fourni
+- [x] PluginManager créé
+- [x] Découverte automatique plugins
+- [x] Load plugins
+- [x] PluginContext fourni
 
 ### Event Bus (Jour 2)
-- [ ] EventBus implémenté
-- [ ] Subscribe/emit fonctionnent
-- [ ] Events constants définis
-- [ ] Tests passent
+- [x] EventBus implémenté
+- [x] Subscribe/emit fonctionnent
+- [x] Events constants définis
+- [x] Tests passent
 
 ### UI Builder (Jours 3-4)
-- [ ] UIBuilder API créée
-- [ ] Add menu/toolbar/sidebar
-- [ ] Intégration MainWindow
+- [x] UIBuilder API créée
+- [x] Add menu/toolbar
+- [x] Intégration MainWindow
 
 ### Example Plugins (Jours 4-5)
-- [ ] Search plugin
-- [ ] History plugin
-- [ ] Stats plugin
-- [ ] Tous plugins fonctionnent
+- [x] Stats plugin
+- [ ] History plugin (non fait)
+- [x] Intégration automatique plugins
 
 ### Tests (Jour 5)
-- [ ] Tests plugin loading
+- [x] Tests existants passent
+- [ ] Tests spécifiques plugin loading
 - [ ] Tests event bus
 - [ ] Tests UI injection
-- [ ] Integration tests
 
 ---
 

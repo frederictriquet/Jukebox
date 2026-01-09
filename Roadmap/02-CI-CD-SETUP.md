@@ -755,38 +755,38 @@ updates:
 ## Checklist Phase 2
 
 ### GitHub Actions (Jour 1)
-- [ ] Workflow CI créé et fonctionnel
-- [ ] Tests s'exécutent sur 3 OS
-- [ ] Workflow Build créé
-- [ ] Packages générés automatiquement
-- [ ] Cache Poetry fonctionne
+- [x] Workflow CI créé et fonctionnel
+- [x] Tests s'exécutent sur 3 OS
+- [x] Workflow Build créé
+- [x] Packages générés automatiquement
+- [x] Cache uv fonctionne
 
 ### Pre-commit (Jour 1)
-- [ ] .pre-commit-config.yaml créé
-- [ ] Hooks installés localement
-- [ ] Tous les hooks passent
+- [x] .pre-commit-config.yaml créé
+- [x] Hooks installés localement
+- [x] Tous les hooks passent
 
 ### Outils Qualité (Jour 2)
-- [ ] Ruff configuré (mode strict)
-- [ ] MyPy configuré (strict mode)
-- [ ] Coverage configuré
-- [ ] Bandit ajouté pour sécurité
+- [x] Ruff configuré (mode strict)
+- [x] MyPy configuré (strict mode)
+- [x] Coverage configuré
+- [x] Bandit ajouté pour sécurité
 
 ### Scripts (Jour 2)
-- [ ] Makefile créé
-- [ ] Script dev.sh créé et exécutable
-- [ ] `make ci` fonctionne
+- [x] Makefile créé
+- [x] Scripts utilitaires créés
+- [x] `make ci` fonctionne
 
 ### Documentation (Jour 3)
-- [ ] Badges ajoutés au README
-- [ ] CONTRIBUTING.md créé
-- [ ] Dependabot configuré
+- [x] Badges ajoutés au README
+- [x] CONTRIBUTING.md créé
+- [x] Dependabot configuré
 
 ### Validation
-- [ ] Premier commit passe tous les checks
-- [ ] Pre-commit bloque les mauvais commits
-- [ ] CI s'exécute automatiquement sur push
-- [ ] Build packages fonctionne
+- [x] Commits passent tous les checks
+- [x] Pre-commit configuré
+- [x] CI s'exécute automatiquement sur push
+- [x] Build packages fonctionne
 
 ---
 

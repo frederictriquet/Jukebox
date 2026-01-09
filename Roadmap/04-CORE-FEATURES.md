@@ -613,33 +613,33 @@ class PlaylistManager:
 ## Checklist Phase 4
 
 ### Database (Jours 1-2)
-- [ ] Schema SQLite créé
-- [ ] FTS5 configuré avec triggers
-- [ ] CRUD operations implémentées
-- [ ] Tests database passent
+- [x] Schema SQLite créé
+- [x] FTS5 configuré avec triggers
+- [x] CRUD operations implémentées
+- [x] Tests database passent
 
 ### Metadata (Jours 2-3)
-- [ ] MetadataExtractor pour MP3/FLAC/AIFF
-- [ ] Support tous les tags ID3v2
-- [ ] Gestion erreurs robuste
-- [ ] Tests extraction passent
+- [x] MetadataExtractor pour MP3/FLAC/AIFF
+- [x] Support tous les tags ID3v2
+- [x] Gestion erreurs robuste (FLAC ValueError fix)
+- [x] Tests extraction passent
 
 ### Scanner (Jours 3-4)
-- [ ] FileScanner implémenté
-- [ ] Scan récursif fonctionne
-- [ ] Progress callback
-- [ ] Intégration UI
+- [x] FileScanner implémenté
+- [x] Scan récursif fonctionne
+- [x] Progress callback
+- [x] Intégration UI
 
 ### Search (Jour 4)
-- [ ] SearchBar avec debounce
-- [ ] FTS5 search fonctionne
-- [ ] Résultats instantanés
-- [ ] Tests search passent
+- [x] SearchBar avec debounce
+- [x] FTS5 search fonctionne
+- [x] Résultats instantanés
+- [x] Tests search passent
 
 ### Playlists (Jour 5)
-- [ ] PlaylistManager créé
-- [ ] CRUD playlists
-- [ ] Ordre tracks maintenu
+- [x] Schema playlists dans DB
+- [ ] PlaylistManager créé (non implémenté)
+- [ ] CRUD playlists UI
 - [ ] Tests playlists passent
 
 ---

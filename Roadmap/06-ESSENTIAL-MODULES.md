@@ -430,28 +430,30 @@ class RecommendationsPlugin:
 ## Checklist Phase 6
 
 ### Duplicate Finder (Jours 1-2)
-- [ ] Plugin créé
-- [ ] Détection par métadonnées
-- [ ] UI dialog
-- [ ] Tests
+- [x] Plugin créé
+- [x] Détection par métadonnées (title+artist)
+- [x] UI dialog
+- [ ] Tests spécifiques
 
 ### File Curator (Jours 2-3)
-- [ ] Organisation automatique
-- [ ] Patterns configurables
-- [ ] Move/copy files
-- [ ] Update database
+- [x] Plugin créé avec organize_file()
+- [x] Patterns configurables
+- [x] Move files avec update DB
+- [ ] UI complète
+- [ ] Tests
 
 ### Waveform Visualizer (Jours 3-5)
-- [ ] Génération waveforms
-- [ ] Cache SQLite
+- [ ] Génération waveforms (non fait)
+- [ ] Cache SQLite (schema créé)
 - [ ] PyQtGraph integration
 - [ ] Background processing
 
 ### Recommendations (Jours 5-6)
-- [ ] Algorithme basique
-- [ ] Basé sur historique
-- [ ] UI intégration
-- [ ] Tests
+- [x] Plugin créé
+- [x] Algorithme basique (artistes/genres similaires)
+- [x] Basé sur historique play_history
+- [x] UI intégration
+- [ ] Tests spécifiques
 
 ---
 
