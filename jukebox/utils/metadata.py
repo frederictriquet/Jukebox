@@ -23,6 +23,7 @@ class MetadataExtractor:
         try:
             audio = mutagen.File(filepath)
             if audio is None:
+                logging.warning(f"Mutagen returned None for {filepath}")
                 return MetadataExtractor._basic_info(filepath)
 
             metadata: dict[str, Any] = {
@@ -103,12 +104,23 @@ class MetadataExtractor:
         Returns:
             Tag value or None
         """
+        # For FLAC/Vorbis, try lowercase keys first
         for key in keys:
+            # Try exact match
             if key in audio:
                 value = audio[key]
                 if isinstance(value, list) and value:
                     return str(value[0])
                 return str(value)
+
+            # Try lowercase for FLAC compatibility
+            key_lower = key.lower()
+            if key_lower in audio:
+                value = audio[key_lower]
+                if isinstance(value, list) and value:
+                    return str(value[0])
+                return str(value)
+
         return None
 
     @staticmethod

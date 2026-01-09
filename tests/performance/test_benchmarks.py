@@ -56,11 +56,13 @@ class TestPerformance:
         )
         window = MainWindow(config)
 
-        # Create dummy paths
-        paths = [Path(f"/tmp/track{i}.mp3") for i in range(100)]
+        # Clear any existing tracks
+        window.track_list.clear_tracks()
 
+        # Add dummy tracks
         start = time.perf_counter()
-        window.track_list.add_tracks(paths)
+        for i in range(100):
+            window.track_list.add_track(Path(f"/tmp/track{i}.mp3"))
         duration = time.perf_counter() - start
 
         assert window.track_list.count() == 100

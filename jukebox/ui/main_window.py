@@ -165,14 +165,14 @@ class MainWindow(QMainWindow):
         self.track_list.clear_tracks()
         tracks = self.database.get_all_tracks() if not query else self.database.search_tracks(query)
         for track in tracks:
-            self.track_list.add_track(Path(track["filepath"]))
+            self.track_list.add_track(Path(track["filepath"]), track["title"], track["artist"])
 
     def _load_tracks_from_db(self) -> None:
         """Load all tracks from database."""
         self.track_list.clear_tracks()
         tracks = self.database.get_all_tracks()
         for track in tracks:
-            self.track_list.add_track(Path(track["filepath"]))
+            self.track_list.add_track(Path(track["filepath"]), track["title"], track["artist"])
 
     def _load_and_play(self, filepath: Path) -> None:
         """Load and play selected track.

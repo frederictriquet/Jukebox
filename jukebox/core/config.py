@@ -10,7 +10,7 @@ class AudioConfig(BaseModel):
     """Audio configuration."""
 
     default_volume: int = Field(ge=0, le=100, default=70)
-    supported_formats: list[str] = ["mp3", "flac", "aiff", "wav"]
+    supported_formats: list[str] = ["mp3", "flac", "aiff", "aif", "wav"]
     music_directory: Path = Field(default_factory=lambda: Path.home() / "Music")
 
 

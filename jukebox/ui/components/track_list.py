@@ -20,13 +20,25 @@ class TrackList(QListWidget):
         super().__init__(parent)
         self.itemDoubleClicked.connect(self._on_item_double_clicked)
 
-    def add_track(self, filepath: Path) -> None:
+    def add_track(
+        self, filepath: Path, title: str | None = None, artist: str | None = None
+    ) -> None:
         """Add a track to the list.
 
         Args:
             filepath: Path to audio file
+            title: Track title (optional)
+            artist: Track artist (optional)
         """
-        item = QListWidgetItem(filepath.name)
+        # Format display text
+        if title and artist:
+            display = f"{artist} - {title}"
+        elif title:
+            display = title
+        else:
+            display = filepath.name
+
+        item = QListWidgetItem(display)
         item.setData(Qt.ItemDataRole.UserRole, filepath)
         item.setToolTip(str(filepath))
         self.addItem(item)

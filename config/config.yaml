@@ -4,6 +4,7 @@ audio:
     - mp3
     - flac
     - aiff
+    - aif
     - wav
   music_directory: ~/Music
 
