@@ -154,13 +154,18 @@ class WaveformVisualizerPlugin:
 
     def shutdown(self) -> None:
         """Cleanup."""
+        self._cleanup_worker()
+
+    def __del__(self) -> None:
+        """Destructor - ensure worker is stopped."""
+        self._cleanup_worker()
+
+    def _cleanup_worker(self) -> None:
+        """Clean up worker thread."""
         if self.worker and self.worker.isRunning():
-            self.worker.cancel()
-            self.worker.quit()
-            # Don't wait indefinitely - force terminate if needed
-            if not self.worker.wait(500):
-                self.worker.terminate()
-                self.worker.wait(100)
+            # Force terminate immediately
+            self.worker.terminate()
+            self.worker.wait()  # Wait for cleanup
 
 
 class WaveformWidget(QWidget):
@@ -309,9 +314,11 @@ class WaveformWorker(QThread):
     chunk_ready = Signal(int, object)  # track_id, partial waveform chunk
     finished = Signal(int, object)  # track_id, complete waveform (dict or ndarray)
 
-    def __init__(self, track_id: int, filepath: str, chunk_duration: float = 10.0):
+    def __init__(
+        self, track_id: int, filepath: str, chunk_duration: float = 10.0, parent: Any = None
+    ):
         """Initialize worker."""
-        super().__init__()
+        super().__init__(parent)
         self.track_id = track_id
         self.filepath = filepath
         self.chunk_duration = chunk_duration  # seconds per chunk
@@ -402,6 +409,12 @@ class WaveformWorker(QThread):
                 # Emit progressive update with partial data (normalized)
                 # Only normalize non-zero portion for better visual feedback
                 current_data = write_index
+
+                # Skip progressive update if no data yet
+                if current_data == 0 or expected_length == 0:
+                    offset += self.chunk_duration
+                    continue
+
                 bass_partial = full_bass[:current_data]
                 mid_partial = full_mid[:current_data]
                 treble_partial = full_treble[:current_data]
