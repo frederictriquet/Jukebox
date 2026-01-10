@@ -14,6 +14,7 @@ class UIBuilder:
         """Initialize UI builder."""
         self.main_window = main_window
         self.plugin_menus: list[QMenu] = []
+        self.plugin_widgets: list[QWidget] = []  # Track all widgets added by plugins
 
     def add_menu(self, name: str) -> QMenu:
         """Add menu to menubar and track it."""
@@ -41,25 +42,47 @@ class UIBuilder:
         return action
 
     def add_toolbar_widget(self, widget: QWidget) -> None:
-        """Add widget to toolbar."""
+        """Add widget to toolbar and track it."""
         if not hasattr(self.main_window, "_plugin_toolbar"):
             self.main_window._plugin_toolbar = QToolBar("Plugins")
             self.main_window.addToolBar(self.main_window._plugin_toolbar)
         self.main_window._plugin_toolbar.addWidget(widget)
+        self.plugin_widgets.append(widget)
 
     def add_sidebar_widget(self, widget: QWidget, title: str) -> None:
-        """Add widget to sidebar (dock widget)."""
+        """Add widget to sidebar (dock widget) and track it."""
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import QDockWidget
 
         dock = QDockWidget(title, self.main_window)
         dock.setWidget(widget)
         self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+        self.plugin_widgets.append(dock)
 
     def add_bottom_widget(self, widget: QWidget) -> None:
-        """Add widget at bottom of main layout."""
+        """Add widget at bottom of main layout and track it."""
         # Access main layout and add widget at bottom
         if hasattr(self.main_window, "centralWidget"):
             central = self.main_window.centralWidget()
             if central and central.layout():
                 central.layout().addWidget(widget)
+                self.plugin_widgets.append(widget)
+
+    def insert_widget_in_layout(
+        self, layout: Any, index: int, widget: QWidget
+    ) -> None:
+        """Insert widget in a layout at specific index and track it.
+
+        Args:
+            layout: QLayout to insert widget into
+            index: Index to insert at
+            widget: Widget to insert
+        """
+        layout.insertWidget(index, widget)
+        self.plugin_widgets.append(widget)
+
+    def clear_all_plugin_widgets(self) -> None:
+        """Clear all widgets added by plugins."""
+        for widget in self.plugin_widgets:
+            widget.deleteLater()
+        self.plugin_widgets.clear()

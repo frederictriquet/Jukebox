@@ -64,45 +64,44 @@ class ModeSwitcherPlugin:
         # Update config with new mode
         self.context.config.ui.mode = mode.value
 
-        # Hide window to prevent visual flashing during rebuild
-        was_visible = main_window.isVisible()
-        if was_visible:
-            main_window.hide()
+        # Create overlay to hide transition
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication, QLabel
+
+        overlay = QLabel(main_window)
+        overlay.setStyleSheet(
+            "background-color: #1e1e1e; color: #ffffff; font-size: 16px;"
+        )
+        overlay.setGeometry(0, 0, main_window.width(), main_window.height())
+        overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        overlay.raise_()
+        overlay.show()
+
+        # Process events to ensure overlay is visible before starting cleanup
+        QApplication.processEvents()
+
+        # Disable updates
+        main_window.setUpdatesEnabled(False)
 
         try:
             # Clear event bus subscribers from old plugins
             if hasattr(main_window, "event_bus"):
                 main_window.event_bus.clear_all_subscribers()
 
-            # Clear only plugin menus (not all menus)
+            # Clear plugin UI elements
             if hasattr(main_window, "ui_builder"):
-                logging.info(f"Clearing {len(main_window.ui_builder.plugin_menus)} plugin menus")
+                logging.info(
+                    f"Clearing {len(main_window.ui_builder.plugin_menus)} menus "
+                    f"and {len(main_window.ui_builder.plugin_widgets)} widgets"
+                )
                 main_window.ui_builder.clear_plugin_menus()
-            else:
-                logging.warning("No ui_builder found in main_window")
+                main_window.ui_builder.clear_all_plugin_widgets()
 
             # Clear plugin toolbar if it exists
             if hasattr(main_window, "_plugin_toolbar"):
                 main_window.removeToolBar(main_window._plugin_toolbar)
                 main_window._plugin_toolbar.deleteLater()
                 delattr(main_window, "_plugin_toolbar")
-
-            # Clear widgets added by plugins (dock widgets, bottom widgets)
-            from PySide6.QtWidgets import QDockWidget
-
-            for dock in main_window.findChildren(QDockWidget):
-                main_window.removeDockWidget(dock)
-                dock.deleteLater()
-
-            # Clear bottom widgets from main layout
-            central = main_window.centralWidget()
-            if central and central.layout():
-                layout = central.layout()
-                # Remove widgets added after player controls (index > 3)
-                while layout.count() > 4:  # Keep toolbar, search, tracklist, controls
-                    item = layout.takeAt(layout.count() - 1)
-                    if item and item.widget():
-                        item.widget().deleteLater()
 
             # Create new UIBuilder for new plugin set
             from jukebox.ui.ui_builder import UIBuilder
@@ -133,9 +132,17 @@ class ModeSwitcherPlugin:
             logging.info(f"Reloaded {loaded} plugins for {mode.value} mode")
 
         finally:
-            # Show window if it was visible
-            if was_visible:
-                main_window.show()
+            # Re-enable updates
+            main_window.setUpdatesEnabled(True)
+
+            # Force complete repaint before removing overlay
+            QApplication.processEvents()
+            main_window.update()
+
+            # Small delay then remove overlay
+            from PySide6.QtCore import QTimer
+
+            QTimer.singleShot(50, overlay.deleteLater)
 
     def register_shortcuts(self, shortcut_manager: Any) -> None:
         """Register keyboard shortcuts."""
