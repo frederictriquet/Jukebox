@@ -23,6 +23,20 @@ shortcuts:
   volume_down: "Ctrl+Down"
   quit: "Ctrl+Q"
   focus_search: "Ctrl+F"
+  seek_forward: "Right"
+  seek_backward: "Left"
+  next_track: "Down"
+  previous_track: "Up"
+  skip_to_next: "Return"
+  jump_20: ","
+  jump_40: ";"
+  jump_60: ":"
+  jump_80: "="
+
+playback_navigation:
+  seek_amount: 10.0 # Base seek amount in seconds
+  rapid_press_threshold: 0.5 # Time threshold for rapid press detection (seconds)
+  max_seek_multiplier: 5 # Maximum acceleration multiplier
 
 waveform:
   bass_color: "#0066FF" # Blue
@@ -45,6 +59,7 @@ plugins:
   jukebox_mode:
     - mode_switcher
     - theme_switcher
+    - playback_navigation
     - track_info
     - stats_plugin
     - playlists_plugin
@@ -52,6 +67,7 @@ plugins:
   curating_mode:
     - mode_switcher
     - theme_switcher
+    - playback_navigation
     - track_info
     - stats_plugin
     - playlists_plugin

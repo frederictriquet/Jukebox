@@ -34,6 +34,15 @@ class ShortcutsConfig(BaseModel):
     volume_down: str = "Ctrl+Down"
     quit: str = "Ctrl+Q"
     focus_search: str = "Ctrl+F"
+    seek_forward: str = "Right"
+    seek_backward: str = "Left"
+    next_track: str = "Down"
+    previous_track: str = "Up"
+    skip_to_next: str = "Return"
+    jump_20: str = ","
+    jump_40: str = ";"
+    jump_60: str = ":"
+    jump_80: str = "="
 
 
 class LoggingConfig(BaseModel):
@@ -41,6 +50,14 @@ class LoggingConfig(BaseModel):
 
     level: str = "INFO"
     file: str = "jukebox.log"
+
+
+class PlaybackNavigationConfig(BaseModel):
+    """Playback navigation configuration."""
+
+    seek_amount: float = Field(gt=0, default=10.0)
+    rapid_press_threshold: float = Field(gt=0, default=0.5)
+    max_seek_multiplier: int = Field(ge=1, default=5)
 
 
 class WaveformConfig(BaseModel):
@@ -75,6 +92,9 @@ class JukeboxConfig(BaseModel):
     audio: AudioConfig
     ui: UIConfig
     shortcuts: ShortcutsConfig = Field(default_factory=ShortcutsConfig)
+    playback_navigation: PlaybackNavigationConfig = Field(
+        default_factory=PlaybackNavigationConfig
+    )
     waveform: WaveformConfig = Field(default_factory=WaveformConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     logging: LoggingConfig

@@ -1,6 +1,7 @@
 """Audio player wrapper for python-vlc."""
 
 from pathlib import Path
+from typing import Any
 
 import vlc
 from PySide6.QtCore import QObject, Signal
@@ -21,6 +22,10 @@ class AudioPlayer(QObject):
         self._instance = vlc.Instance()
         self._player = self._instance.media_player_new()
         self._current_file: Path | None = None
+
+        # Setup event manager for track end detection
+        event_manager = self._player.event_manager()
+        event_manager.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_end_reached)
 
     def load(self, filepath: Path) -> bool:
         """Load an audio file.
@@ -112,3 +117,11 @@ class AudioPlayer(QObject):
             Path to current file or None
         """
         return self._current_file
+
+    def _on_end_reached(self, event: Any) -> None:
+        """Handle VLC end reached event.
+
+        Args:
+            event: VLC event
+        """
+        self.track_finished.emit()

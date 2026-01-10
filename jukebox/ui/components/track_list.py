@@ -107,3 +107,23 @@ class TrackList(QListWidget):
         filepath = item.data(Qt.ItemDataRole.UserRole)
         if filepath:
             self.add_to_playlist_requested.emit(filepath, playlist_id)
+
+    def select_next_track(self) -> None:
+        """Select and play next track in list."""
+        current_row = self.currentRow()
+        if current_row < self.count() - 1:
+            next_row = current_row + 1
+            self.setCurrentRow(next_row)
+            item = self.item(next_row)
+            if item:
+                self._on_item_clicked(item)
+
+    def select_previous_track(self) -> None:
+        """Select and play previous track in list."""
+        current_row = self.currentRow()
+        if current_row > 0:
+            prev_row = current_row - 1
+            self.setCurrentRow(prev_row)
+            item = self.item(prev_row)
+            if item:
+                self._on_item_clicked(item)
