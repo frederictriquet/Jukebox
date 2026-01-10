@@ -16,7 +16,11 @@ class PlaybackNavigationPlugin:
         self.last_seek_time: float = 0.0
         self.seek_multiplier: int = 1
         self.auto_play_next: bool = True
+        self.random_mode: bool = False
         self.auto_play_action: Any = None
+        self.random_action: Any = None
+        self.auto_play_button: Any = None
+        self.random_button: Any = None
 
     def initialize(self, context: Any) -> None:
         """Initialize plugin."""
@@ -26,17 +30,51 @@ class PlaybackNavigationPlugin:
         context.player.track_finished.connect(self._on_track_finished)
 
     def register_ui(self, ui_builder: Any) -> None:
-        """Register auto-play menu."""
+        """Register auto-play and random mode menu and buttons."""
+        # Add menu options
         menu = ui_builder.add_menu("&Playback")
 
-        # Create checkable action for auto-play next
         from PySide6.QtGui import QAction
 
         self.auto_play_action = QAction("Auto-play Next Track", ui_builder.main_window)
         self.auto_play_action.setCheckable(True)
         self.auto_play_action.setChecked(self.auto_play_next)
-        self.auto_play_action.triggered.connect(self._toggle_auto_play)
+        self.auto_play_action.triggered.connect(self._toggle_auto_play_from_menu)
         menu.addAction(self.auto_play_action)
+
+        self.random_action = QAction("Random Mode", ui_builder.main_window)
+        self.random_action.setCheckable(True)
+        self.random_action.setChecked(self.random_mode)
+        self.random_action.triggered.connect(self._toggle_random_from_menu)
+        menu.addAction(self.random_action)
+
+        # Add buttons in player controls (after stop button)
+        from PySide6.QtWidgets import QPushButton
+
+        main_window = self.context.app
+        if hasattr(main_window, "controls") and hasattr(main_window.controls, "layout"):
+            # Auto-play button
+            self.auto_play_button = QPushButton("↻")
+            self.auto_play_button.setCheckable(True)
+            self.auto_play_button.setChecked(self.auto_play_next)
+            self.auto_play_button.setToolTip("Auto-play next track")
+            self.auto_play_button.setMaximumWidth(40)
+            self.auto_play_button.clicked.connect(self._toggle_auto_play_from_button)
+
+            # Random mode button
+            self.random_button = QPushButton("🎲")
+            self.random_button.setCheckable(True)
+            self.random_button.setChecked(self.random_mode)
+            self.random_button.setToolTip("Random mode")
+            self.random_button.setMaximumWidth(40)
+            self.random_button.clicked.connect(self._toggle_random_from_button)
+
+            self._update_button_styles()
+
+            layout = main_window.controls.layout()
+            # Insert at index 3 (after stop button, before spacer)
+            ui_builder.insert_widget_in_layout(layout, 3, self.auto_play_button)
+            ui_builder.insert_widget_in_layout(layout, 4, self.random_button)
 
     def register_shortcuts(self, shortcut_manager: Any) -> None:
         """Register keyboard shortcuts."""
@@ -159,11 +197,70 @@ class PlaybackNavigationPlugin:
     def _on_track_finished(self) -> None:
         """Handle track finished event."""
         if self.auto_play_next:
-            self._next_track()
+            if self.random_mode:
+                self._play_random_track()
+            else:
+                self._next_track()
 
-    def _toggle_auto_play(self) -> None:
-        """Toggle auto-play next track."""
+    def _play_random_track(self) -> None:
+        """Play a random track from the list."""
+        import random
+
+        main_window = self.context.app
+        if hasattr(main_window, "track_list"):
+            track_list = main_window.track_list
+            if track_list.count() > 0:
+                random_row = random.randint(0, track_list.count() - 1)
+                track_list.setCurrentRow(random_row)
+                item = track_list.item(random_row)
+                if item:
+                    track_list._on_item_clicked(item)
+
+    def _toggle_auto_play_from_menu(self) -> None:
+        """Toggle auto-play from menu action."""
         self.auto_play_next = self.auto_play_action.isChecked()
+        # Sync button state
+        if self.auto_play_button:
+            self.auto_play_button.setChecked(self.auto_play_next)
+            self._update_button_styles()
+
+    def _toggle_auto_play_from_button(self) -> None:
+        """Toggle auto-play from button."""
+        self.auto_play_next = self.auto_play_button.isChecked()
+        # Sync menu action state
+        if self.auto_play_action:
+            self.auto_play_action.setChecked(self.auto_play_next)
+        self._update_button_styles()
+
+    def _toggle_random_from_menu(self) -> None:
+        """Toggle random mode from menu action."""
+        self.random_mode = self.random_action.isChecked()
+        # Sync button state
+        if self.random_button:
+            self.random_button.setChecked(self.random_mode)
+            self._update_button_styles()
+
+    def _toggle_random_from_button(self) -> None:
+        """Toggle random mode from button."""
+        self.random_mode = self.random_button.isChecked()
+        # Sync menu action state
+        if self.random_action:
+            self.random_action.setChecked(self.random_mode)
+        self._update_button_styles()
+
+    def _update_button_styles(self) -> None:
+        """Update button styles based on state."""
+        if self.auto_play_button:
+            if self.auto_play_next:
+                self.auto_play_button.setStyleSheet("background-color: #0066FF;")
+            else:
+                self.auto_play_button.setStyleSheet("")
+
+        if self.random_button:
+            if self.random_mode:
+                self.random_button.setStyleSheet("background-color: #FF6600;")
+            else:
+                self.random_button.setStyleSheet("")
 
     def shutdown(self) -> None:
         """Cleanup."""
