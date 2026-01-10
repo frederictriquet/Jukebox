@@ -22,6 +22,7 @@ from jukebox.core.config import JukeboxConfig
 from jukebox.core.database import Database
 from jukebox.core.event_bus import EventBus
 from jukebox.core.plugin_manager import PluginContext, PluginManager
+from jukebox.core.shortcut_manager import ShortcutManager
 from jukebox.ui.components.player_controls import PlayerControls
 from jukebox.ui.components.search_bar import SearchBar
 from jukebox.ui.components.track_list import TrackList
@@ -64,6 +65,7 @@ class MainWindow(QMainWindow):
 
         self._init_ui()
         self._connect_signals()
+        self._register_shortcuts()
         self._load_plugins()
         self._load_tracks_from_db()
 
@@ -120,6 +122,41 @@ class MainWindow(QMainWindow):
 
         # Player feedback
         self.player.volume_changed.connect(self.controls.set_volume)
+
+    def _register_shortcuts(self) -> None:
+        """Register default keyboard shortcuts."""
+        self.shortcut_manager = ShortcutManager(self)
+        shortcuts = self.config.shortcuts
+
+        # Playback controls
+        self.shortcut_manager.register(shortcuts.play_pause, self._toggle_play_pause)
+        self.shortcut_manager.register(shortcuts.pause, self._on_pause)
+        self.shortcut_manager.register(shortcuts.stop, self._on_stop)
+
+        # Volume controls
+        self.shortcut_manager.register(shortcuts.volume_up, self._increase_volume)
+        self.shortcut_manager.register(shortcuts.volume_down, self._decrease_volume)
+
+        # Application
+        self.shortcut_manager.register(shortcuts.quit, self.close)
+        self.shortcut_manager.register(shortcuts.focus_search, lambda: self.search_bar.setFocus())
+
+    def _toggle_play_pause(self) -> None:
+        """Toggle between play and pause."""
+        if self.player.is_playing():
+            self._on_pause()
+        else:
+            self._on_play()
+
+    def _increase_volume(self) -> None:
+        """Increase volume by 10."""
+        current = self.player.get_volume()
+        self.player.set_volume(min(100, current + 10))
+
+    def _decrease_volume(self) -> None:
+        """Decrease volume by 10."""
+        current = self.player.get_volume()
+        self.player.set_volume(max(0, current - 10))
 
     def _add_files(self) -> None:
         """Open file dialog to add audio files."""
@@ -242,8 +279,11 @@ class MainWindow(QMainWindow):
         loaded = self.plugin_manager.load_all_plugins()
         logging.info(f"Loaded {loaded} plugins")
 
+        # Register plugin UIs and shortcuts
         for plugin in self.plugin_manager.get_all_plugins():
             plugin.register_ui(ui_builder)
+            if hasattr(plugin, "register_shortcuts"):
+                plugin.register_shortcuts(self.shortcut_manager)
 
         # Add fallback position slider if waveform plugin not loaded
         waveform_loaded = "waveform_visualizer" in self.plugin_manager.plugins

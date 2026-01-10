@@ -23,8 +23,8 @@ Cette roadmap suit une approche **progressive et itérative** qui privilégie :
 Semaine 1-2  │ MVP Foundation + CI/CD Setup
 Semaine 2-3  │ Core Features + Testing Infrastructure
 Semaine 3-4  │ Plugin System Architecture
-Semaine 4-6  │ Essential Modules Development
-Semaine 6-8  │ Advanced Features + Optimization
+Semaine 4-6  │ Essential Modules Development (incl. advanced waveforms)
+Semaine 7    │ Advanced Features + Optimization
 Semaine 8-10 │ Polish, Distribution & Release
 ```
 
@@ -116,17 +116,19 @@ Semaine 8-10 │ Polish, Distribution & Release
 
 ---
 
-### [Phase 7: Advanced Features](07-ADVANCED-FEATURES.md) (Semaines 6-8)
+### [Phase 7: Advanced Features](07-ADVANCED-FEATURES.md) (Semaine 7)
 **Objectif**: Fonctionnalités avancées et optimisations
 
 **Livrables**:
-- ✅ Waveforms 3-color (Engine DJ style, completed in Phase 6)
 - ⏳ Mode jukebox vs curating
 - ⏳ Thèmes UI
-- ⏳ Raccourcis clavier
+- ✅ Raccourcis clavier
 - ⏳ Optimisations Raspberry Pi
+- ⏳ Tests performance & profiling
 
 **Milestone**: `v0.9.0-rc` - Feature Complete
+
+**Note**: Waveforms 3-color (Engine DJ style) déjà complétés en Phase 6
 
 ---
 

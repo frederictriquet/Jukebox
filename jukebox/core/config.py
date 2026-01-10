@@ -23,6 +23,18 @@ class UIConfig(BaseModel):
     theme: str = "dark"
 
 
+class ShortcutsConfig(BaseModel):
+    """Keyboard shortcuts configuration."""
+
+    play_pause: str = "Space"
+    pause: str = "Ctrl+P"
+    stop: str = "Ctrl+S"
+    volume_up: str = "Ctrl+Up"
+    volume_down: str = "Ctrl+Down"
+    quit: str = "Ctrl+Q"
+    focus_search: str = "Ctrl+F"
+
+
 class LoggingConfig(BaseModel):
     """Logging configuration."""
 
@@ -59,6 +71,7 @@ class JukeboxConfig(BaseModel):
 
     audio: AudioConfig
     ui: UIConfig
+    shortcuts: ShortcutsConfig = Field(default_factory=ShortcutsConfig)
     waveform: WaveformConfig = Field(default_factory=WaveformConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     logging: LoggingConfig

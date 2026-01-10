@@ -267,85 +267,9 @@ class PerformanceSettings:
 
 ---
 
-## 7.5 Waveforms 3D (Jours 5-7)
+## 7.5 Tests Performance (Jour 5-6)
 
-### 7.5.1 3D Waveform Viewer
-```python
-# plugins/waveform_3d.py
-from PySide6.QtWidgets import QWidget
-import pyqtgraph.opengl as gl
-import numpy as np
-
-
-class Waveform3DPlugin:
-    """3D waveform visualization."""
-
-    name = "waveform_3d"
-    version = "1.0.0"
-    description = "3D waveform visualization"
-
-    def initialize(self, context):
-        self.context = context
-        self.viewer = None
-
-    def register_ui(self, ui_builder):
-        """Add 3D viewer."""
-        if not PerformanceSettings.is_raspberry_pi():
-            self.viewer = Waveform3DWidget()
-            ui_builder.add_sidebar_widget(self.viewer, "3D Waveform")
-
-    def register_shortcuts(self, shortcut_manager):
-        pass
-
-    def shutdown(self):
-        pass
-
-
-class Waveform3DWidget(QWidget):
-    """3D waveform widget using OpenGL."""
-
-    def __init__(self):
-        super().__init__()
-        self._init_ui()
-
-    def _init_ui(self):
-        from PySide6.QtWidgets import QVBoxLayout
-        layout = QVBoxLayout()
-
-        self.gl_widget = gl.GLViewWidget()
-        self.gl_widget.opts['distance'] = 40
-        layout.addWidget(self.gl_widget)
-
-        self.setLayout(layout)
-
-    def display_waveform_3d(self, waveform: np.ndarray):
-        """Display waveform in 3D."""
-        self.gl_widget.clear()
-
-        # Create 3D surface from waveform
-        z = waveform.reshape(-1, 1) * np.ones((1, 10))
-        x = np.arange(z.shape[0])
-        y = np.arange(z.shape[1])
-
-        colors = np.ones((z.shape[0], z.shape[1], 4))
-        colors[:, :, 0] = np.linspace(0, 1, z.shape[0])[:, None]
-        colors[:, :, 1] = np.linspace(0, 1, z.shape[1])[None, :]
-        colors[:, :, 2] = 0.5
-        colors[:, :, 3] = 0.8
-
-        surface = gl.GLSurfacePlotItem(
-            x=x, y=y, z=z, colors=colors,
-            shader='shaded', smooth=True
-        )
-
-        self.gl_widget.addItem(surface)
-```
-
----
-
-## 7.6 Tests Performance (Jour 7)
-
-### 7.6.1 Profiling
+### 7.5.1 Profiling
 ```python
 # tests/performance/test_profiling.py
 import cProfile
@@ -376,9 +300,9 @@ def profile_database_operations():
 
 ---
 
-## 7.7 Documentation Polish (Jour 8)
+## 7.6 Documentation Polish (Jour 7)
 
-### 7.7.1 User Guide
+### 7.6.1 User Guide
 Créer `docs/USER_GUIDE.md`:
 
 ```markdown
@@ -436,10 +360,10 @@ Créer `docs/USER_GUIDE.md`:
 - [ ] Style cohérent
 
 ### Shortcuts (Jour 3)
-- [ ] ShortcutManager
-- [ ] Shortcuts par défaut
-- [ ] Configuration
-- [ ] Tests
+- [x] ShortcutManager
+- [x] Shortcuts par défaut (Space, Ctrl+P/S, Ctrl+Up/Down, Ctrl+Q/F)
+- [x] Plugin API (register_shortcuts method)
+- [x] Tests
 
 ### Pi Optimization (Jours 4-5)
 - [ ] Détection Pi
@@ -447,19 +371,13 @@ Créer `docs/USER_GUIDE.md`:
 - [ ] Tests sur Pi
 - [ ] Performance validée
 
-### 3D Waveforms (Jours 5-7)
-- [ ] OpenGL viewer
-- [ ] Disabled sur Pi
-- [ ] Smooth rendering
-- [ ] Tests
-
-### Performance (Jour 7)
+### Performance (Jours 5-6)
 - [ ] Profiling
 - [ ] Bottlenecks identifiés
 - [ ] Optimisations appliquées
 - [ ] Benchmarks
 
-### Documentation (Jour 8)
+### Documentation (Jour 7)
 - [ ] User guide
 - [ ] Keyboard shortcuts
 - [ ] Troubleshooting
@@ -473,6 +391,8 @@ Créer `docs/USER_GUIDE.md`:
 
 ---
 
-**Durée estimée**: 8-10 jours
-**Effort**: ~50-60 heures
-**Complexité**: Élevée
+**Durée estimée**: 7 jours
+**Effort**: ~40-45 heures
+**Complexité**: Moyenne-Élevée
+
+**Note**: Waveforms 3D supprimé de cette phase car la visualisation 3-color (Engine DJ style) complétée en Phase 6 couvre déjà les besoins de visualisation avancée.
