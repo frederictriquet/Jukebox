@@ -38,6 +38,7 @@ class WaveformConfig(BaseModel):
     treble_color: str = "#FFFFFF"
     cursor_color: str = "#FFFFFF"
     height: int = 120
+    chunk_duration: float = Field(gt=0, default=10.0)
 
 
 class PluginsConfig(BaseModel):

@@ -449,10 +449,14 @@ class RecommendationsPlugin:
 - [x] UI complète
 
 ### Waveform Visualizer (Jours 3-5)
-- [ ] Génération waveforms
-- [ ] Cache SQLite (schema existe)
-- [ ] PyQtGraph integration
-- [ ] Background processing
+- [x] Génération waveforms
+- [x] Cache SQLite (schema existe)
+- [x] PyQtGraph integration
+- [x] Background processing
+- [x] Progressive chunked rendering (10s segments, configurable)
+- [x] 3-color frequency separation (bass/mid/treble)
+- [x] Engine DJ style stacked visualization
+- [x] Interactive seek by clicking waveform
 
 ### Recommendations (Jours 5-6)
 - [x] Plugin créé

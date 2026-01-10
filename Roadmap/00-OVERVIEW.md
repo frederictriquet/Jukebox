@@ -109,7 +109,7 @@ Semaine 8-10 │ Polish, Distribution & Release
 **Livrables**:
 - ✅ Module duplicate finder
 - ✅ Module file curator
-- ✅ Module waveform visualizer
+- ✅ Module waveform visualizer (progressive rendering, 3-band frequency)
 - ✅ Module recommendations
 
 **Milestone**: `v0.5.0-beta` - MVP Complet
@@ -120,11 +120,11 @@ Semaine 8-10 │ Polish, Distribution & Release
 **Objectif**: Fonctionnalités avancées et optimisations
 
 **Livrables**:
-- ✅ Waveforms 3D
-- ✅ Mode jukebox vs curating
-- ✅ Thèmes UI
-- ✅ Raccourcis clavier
-- ✅ Optimisations Raspberry Pi
+- ✅ Waveforms 3-color (Engine DJ style, completed in Phase 6)
+- ⏳ Mode jukebox vs curating
+- ⏳ Thèmes UI
+- ⏳ Raccourcis clavier
+- ⏳ Optimisations Raspberry Pi
 
 **Milestone**: `v0.9.0-rc` - Feature Complete
 

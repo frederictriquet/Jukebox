@@ -20,6 +20,7 @@ waveform:
   treble_color: "#FFFFFF" # White
   cursor_color: "#FFFFFF" # White
   height: 60
+  chunk_duration: 10.0 # Duration in seconds for progressive waveform calculation
 
 plugins:
   enabled:

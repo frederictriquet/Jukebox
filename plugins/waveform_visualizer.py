@@ -37,8 +37,6 @@ class WaveformVisualizerPlugin:
         self.waveform_widget = WaveformWidget(waveform_config)
 
         # Connect position updates
-        from jukebox.core.event_bus import Events
-
         self.context.subscribe("position_update", self._update_cursor)
         self.waveform_widget.position_clicked.connect(self._on_seek_requested)
 
@@ -100,9 +98,18 @@ class WaveformVisualizerPlugin:
                 self.worker.terminate()
 
         # Start new worker
-        self.worker = WaveformWorker(track_id, filepath)
+        self.worker = WaveformWorker(
+            track_id, filepath, self.context.config.waveform.chunk_duration
+        )
+        self.worker.chunk_ready.connect(self._on_waveform_chunk)
         self.worker.finished.connect(self._on_waveform_generated)
         self.worker.start()
+
+    def _on_waveform_chunk(self, track_id: int, partial_waveform: Any) -> None:
+        """Handle progressive waveform chunk (main thread)."""
+        # Display partial waveform immediately
+        if self.waveform_widget:
+            self.waveform_widget.display_waveform(partial_waveform)
 
     def _on_waveform_generated(self, track_id: int, waveform: Any) -> None:
         """Handle waveform generation complete (main thread)."""
@@ -276,49 +283,120 @@ class WaveformWidget(QWidget):
 
 
 class WaveformWorker(QThread):
-    """Background worker to generate waveform."""
+    """Background worker to generate waveform progressively."""
 
-    finished = Signal(int, object)  # track_id, waveform (dict or ndarray)
+    chunk_ready = Signal(int, object)  # track_id, partial waveform chunk
+    finished = Signal(int, object)  # track_id, complete waveform (dict or ndarray)
 
-    def __init__(self, track_id: int, filepath: str):
+    def __init__(self, track_id: int, filepath: str, chunk_duration: float = 10.0):
         """Initialize worker."""
         super().__init__()
         self.track_id = track_id
         self.filepath = filepath
+        self.chunk_duration = chunk_duration  # seconds per chunk
 
     def run(self) -> None:
-        """Generate 3-color waveform (bass/mid/treble)."""
+        """Generate 3-color waveform (bass/mid/treble) progressively."""
         try:
             import librosa
             from scipy import signal
 
-            # Load audio at lower sample rate for faster processing
-            y, sr = librosa.load(self.filepath, sr=11025, mono=True)
+            # Get audio info first to know total duration
+            duration = librosa.get_duration(path=self.filepath)
+            sr = 11025  # Target sample rate
 
-            # Separate frequency bands
-            # Bass: < 250 Hz
+            # Downsampling hop for visualization
+            hop = 2048
+
+            # Calculate expected total length for pre-allocation
+            total_samples = int(duration * sr)
+            expected_length = (total_samples // hop) + 1
+
+            # Pre-allocate arrays with zeros (will fill progressively)
+            full_bass = np.zeros(expected_length)
+            full_mid = np.zeros(expected_length)
+            full_treble = np.zeros(expected_length)
+
+            # Pre-calculate filter coefficients (reuse for all chunks)
             sos_bass = signal.butter(4, 250, "lp", fs=sr, output="sos")
-            bass = signal.sosfilt(sos_bass, y)
-
-            # Mid: 250-4000 Hz
             sos_mid = signal.butter(4, [250, 4000], "bandpass", fs=sr, output="sos")
-            mid = signal.sosfilt(sos_mid, y)
-
-            # Treble: > 4000 Hz (limited by Nyquist at 11025/2 = 5512 Hz)
             sos_treble = signal.butter(4, 4000, "hp", fs=sr, output="sos")
-            treble = signal.sosfilt(sos_treble, y)
 
-            # Downsample more aggressively for visualization
-            hop = 2048  # Less dense sampling
-            bass_wave = np.abs(bass[::hop])
-            mid_wave = np.abs(mid[::hop])
-            treble_wave = np.abs(treble[::hop])
+            # Process in chunks
+            offset = 0.0
+            write_index = 0
+            while offset < duration:
+                # Load chunk
+                chunk_dur = min(self.chunk_duration, duration - offset)
+                y, _ = librosa.load(
+                    self.filepath, sr=sr, mono=True, offset=offset, duration=chunk_dur
+                )
 
-            # Normalize each
-            bass_wave = bass_wave / np.max(bass_wave) if np.max(bass_wave) > 0 else bass_wave
-            mid_wave = mid_wave / np.max(mid_wave) if np.max(mid_wave) > 0 else mid_wave
+                # Separate frequency bands
+                bass = signal.sosfilt(sos_bass, y)
+                mid = signal.sosfilt(sos_mid, y)
+                treble = signal.sosfilt(sos_treble, y)
+
+                # Downsample for visualization
+                bass_chunk = np.abs(bass[::hop])
+                mid_chunk = np.abs(mid[::hop])
+                treble_chunk = np.abs(treble[::hop])
+
+                # Write to pre-allocated array at correct position
+                chunk_len = len(bass_chunk)
+                end_index = min(write_index + chunk_len, expected_length)
+                actual_len = end_index - write_index
+
+                full_bass[write_index:end_index] = bass_chunk[:actual_len]
+                full_mid[write_index:end_index] = mid_chunk[:actual_len]
+                full_treble[write_index:end_index] = treble_chunk[:actual_len]
+
+                write_index = end_index
+
+                # Emit progressive update with partial data (normalized)
+                # Only normalize non-zero portion for better visual feedback
+                current_data = write_index
+                bass_partial = full_bass[:current_data]
+                mid_partial = full_mid[:current_data]
+                treble_partial = full_treble[:current_data]
+
+                # Normalize each band for progressive display
+                bass_norm = (
+                    bass_partial / np.max(bass_partial) if np.max(bass_partial) > 0 else bass_partial
+                )
+                mid_norm = (
+                    mid_partial / np.max(mid_partial) if np.max(mid_partial) > 0 else mid_partial
+                )
+                treble_norm = (
+                    treble_partial / np.max(treble_partial)
+                    if np.max(treble_partial) > 0
+                    else treble_partial
+                )
+
+                # Pad with zeros to expected length for stable display
+                bass_display = np.zeros(expected_length)
+                mid_display = np.zeros(expected_length)
+                treble_display = np.zeros(expected_length)
+
+                bass_display[:current_data] = bass_norm
+                mid_display[:current_data] = mid_norm
+                treble_display[:current_data] = treble_norm
+
+                chunk_data = {"bass": bass_display, "mid": mid_display, "treble": treble_display}
+                self.chunk_ready.emit(self.track_id, chunk_data)
+
+                offset += self.chunk_duration
+
+            # Final normalization - trim to actual length
+            actual_length = write_index
+            full_bass = full_bass[:actual_length]
+            full_mid = full_mid[:actual_length]
+            full_treble = full_treble[:actual_length]
+
+            bass_wave = full_bass / np.max(full_bass) if np.max(full_bass) > 0 else full_bass
+            mid_wave = full_mid / np.max(full_mid) if np.max(full_mid) > 0 else full_mid
             treble_wave = (
-                treble_wave / np.max(treble_wave) if np.max(treble_wave) > 0 else treble_wave
+                full_treble / np.max(full_treble) if np.max(full_treble) > 0 else full_treble
             )
 
             waveform_data = {"bass": bass_wave, "mid": mid_wave, "treble": treble_wave}
