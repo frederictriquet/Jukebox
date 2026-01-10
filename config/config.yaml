@@ -45,12 +45,14 @@ plugins:
   jukebox_mode:
     - mode_switcher
     - theme_switcher
+    - track_info
     - stats_plugin
     - playlists_plugin
     - waveform_visualizer
   curating_mode:
     - mode_switcher
     - theme_switcher
+    - track_info
     - stats_plugin
     - playlists_plugin
     - duplicate_finder
