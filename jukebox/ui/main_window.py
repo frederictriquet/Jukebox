@@ -26,7 +26,6 @@ from jukebox.core.shortcut_manager import ShortcutManager
 from jukebox.ui.components.player_controls import PlayerControls
 from jukebox.ui.components.search_bar import SearchBar
 from jukebox.ui.components.track_list import TrackList
-from jukebox.ui.theme_manager import ThemeManager
 from jukebox.ui.ui_builder import UIBuilder
 from jukebox.utils.metadata import MetadataExtractor
 from jukebox.utils.scanner import FileScanner
@@ -64,16 +63,11 @@ class MainWindow(QMainWindow):
         # Fallback position slider (if no waveform plugin)
         self.fallback_position_slider: Any = None
 
-        self._apply_theme()
         self._init_ui()
         self._connect_signals()
         self._register_shortcuts()
         self._load_plugins()
         self._load_tracks_from_db()
-
-    def _apply_theme(self) -> None:
-        """Apply theme from configuration."""
-        ThemeManager.apply_theme(self.config.ui.theme)
 
     def _init_ui(self) -> None:
         """Initialize UI."""

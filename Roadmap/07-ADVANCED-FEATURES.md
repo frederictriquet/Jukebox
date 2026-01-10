@@ -354,9 +354,11 @@ Créer `docs/USER_GUIDE.md`:
 - [ ] Tests
 
 ### Thèmes (Jours 2-3)
-- [x] Theme manager
+- [x] Theme manager (jukebox/ui/theme_manager.py)
 - [x] Dark/Light themes
-- [x] Applied from config.ui.theme
+- [x] Theme switcher plugin with View menu
+- [x] Runtime theme switching (no restart needed)
+- [x] Toggle shortcut (Ctrl+T)
 - [x] Style cohérent (buttons, menus, lists, sliders, toolbars, docks)
 
 ### Shortcuts (Jour 3)

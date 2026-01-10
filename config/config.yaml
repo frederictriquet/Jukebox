@@ -33,6 +33,7 @@ waveform:
 
 plugins:
   enabled:
+    - theme_switcher
     - stats_plugin
     - playlists_plugin
     - duplicate_finder
