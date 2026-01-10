@@ -84,5 +84,13 @@ class UIBuilder:
     def clear_all_plugin_widgets(self) -> None:
         """Clear all widgets added by plugins."""
         for widget in self.plugin_widgets:
+            # Remove widget from its parent layout first
+            if widget.parent():
+                parent = widget.parent()
+                if hasattr(parent, 'layout') and parent.layout():
+                    parent.layout().removeWidget(widget)
+
+            # Hide widget immediately before deletion
+            widget.hide()
             widget.deleteLater()
         self.plugin_widgets.clear()

@@ -16,6 +16,9 @@ class WaveformVisualizerPlugin:
     version = "1.0.0"
     description = "Display track waveforms"
 
+    # Class variable to keep orphan workers alive until they finish
+    _orphan_workers: list[Any] = []
+
     def __init__(self) -> None:
         """Initialize plugin."""
         self.context: Any = None
@@ -105,9 +108,13 @@ class WaveformVisualizerPlugin:
                     self.current_worker.error.disconnect()
                 except (RuntimeError, TypeError):
                     pass
-                # Wait for current chunk to finish (max ~2 seconds)
-                if self.current_worker.isRunning():
-                    self.current_worker.wait(3000)
+                # Detach worker from parent and keep in orphan list
+                self.current_worker.setParent(None)
+                WaveformVisualizerPlugin._orphan_workers.append(self.current_worker)
+                # Clean up finished workers from orphan list
+                WaveformVisualizerPlugin._orphan_workers = [
+                    w for w in WaveformVisualizerPlugin._orphan_workers if w.isRunning()
+                ]
             # Mark old generation as cancelled
             self.current_generation = None
             self.current_worker = None
@@ -347,12 +354,15 @@ class WaveformVisualizerPlugin:
             except (RuntimeError, TypeError):
                 pass
 
-            # Wait for worker to finish (with timeout to avoid blocking)
-            # Each chunk takes ~1-2 seconds max
-            if self.current_worker.isRunning():
-                self.current_worker.wait(3000)  # Wait up to 3 seconds
+            # Detach worker from parent and keep in orphan list
+            self.current_worker.setParent(None)
+            WaveformVisualizerPlugin._orphan_workers.append(self.current_worker)
+            # Clean up finished workers from orphan list
+            WaveformVisualizerPlugin._orphan_workers = [
+                w for w in WaveformVisualizerPlugin._orphan_workers if w.isRunning()
+            ]
 
-        # Simply clear generation state - current chunk will finish naturally
+        # Clear generation state - worker will finish naturally
         self.current_generation = None
         self.current_worker = None
 
