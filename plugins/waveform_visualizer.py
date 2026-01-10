@@ -20,10 +20,8 @@ class WaveformVisualizerPlugin:
         """Initialize plugin."""
         self.context: Any = None
         self.waveform_widget: WaveformWidget | None = None
-        self.worker: WaveformWorker | None = None
-        self.current_track_id: int | None = None
-        self.pending_track: tuple[int, str] | None = None  # (track_id, filepath)
-        self._cleaning_up: bool = False
+        self.current_generation: dict[str, Any] | None = None  # Generation state tracking
+        self.current_worker: WaveformWorker | None = None  # Keep reference to current worker
 
     def initialize(self, context: Any) -> None:
         """Initialize plugin."""
@@ -60,9 +58,6 @@ class WaveformVisualizerPlugin:
         if not self.waveform_widget:
             return
 
-        # Store current track ID
-        self.current_track_id = track_id
-
         # Check cache
         cached = self.context.database.conn.execute(
             "SELECT waveform_data FROM waveform_cache WHERE track_id = ?", (track_id,)
@@ -95,99 +90,271 @@ class WaveformVisualizerPlugin:
                 self._generate_waveform(track_id, track["filepath"])
 
     def _generate_waveform(self, track_id: int, filepath: str) -> None:
-        """Generate waveform in background thread."""
+        """Generate waveform progressively using one thread per chunk."""
         # Clear waveform display immediately
         if self.waveform_widget:
             self.waveform_widget.clear_waveform()
 
-        # If a worker is already running, save as pending and skip
-        if self.worker and self.worker.isRunning():
-            self.pending_track = (track_id, filepath)
+        # If already generating for a different track, cancel by not continuing
+        # (current chunk will finish naturally in ~1-2 seconds)
+        if self.current_generation:
+            # Disconnect current worker's signals before cancelling
+            if self.current_worker:
+                try:
+                    self.current_worker.chunk_ready.disconnect()
+                    self.current_worker.error.disconnect()
+                except (RuntimeError, TypeError):
+                    pass
+                # Wait for current chunk to finish (max ~2 seconds)
+                if self.current_worker.isRunning():
+                    self.current_worker.wait(3000)
+            # Mark old generation as cancelled
+            self.current_generation = None
+            self.current_worker = None
+
+        # Initialize generation state
+        try:
+            import librosa
+
+            # Get audio info to know total duration
+            duration = librosa.get_duration(path=filepath)
+
+            # Skip if duration is zero or very short
+            if duration < 0.1:
+                logging.warning(f"Track too short or empty: {duration}s for {filepath}")
+                return
+
+            sr = 11025  # Target sample rate
+            hop = 2048  # Downsampling hop
+
+            # Calculate expected total length for pre-allocation
+            total_samples = int(duration * sr)
+            expected_length = max((total_samples // hop) + 1, 1)
+
+            # Pre-calculate filter coefficients (reuse for all chunks)
+            from scipy import signal
+
+            sos_bass = signal.butter(4, 250, "lp", fs=sr, output="sos")
+            sos_mid = signal.butter(4, [250, 4000], "bandpass", fs=sr, output="sos")
+            sos_treble = signal.butter(4, 4000, "hp", fs=sr, output="sos")
+
+            # Initialize generation state
+            self.current_generation = {
+                "track_id": track_id,
+                "filepath": filepath,
+                "duration": duration,
+                "sr": sr,
+                "hop": hop,
+                "expected_length": expected_length,
+                "sos_bass": sos_bass,
+                "sos_mid": sos_mid,
+                "sos_treble": sos_treble,
+                "full_bass": np.zeros(expected_length),
+                "full_mid": np.zeros(expected_length),
+                "full_treble": np.zeros(expected_length),
+                "write_index": 0,
+                "offset": 0.0,
+            }
+
+            # Start first chunk
+            self._start_next_chunk()
+
+        except Exception as e:
+            logging.error(f"Failed to initialize waveform generation for {filepath}: {e}")
+            self.current_generation = None
+
+    def _start_next_chunk(self) -> None:
+        """Start processing the next chunk."""
+        if not self.current_generation:
             return
 
-        # Start new worker
-        self.worker = WaveformWorker(
-            track_id, filepath, self.context.config.waveform.chunk_duration
+        gen = self.current_generation
+        chunk_duration = self.context.config.waveform.chunk_duration
+
+        # Check if we're done
+        if gen["offset"] >= gen["duration"]:
+            self._finalize_waveform()
+            return
+
+        # Calculate chunk duration (last chunk may be shorter)
+        actual_chunk_duration = min(chunk_duration, gen["duration"] - gen["offset"])
+
+        # Create worker for this chunk
+        self.current_worker = WaveformWorker(
+            track_id=gen["track_id"],
+            filepath=gen["filepath"],
+            offset=gen["offset"],
+            chunk_duration=actual_chunk_duration,
+            sr=gen["sr"],
+            hop=gen["hop"],
+            sos_bass=gen["sos_bass"],
+            sos_mid=gen["sos_mid"],
+            sos_treble=gen["sos_treble"],
         )
-        self.worker.chunk_ready.connect(self._on_waveform_chunk)
-        self.worker.finished.connect(self._on_waveform_generated)
-        self.worker.start()
 
-    def _on_waveform_chunk(self, track_id: int, partial_waveform: Any) -> None:
-        """Handle progressive waveform chunk (main thread)."""
-        # Only display if this is still the current track
-        if track_id != self.current_track_id:
+        # Connect signals
+        self.current_worker.chunk_ready.connect(self._on_chunk_complete)
+        self.current_worker.error.connect(self._on_chunk_error)
+
+        # Start worker
+        self.current_worker.start()
+
+    def _on_chunk_complete(
+        self, track_id: int, bass_chunk: np.ndarray, mid_chunk: np.ndarray, treble_chunk: np.ndarray
+    ) -> None:
+        """Handle chunk completion."""
+        # Check if this is still the current generation
+        if not self.current_generation or self.current_generation["track_id"] != track_id:
+            # Stale chunk from cancelled generation, ignore
             return
 
-        # Display partial waveform immediately
-        if self.waveform_widget:
-            self.waveform_widget.display_waveform(partial_waveform)
+        gen = self.current_generation
 
-    def _on_waveform_generated(self, track_id: int, waveform: Any) -> None:
-        """Handle waveform generation complete (main thread)."""
-        # Cache in database (main thread - SQLite safe)
+        # Skip if chunk is empty
+        if len(bass_chunk) == 0:
+            gen["offset"] += self.context.config.waveform.chunk_duration
+            self._start_next_chunk()
+            return
+
+        # Write to pre-allocated arrays at correct position
+        chunk_len = len(bass_chunk)
+        end_index = min(gen["write_index"] + chunk_len, gen["expected_length"])
+        actual_len = end_index - gen["write_index"]
+
+        gen["full_bass"][gen["write_index"] : end_index] = bass_chunk[:actual_len]
+        gen["full_mid"][gen["write_index"] : end_index] = mid_chunk[:actual_len]
+        gen["full_treble"][gen["write_index"] : end_index] = treble_chunk[:actual_len]
+
+        gen["write_index"] = end_index
+
+        # Emit progressive update with partial data (normalized)
+        current_data = gen["write_index"]
+
+        # Skip progressive update if no data yet
+        if current_data == 0 or gen["expected_length"] == 0:
+            gen["offset"] += self.context.config.waveform.chunk_duration
+            self._start_next_chunk()
+            return
+
+        bass_partial = gen["full_bass"][:current_data]
+        mid_partial = gen["full_mid"][:current_data]
+        treble_partial = gen["full_treble"][:current_data]
+
+        # Normalize each band for progressive display
+        bass_norm = bass_partial / np.max(bass_partial) if np.max(bass_partial) > 0 else bass_partial
+        mid_norm = mid_partial / np.max(mid_partial) if np.max(mid_partial) > 0 else mid_partial
+        treble_norm = (
+            treble_partial / np.max(treble_partial) if np.max(treble_partial) > 0 else treble_partial
+        )
+
+        # Pad with zeros to expected length for stable display
+        bass_display = np.zeros(gen["expected_length"])
+        mid_display = np.zeros(gen["expected_length"])
+        treble_display = np.zeros(gen["expected_length"])
+
+        bass_display[:current_data] = bass_norm
+        mid_display[:current_data] = mid_norm
+        treble_display[:current_data] = treble_norm
+
+        chunk_data = {"bass": bass_display, "mid": mid_display, "treble": treble_display}
+
+        # Display partial waveform
+        if self.waveform_widget:
+            self.waveform_widget.display_waveform(chunk_data)
+
+        # Move to next chunk
+        gen["offset"] += self.context.config.waveform.chunk_duration
+        self._start_next_chunk()
+
+    def _on_chunk_error(self, track_id: int, error_msg: str) -> None:
+        """Handle chunk error."""
+        logging.error(f"Chunk error for track {track_id}: {error_msg}")
+
+        # Check if this is still the current generation
+        if not self.current_generation or self.current_generation["track_id"] != track_id:
+            return
+
+        # Disconnect worker signals before cancelling
+        if self.current_worker:
+            try:
+                self.current_worker.chunk_ready.disconnect()
+                self.current_worker.error.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+
+        # Cancel generation on error
+        self.current_generation = None
+        self.current_worker = None
+
+    def _finalize_waveform(self) -> None:
+        """Finalize waveform generation and cache results."""
+        if not self.current_generation:
+            return
+
+        gen = self.current_generation
+        actual_length = gen["write_index"]
+
+        # Skip if no data was written
+        if actual_length == 0:
+            logging.warning(f"No waveform data generated for track {gen['track_id']}")
+            self.current_generation = None
+            return
+
+        # Trim to actual length
+        full_bass = gen["full_bass"][:actual_length]
+        full_mid = gen["full_mid"][:actual_length]
+        full_treble = gen["full_treble"][:actual_length]
+
+        # Final normalization
+        bass_wave = full_bass / np.max(full_bass) if np.max(full_bass) > 0 else full_bass
+        mid_wave = full_mid / np.max(full_mid) if np.max(full_mid) > 0 else full_mid
+        treble_wave = full_treble / np.max(full_treble) if np.max(full_treble) > 0 else full_treble
+
+        waveform_data = {"bass": bass_wave, "mid": mid_wave, "treble": treble_wave}
+
+        # Cache in database
         try:
             import pickle
 
-            # Serialize dict or array
-            waveform_bytes = pickle.dumps(waveform)
+            waveform_bytes = pickle.dumps(waveform_data)
 
             self.context.database.conn.execute(
                 """
                 INSERT OR REPLACE INTO waveform_cache (track_id, waveform_data)
                 VALUES (?, ?)
             """,
-                (track_id, waveform_bytes),
+                (gen["track_id"], waveform_bytes),
             )
             self.context.database.conn.commit()
         except Exception as e:
             logging.error(f"Failed to cache waveform: {e}")
 
-        # Only display if this is still the current track
-        if track_id == self.current_track_id and self.waveform_widget:
-            self.waveform_widget.display_waveform(waveform)
+        # Display final waveform
+        if self.waveform_widget:
+            self.waveform_widget.display_waveform(waveform_data)
 
-        # If there's a pending track request, process it now
-        if self.pending_track:
-            pending_id, pending_path = self.pending_track
-            self.pending_track = None
-            self._generate_waveform(pending_id, pending_path)
+        # Clear generation state
+        self.current_generation = None
+        self.current_worker = None
 
     def shutdown(self) -> None:
         """Cleanup."""
-        # Disconnect signals first to prevent worker from accessing deleted objects
-        if self.worker:
+        # Disconnect signals from current worker
+        if self.current_worker:
             try:
-                self.worker.chunk_ready.disconnect()
-                self.worker.finished.disconnect()
+                self.current_worker.chunk_ready.disconnect()
+                self.current_worker.error.disconnect()
             except (RuntimeError, TypeError):
                 pass
 
-        self._cleanup_worker()
+            # Wait for worker to finish (with timeout to avoid blocking)
+            # Each chunk takes ~1-2 seconds max
+            if self.current_worker.isRunning():
+                self.current_worker.wait(3000)  # Wait up to 3 seconds
 
-    def __del__(self) -> None:
-        """Destructor - ensure worker is stopped."""
-        self._cleanup_worker()
-
-    def _cleanup_worker(self) -> None:
-        """Clean up worker thread."""
-        # Prevent multiple simultaneous cleanups
-        if self._cleaning_up:
-            return
-
-        self._cleaning_up = True
-
-        try:
-            if hasattr(self, 'worker') and self.worker is not None:
-                if self.worker.isRunning():
-                    # Just set cancel flag - let worker finish naturally
-                    self.worker.cancel()
-                    # Don't terminate() or wait() - causes crashes/freezes
-                    # Worker will exit gracefully at next cancel check
-        except (RuntimeError, AttributeError):
-            pass
-        finally:
-            self._cleaning_up = False
+        # Simply clear generation state - current chunk will finish naturally
+        self.current_generation = None
+        self.current_worker = None
 
 
 class WaveformWidget(QWidget):
@@ -331,164 +498,77 @@ class WaveformWidget(QWidget):
 
 
 class WaveformWorker(QThread):
-    """Background worker to generate waveform progressively."""
+    """Background worker to generate one waveform chunk."""
 
-    chunk_ready = Signal(int, object)  # track_id, partial waveform chunk
-    finished = Signal(int, object)  # track_id, complete waveform (dict or ndarray)
+    chunk_ready = Signal(int, object, object, object)  # track_id, bass, mid, treble arrays
+    error = Signal(int, str)  # track_id, error message
 
     def __init__(
-        self, track_id: int, filepath: str, chunk_duration: float = 10.0, parent: Any = None
+        self,
+        track_id: int,
+        filepath: str,
+        offset: float,
+        chunk_duration: float,
+        sr: int,
+        hop: int,
+        sos_bass: Any,
+        sos_mid: Any,
+        sos_treble: Any,
+        parent: Any = None,
     ):
-        """Initialize worker."""
+        """Initialize worker for single chunk.
+
+        Args:
+            track_id: Track ID for this chunk
+            filepath: Path to audio file
+            offset: Starting position in seconds
+            chunk_duration: Duration of this chunk in seconds
+            sr: Sample rate
+            hop: Downsampling hop
+            sos_bass: Pre-calculated bass filter coefficients
+            sos_mid: Pre-calculated mid filter coefficients
+            sos_treble: Pre-calculated treble filter coefficients
+            parent: Parent object
+        """
         super().__init__(parent)
         self.track_id = track_id
         self.filepath = filepath
-        self.chunk_duration = chunk_duration  # seconds per chunk
-        self._cancelled = False
-
-    def cancel(self) -> None:
-        """Cancel the waveform generation."""
-        self._cancelled = True
+        self.offset = offset
+        self.chunk_duration = chunk_duration
+        self.sr = sr
+        self.hop = hop
+        self.sos_bass = sos_bass
+        self.sos_mid = sos_mid
+        self.sos_treble = sos_treble
 
     def run(self) -> None:
-        """Generate 3-color waveform (bass/mid/treble) progressively."""
+        """Process single chunk."""
         try:
             import librosa
             from scipy import signal
 
-            # Get audio info first to know total duration
-            try:
-                duration = librosa.get_duration(path=self.filepath)
-            except Exception as e:
-                logging.error(f"Failed to get duration for {self.filepath}: {e}")
-                return
-
-            sr = 11025  # Target sample rate
-
-            # Skip if duration is zero or very short
-            if duration < 0.1:
-                logging.warning(f"Track too short or empty: {duration}s for {self.filepath}")
-                return
-
-            # Downsampling hop for visualization
-            hop = 2048
-
-            # Calculate expected total length for pre-allocation
-            total_samples = int(duration * sr)
-            expected_length = max((total_samples // hop) + 1, 1)  # At least 1
-            logging.info(f"Expected length: {expected_length} for {self.filepath}")
-
-            # Pre-allocate arrays with zeros (will fill progressively)
-            full_bass = np.zeros(expected_length)
-            full_mid = np.zeros(expected_length)
-            full_treble = np.zeros(expected_length)
-
-            # Pre-calculate filter coefficients (reuse for all chunks)
-            sos_bass = signal.butter(4, 250, "lp", fs=sr, output="sos")
-            sos_mid = signal.butter(4, [250, 4000], "bandpass", fs=sr, output="sos")
-            sos_treble = signal.butter(4, 4000, "hp", fs=sr, output="sos")
-
-            # Process in chunks
-            offset = 0.0
-            write_index = 0
-            while offset < duration and not self._cancelled:
-                # Load chunk
-                chunk_dur = min(self.chunk_duration, duration - offset)
-                y, _ = librosa.load(
-                    self.filepath, sr=sr, mono=True, offset=offset, duration=chunk_dur
-                )
-
-                # Check if cancelled after loading or if audio is empty
-                if self._cancelled or len(y) == 0:
-                    return
-
-                # Separate frequency bands
-                bass = signal.sosfilt(sos_bass, y)
-                mid = signal.sosfilt(sos_mid, y)
-                treble = signal.sosfilt(sos_treble, y)
-
-                # Downsample for visualization
-                bass_chunk = np.abs(bass[::hop])
-                mid_chunk = np.abs(mid[::hop])
-                treble_chunk = np.abs(treble[::hop])
-
-                # Skip if chunk is empty
-                if len(bass_chunk) == 0:
-                    offset += self.chunk_duration
-                    continue
-
-                # Write to pre-allocated array at correct position
-                chunk_len = len(bass_chunk)
-                end_index = min(write_index + chunk_len, expected_length)
-                actual_len = end_index - write_index
-
-                full_bass[write_index:end_index] = bass_chunk[:actual_len]
-                full_mid[write_index:end_index] = mid_chunk[:actual_len]
-                full_treble[write_index:end_index] = treble_chunk[:actual_len]
-
-                write_index = end_index
-
-                # Emit progressive update with partial data (normalized)
-                # Only normalize non-zero portion for better visual feedback
-                current_data = write_index
-
-                # Skip progressive update if no data yet
-                if current_data == 0 or expected_length == 0:
-                    offset += self.chunk_duration
-                    continue
-
-                bass_partial = full_bass[:current_data]
-                mid_partial = full_mid[:current_data]
-                treble_partial = full_treble[:current_data]
-
-                # Normalize each band for progressive display
-                bass_norm = (
-                    bass_partial / np.max(bass_partial) if np.max(bass_partial) > 0 else bass_partial
-                )
-                mid_norm = (
-                    mid_partial / np.max(mid_partial) if np.max(mid_partial) > 0 else mid_partial
-                )
-                treble_norm = (
-                    treble_partial / np.max(treble_partial)
-                    if np.max(treble_partial) > 0
-                    else treble_partial
-                )
-
-                # Pad with zeros to expected length for stable display
-                bass_display = np.zeros(expected_length)
-                mid_display = np.zeros(expected_length)
-                treble_display = np.zeros(expected_length)
-
-                bass_display[:current_data] = bass_norm
-                mid_display[:current_data] = mid_norm
-                treble_display[:current_data] = treble_norm
-
-                chunk_data = {"bass": bass_display, "mid": mid_display, "treble": treble_display}
-                self.chunk_ready.emit(self.track_id, chunk_data)
-
-                offset += self.chunk_duration
-
-            # Final normalization - trim to actual length
-            actual_length = write_index
-
-            # Skip if no data was written (cancelled or empty file)
-            if actual_length == 0:
-                logging.warning(f"No waveform data generated for track {self.track_id}")
-                return
-
-            full_bass = full_bass[:actual_length]
-            full_mid = full_mid[:actual_length]
-            full_treble = full_treble[:actual_length]
-
-            bass_wave = full_bass / np.max(full_bass) if np.max(full_bass) > 0 else full_bass
-            mid_wave = full_mid / np.max(full_mid) if np.max(full_mid) > 0 else full_mid
-            treble_wave = (
-                full_treble / np.max(full_treble) if np.max(full_treble) > 0 else full_treble
+            # Load chunk
+            y, _ = librosa.load(
+                self.filepath, sr=self.sr, mono=True, offset=self.offset, duration=self.chunk_duration
             )
 
-            waveform_data = {"bass": bass_wave, "mid": mid_wave, "treble": treble_wave}
+            # Check if audio is empty
+            if len(y) == 0:
+                self.error.emit(self.track_id, "Empty audio chunk")
+                return
 
-            self.finished.emit(self.track_id, waveform_data)
+            # Separate frequency bands
+            bass = signal.sosfilt(self.sos_bass, y)
+            mid = signal.sosfilt(self.sos_mid, y)
+            treble = signal.sosfilt(self.sos_treble, y)
+
+            # Downsample for visualization
+            bass_chunk = np.abs(bass[:: self.hop])
+            mid_chunk = np.abs(mid[:: self.hop])
+            treble_chunk = np.abs(treble[:: self.hop])
+
+            # Emit chunk data
+            self.chunk_ready.emit(self.track_id, bass_chunk, mid_chunk, treble_chunk)
 
         except Exception as e:
-            logging.error(f"Waveform generation failed: {e}")
+            self.error.emit(self.track_id, str(e))
