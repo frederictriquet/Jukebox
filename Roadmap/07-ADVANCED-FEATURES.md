@@ -354,10 +354,10 @@ Créer `docs/USER_GUIDE.md`:
 - [ ] Tests
 
 ### Thèmes (Jours 2-3)
-- [ ] Theme manager
-- [ ] Dark/Light themes
-- [ ] Switch runtime
-- [ ] Style cohérent
+- [x] Theme manager
+- [x] Dark/Light themes
+- [x] Applied from config.ui.theme
+- [x] Style cohérent (buttons, menus, lists, sliders, toolbars, docks)
 
 ### Shortcuts (Jour 3)
 - [x] ShortcutManager

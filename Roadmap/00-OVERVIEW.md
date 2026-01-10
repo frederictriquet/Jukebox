@@ -121,7 +121,7 @@ Semaine 8-10 │ Polish, Distribution & Release
 
 **Livrables**:
 - ⏳ Mode jukebox vs curating
-- ⏳ Thèmes UI
+- ✅ Thèmes UI
 - ✅ Raccourcis clavier
 - ⏳ Optimisations Raspberry Pi
 - ⏳ Tests performance & profiling
