@@ -23,6 +23,7 @@ class WaveformVisualizerPlugin:
         self.worker: WaveformWorker | None = None
         self.current_track_id: int | None = None
         self.pending_track: tuple[int, str] | None = None  # (track_id, filepath)
+        self._cleaning_up: bool = False
 
     def initialize(self, context: Any) -> None:
         """Initialize plugin."""
@@ -154,6 +155,14 @@ class WaveformVisualizerPlugin:
 
     def shutdown(self) -> None:
         """Cleanup."""
+        # Disconnect signals first to prevent worker from accessing deleted objects
+        if self.worker:
+            try:
+                self.worker.chunk_ready.disconnect()
+                self.worker.finished.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+
         self._cleanup_worker()
 
     def __del__(self) -> None:
@@ -162,10 +171,23 @@ class WaveformVisualizerPlugin:
 
     def _cleanup_worker(self) -> None:
         """Clean up worker thread."""
-        if self.worker and self.worker.isRunning():
-            # Force terminate immediately
-            self.worker.terminate()
-            self.worker.wait()  # Wait for cleanup
+        # Prevent multiple simultaneous cleanups
+        if self._cleaning_up:
+            return
+
+        self._cleaning_up = True
+
+        try:
+            if hasattr(self, 'worker') and self.worker is not None:
+                if self.worker.isRunning():
+                    # Just set cancel flag - let worker finish naturally
+                    self.worker.cancel()
+                    # Don't terminate() or wait() - causes crashes/freezes
+                    # Worker will exit gracefully at next cancel check
+        except (RuntimeError, AttributeError):
+            pass
+        finally:
+            self._cleaning_up = False
 
 
 class WaveformWidget(QWidget):

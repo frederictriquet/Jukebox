@@ -94,13 +94,13 @@ class MainWindow(QMainWindow):
         self.search_bar.search_triggered.connect(self._perform_search)
         layout.addWidget(self.search_bar)
 
-        # Track list
+        # Track list (with stretch to take all available space)
         self.track_list = TrackList()
-        layout.addWidget(self.track_list)
+        layout.addWidget(self.track_list, stretch=1)
 
-        # Player controls
+        # Player controls (no stretch - fixed height)
         self.controls = PlayerControls()
-        layout.addWidget(self.controls)
+        layout.addWidget(self.controls, stretch=0)
 
         # Set initial volume
         self.controls.set_volume(self.config.audio.default_volume)
