@@ -21,6 +21,8 @@ class WaveformVisualizerPlugin:
         self.context: Any = None
         self.waveform_widget: WaveformWidget | None = None
         self.worker: WaveformWorker | None = None
+        self.current_track_id: int | None = None
+        self.pending_track: tuple[int, str] | None = None  # (track_id, filepath)
 
     def initialize(self, context: Any) -> None:
         """Initialize plugin."""
@@ -57,6 +59,9 @@ class WaveformVisualizerPlugin:
         if not self.waveform_widget:
             return
 
+        # Store current track ID
+        self.current_track_id = track_id
+
         # Check cache
         cached = self.context.database.conn.execute(
             "SELECT waveform_data FROM waveform_cache WHERE track_id = ?", (track_id,)
@@ -90,12 +95,14 @@ class WaveformVisualizerPlugin:
 
     def _generate_waveform(self, track_id: int, filepath: str) -> None:
         """Generate waveform in background thread."""
-        # Stop any existing worker
+        # Clear waveform display immediately
+        if self.waveform_widget:
+            self.waveform_widget.clear_waveform()
+
+        # If a worker is already running, save as pending and skip
         if self.worker and self.worker.isRunning():
-            self.worker.quit()
-            self.worker.wait(1000)  # Wait max 1 second
-            if self.worker.isRunning():
-                self.worker.terminate()
+            self.pending_track = (track_id, filepath)
+            return
 
         # Start new worker
         self.worker = WaveformWorker(
@@ -107,6 +114,10 @@ class WaveformVisualizerPlugin:
 
     def _on_waveform_chunk(self, track_id: int, partial_waveform: Any) -> None:
         """Handle progressive waveform chunk (main thread)."""
+        # Only display if this is still the current track
+        if track_id != self.current_track_id:
+            return
+
         # Display partial waveform immediately
         if self.waveform_widget:
             self.waveform_widget.display_waveform(partial_waveform)
@@ -131,15 +142,25 @@ class WaveformVisualizerPlugin:
         except Exception as e:
             logging.error(f"Failed to cache waveform: {e}")
 
-        # Display
-        if self.waveform_widget:
+        # Only display if this is still the current track
+        if track_id == self.current_track_id and self.waveform_widget:
             self.waveform_widget.display_waveform(waveform)
+
+        # If there's a pending track request, process it now
+        if self.pending_track:
+            pending_id, pending_path = self.pending_track
+            self.pending_track = None
+            self._generate_waveform(pending_id, pending_path)
 
     def shutdown(self) -> None:
         """Cleanup."""
         if self.worker and self.worker.isRunning():
+            self.worker.cancel()
             self.worker.quit()
-            self.worker.wait()
+            # Don't wait indefinitely - force terminate if needed
+            if not self.worker.wait(500):
+                self.worker.terminate()
+                self.worker.wait(100)
 
 
 class WaveformWidget(QWidget):
@@ -294,6 +315,11 @@ class WaveformWorker(QThread):
         self.track_id = track_id
         self.filepath = filepath
         self.chunk_duration = chunk_duration  # seconds per chunk
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        """Cancel the waveform generation."""
+        self._cancelled = True
 
     def run(self) -> None:
         """Generate 3-color waveform (bass/mid/treble) progressively."""
@@ -302,15 +328,26 @@ class WaveformWorker(QThread):
             from scipy import signal
 
             # Get audio info first to know total duration
-            duration = librosa.get_duration(path=self.filepath)
+            try:
+                duration = librosa.get_duration(path=self.filepath)
+            except Exception as e:
+                logging.error(f"Failed to get duration for {self.filepath}: {e}")
+                return
+
             sr = 11025  # Target sample rate
+
+            # Skip if duration is zero or very short
+            if duration < 0.1:
+                logging.warning(f"Track too short or empty: {duration}s for {self.filepath}")
+                return
 
             # Downsampling hop for visualization
             hop = 2048
 
             # Calculate expected total length for pre-allocation
             total_samples = int(duration * sr)
-            expected_length = (total_samples // hop) + 1
+            expected_length = max((total_samples // hop) + 1, 1)  # At least 1
+            logging.info(f"Expected length: {expected_length} for {self.filepath}")
 
             # Pre-allocate arrays with zeros (will fill progressively)
             full_bass = np.zeros(expected_length)
@@ -325,12 +362,16 @@ class WaveformWorker(QThread):
             # Process in chunks
             offset = 0.0
             write_index = 0
-            while offset < duration:
+            while offset < duration and not self._cancelled:
                 # Load chunk
                 chunk_dur = min(self.chunk_duration, duration - offset)
                 y, _ = librosa.load(
                     self.filepath, sr=sr, mono=True, offset=offset, duration=chunk_dur
                 )
+
+                # Check if cancelled after loading or if audio is empty
+                if self._cancelled or len(y) == 0:
+                    return
 
                 # Separate frequency bands
                 bass = signal.sosfilt(sos_bass, y)
@@ -341,6 +382,11 @@ class WaveformWorker(QThread):
                 bass_chunk = np.abs(bass[::hop])
                 mid_chunk = np.abs(mid[::hop])
                 treble_chunk = np.abs(treble[::hop])
+
+                # Skip if chunk is empty
+                if len(bass_chunk) == 0:
+                    offset += self.chunk_duration
+                    continue
 
                 # Write to pre-allocated array at correct position
                 chunk_len = len(bass_chunk)
@@ -389,6 +435,12 @@ class WaveformWorker(QThread):
 
             # Final normalization - trim to actual length
             actual_length = write_index
+
+            # Skip if no data was written (cancelled or empty file)
+            if actual_length == 0:
+                logging.warning(f"No waveform data generated for track {self.track_id}")
+                return
+
             full_bass = full_bass[:actual_length]
             full_mid = full_mid[:actual_length]
             full_treble = full_treble[:actual_length]
