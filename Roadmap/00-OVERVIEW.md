@@ -120,7 +120,7 @@ Semaine 8-10 │ Polish, Distribution & Release
 **Objectif**: Fonctionnalités avancées et optimisations
 
 **Livrables**:
-- ⏳ Mode jukebox vs curating
+- ✅ Mode jukebox vs curating
 - ✅ Thèmes UI
 - ✅ Raccourcis clavier
 - ⏳ Optimisations Raspberry Pi

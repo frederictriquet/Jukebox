@@ -274,14 +274,16 @@ class MainWindow(QMainWindow):
         plugins_dir = Path(__file__).parent.parent.parent / "plugins"
         context = PluginContext(self)
         self.plugin_manager = PluginManager(plugins_dir, context)
-        ui_builder = UIBuilder(self)
+        self.ui_builder = UIBuilder(self)
 
-        loaded = self.plugin_manager.load_all_plugins()
-        logging.info(f"Loaded {loaded} plugins")
+        # Load plugins for current mode
+        current_mode = self.config.ui.mode
+        loaded = self.plugin_manager.load_all_plugins(mode=current_mode)
+        logging.info(f"Loaded {loaded} plugins for {current_mode} mode")
 
         # Register plugin UIs and shortcuts
         for plugin in self.plugin_manager.get_all_plugins():
-            plugin.register_ui(ui_builder)
+            plugin.register_ui(self.ui_builder)
             if hasattr(plugin, "register_shortcuts"):
                 plugin.register_shortcuts(self.shortcut_manager)
 

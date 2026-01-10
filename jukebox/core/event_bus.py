@@ -19,6 +19,31 @@ class EventBus:
         self.subscribers[event].append(callback)
         logging.debug(f"Subscribed to event: {event}")
 
+    def unsubscribe(self, event: str, callback: Callable[..., None]) -> bool:
+        """Unsubscribe from event.
+
+        Args:
+            event: Event name
+            callback: Callback to remove
+
+        Returns:
+            True if unsubscribed, False if not found
+        """
+        if event not in self.subscribers:
+            return False
+
+        try:
+            self.subscribers[event].remove(callback)
+            logging.debug(f"Unsubscribed from event: {event}")
+            return True
+        except ValueError:
+            return False
+
+    def clear_all_subscribers(self) -> None:
+        """Clear all subscribers from all events."""
+        self.subscribers.clear()
+        logging.debug("Cleared all event subscribers")
+
     def emit(self, event: str, **data: Any) -> None:
         """Emit event."""
         if event not in self.subscribers:

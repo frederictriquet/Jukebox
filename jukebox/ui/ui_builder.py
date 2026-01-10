@@ -13,10 +13,21 @@ class UIBuilder:
     def __init__(self, main_window: Any):
         """Initialize UI builder."""
         self.main_window = main_window
+        self.plugin_menus: list[QMenu] = []
 
     def add_menu(self, name: str) -> QMenu:
-        """Add menu to menubar."""
-        return cast(QMenu, self.main_window.menuBar().addMenu(name))
+        """Add menu to menubar and track it."""
+        menu = cast(QMenu, self.main_window.menuBar().addMenu(name))
+        self.plugin_menus.append(menu)
+        return menu
+
+    def clear_plugin_menus(self) -> None:
+        """Clear all menus added by plugins."""
+        menubar = self.main_window.menuBar()
+        for menu in self.plugin_menus:
+            menubar.removeAction(menu.menuAction())
+            menu.deleteLater()
+        self.plugin_menus.clear()
 
     def add_menu_action(
         self, menu: QMenu, text: str, callback: Callable[[], None], shortcut: str | None = None

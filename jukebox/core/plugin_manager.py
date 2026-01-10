@@ -83,16 +83,32 @@ class PluginManager:
             logging.error(f"Failed to load plugin {plugin_name}: {e}")
             return False
 
-    def load_all_plugins(self) -> int:
-        """Load all plugins."""
+    def load_all_plugins(self, mode: str | None = None) -> int:
+        """Load all plugins for the current mode.
+
+        Args:
+            mode: Optional mode ("jukebox" or "curating"). If None, uses enabled list.
+
+        Returns:
+            Number of plugins loaded
+        """
         loaded = 0
         enabled_plugins = getattr(self.context.config, "plugins", None)
-        enabled_list = enabled_plugins.enabled if enabled_plugins else None
+
+        # Determine which plugins to load based on mode
+        if mode and enabled_plugins:
+            mode_attr = f"{mode}_mode"
+            enabled_list = getattr(enabled_plugins, mode_attr, None)
+            # Fallback to enabled if mode-specific list not defined
+            if enabled_list is None:
+                enabled_list = enabled_plugins.enabled
+        else:
+            enabled_list = enabled_plugins.enabled if enabled_plugins else None
 
         for plugin_name in self.discover_plugins():
-            # Check if plugin is enabled in config
+            # Check if plugin is enabled for this mode
             if enabled_list and plugin_name not in enabled_list:
-                logging.info(f"Plugin {plugin_name} disabled in config")
+                logging.info(f"Plugin {plugin_name} disabled in {mode or 'default'} mode")
                 continue
 
             if self.load_plugin(plugin_name):
@@ -102,3 +118,36 @@ class PluginManager:
     def get_all_plugins(self) -> list[Any]:
         """Get all loaded plugins."""
         return list(self.plugins.values())
+
+    def unload_all_plugins(self) -> None:
+        """Unload all plugins and call their shutdown methods."""
+        for plugin in list(self.plugins.values()):
+            try:
+                plugin.shutdown()
+                logging.info(f"Unloaded plugin: {plugin.name}")
+            except Exception as e:
+                logging.error(f"Error shutting down plugin {plugin.name}: {e}")
+
+        self.plugins.clear()
+
+    def reload_plugins_for_mode(self, mode: str, ui_builder: Any) -> int:
+        """Reload plugins for a different mode.
+
+        Args:
+            mode: Mode to load plugins for ("jukebox" or "curating")
+            ui_builder: UIBuilder instance for plugin UI registration
+
+        Returns:
+            Number of plugins loaded
+        """
+        # Unload all current plugins
+        self.unload_all_plugins()
+
+        # Load plugins for new mode
+        loaded = self.load_all_plugins(mode=mode)
+
+        # Register plugin UIs
+        for plugin in self.get_all_plugins():
+            plugin.register_ui(ui_builder)
+
+        return loaded

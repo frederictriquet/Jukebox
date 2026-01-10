@@ -348,10 +348,12 @@ Créer `docs/USER_GUIDE.md`:
 ## Checklist Phase 7
 
 ### Modes (Jours 1-2)
-- [ ] Mode manager créé
-- [ ] UI adapte au mode
-- [ ] Switch fluide
-- [ ] Tests
+- [x] Mode manager créé (jukebox/core/mode_manager.py)
+- [x] Mode switcher plugin with Mode menu
+- [x] UI adapts based on mode (hides Tools menu in jukebox mode)
+- [x] Runtime mode switching (Ctrl+M toggle)
+- [x] Configurable in config.ui.mode
+- [x] Tests
 
 ### Thèmes (Jours 2-3)
 - [x] Theme manager (jukebox/ui/theme_manager.py)

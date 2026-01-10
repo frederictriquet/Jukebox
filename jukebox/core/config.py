@@ -21,6 +21,7 @@ class UIConfig(BaseModel):
     window_width: int = Field(ge=640, default=1024)
     window_height: int = Field(ge=480, default=768)
     theme: str = "dark"
+    mode: str = "jukebox"
 
 
 class ShortcutsConfig(BaseModel):
@@ -64,6 +65,8 @@ class PluginsConfig(BaseModel):
         "file_curator",
         "waveform_visualizer",
     ]
+    jukebox_mode: list[str] | None = None
+    curating_mode: list[str] | None = None
 
 
 class JukeboxConfig(BaseModel):
