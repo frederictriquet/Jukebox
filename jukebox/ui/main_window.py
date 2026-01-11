@@ -119,6 +119,9 @@ class MainWindow(QMainWindow):
         # Track selection
         self.track_list.track_selected.connect(self._load_and_play)
 
+        # Drag and drop
+        self.track_list.files_dropped.connect(self._on_files_dropped)
+
         # Player controls
         self.controls.play_clicked.connect(self._on_play)
         self.controls.pause_clicked.connect(self._on_pause)
@@ -221,6 +224,29 @@ class MainWindow(QMainWindow):
     def _on_tracks_changed(self) -> None:
         """Handle tracks added/changed event - reload track list."""
         self._load_tracks_from_db()
+
+    def _on_files_dropped(self, paths: list[Path]) -> None:
+        """Handle files/directories dropped on track list."""
+        from jukebox.utils.scanner import FileScanner
+        from jukebox.utils.metadata import MetadataExtractor
+
+        # Scan all paths (files and directories)
+        for path in paths:
+            if path.is_file():
+                # Single file - check if it's a supported format
+                if path.suffix.lower().lstrip('.') in self.config.audio.supported_formats:
+                    # Extract metadata and add to database
+                    metadata = MetadataExtractor.extract(path)
+                    self.database.add_track(metadata)
+            elif path.is_dir():
+                # Directory - scan recursively
+                scanner = FileScanner(self.database, self.config.audio.supported_formats)
+                scanner.scan_directory(path, recursive=True)
+
+        # Emit event to notify plugins
+        from jukebox.core.event_bus import Events
+
+        self.event_bus.emit(Events.TRACKS_ADDED)
 
     def _load_and_play(self, filepath: Path) -> None:
         """Load and play selected track.

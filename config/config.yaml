@@ -43,7 +43,7 @@ waveform:
   mid_color: "#00FF00" # Green
   treble_color: "#FFFFFF" # White
   cursor_color: "#FFFFFF" # White
-  height: 60
+  height: 40
   chunk_duration: 10.0 # Duration in seconds for progressive waveform calculation
 
 metadata_editor:
@@ -52,10 +52,10 @@ metadata_editor:
       label: "Artist"
     - tag: "title"
       label: "Title"
-    - tag: "album"
-      label: "Album"
-    - tag: "albumartist"
-      label: "Album Artist"
+    # - tag: "album"
+    #   label: "Album"
+    # - tag: "albumartist"
+    #   label: "Album Artist"
     - tag: "genre"
       label: "Genre"
     - tag: "date"
