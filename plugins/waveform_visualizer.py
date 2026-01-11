@@ -53,8 +53,7 @@ class WaveformVisualizerPlugin:
 
     def _on_seek_requested(self, position: float) -> None:
         """Handle seek request from waveform click."""
-        if self.context.app and hasattr(self.context.app, "player"):
-            self.context.app.player.set_position(position)
+        self.context.player.set_position(position)
 
     def _on_track_loaded(self, track_id: int) -> None:
         """Generate and show waveform."""

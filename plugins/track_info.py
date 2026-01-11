@@ -34,14 +34,12 @@ class TrackInfoPlugin:
 
         # Get player controls and insert info widget between stop and volume
         main_window = self.context.app
-        if hasattr(main_window, "controls"):
-            controls = main_window.controls
-            if hasattr(controls, "layout"):
-                layout = controls.layout()
-                # Insert after stop button (index 3) and before volume slider
-                # Layout: play (0), pause (1), stop (2), spacer (3), volume label (4), volume (5)
-                # We want to insert at index 4 (before volume label)
-                ui_builder.insert_widget_in_layout(layout, 4, self.info_widget)
+        controls = main_window.controls
+        layout = controls.layout()
+        # Insert after stop button (index 3) and before volume slider
+        # Layout: play (0), pause (1), stop (2), spacer (3), volume label (4), volume (5)
+        # We want to insert at index 4 (before volume label)
+        ui_builder.insert_widget_in_layout(layout, 4, self.info_widget)
 
     def _on_track_loaded(self, track_id: int) -> None:
         """Handle track loaded event."""
@@ -70,10 +68,11 @@ class TrackInfoPlugin:
             return
 
         # Get current track duration
-        if hasattr(self.context.app.player, "current_file") and self.context.app.player.current_file:
+        current_file = self.context.player.current_file
+        if current_file:
             track = self.context.database.conn.execute(
                 "SELECT duration_seconds FROM tracks WHERE filepath = ?",
-                (str(self.context.app.player.current_file),),
+                (str(current_file),),
             ).fetchone()
 
             if track and track["duration_seconds"]:

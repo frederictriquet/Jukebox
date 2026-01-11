@@ -52,7 +52,8 @@ class PlaybackNavigationPlugin:
         from PySide6.QtWidgets import QPushButton
 
         main_window = self.context.app
-        if hasattr(main_window, "controls") and hasattr(main_window.controls, "layout"):
+        controls = main_window.controls
+        if controls.layout():
             # Auto-play button
             self.auto_play_button = QPushButton("↻")
             self.auto_play_button.setCheckable(True)
@@ -159,9 +160,6 @@ class PlaybackNavigationPlugin:
         Returns:
             Duration in seconds or None
         """
-        if not hasattr(self.context.player, "current_file"):
-            return None
-
         current_file = self.context.player.current_file
         if not current_file:
             return None
@@ -174,15 +172,11 @@ class PlaybackNavigationPlugin:
 
     def _next_track(self) -> None:
         """Play next track in list."""
-        main_window = self.context.app
-        if hasattr(main_window, "track_list"):
-            main_window.track_list.select_next_track()
+        self.context.app.track_list.select_next_track()
 
     def _previous_track(self) -> None:
         """Play previous track in list."""
-        main_window = self.context.app
-        if hasattr(main_window, "track_list"):
-            main_window.track_list.select_previous_track()
+        self.context.app.track_list.select_previous_track()
 
     def _jump_to_percent(self, percent: float) -> None:
         """Jump to specific percentage of track.
@@ -206,15 +200,13 @@ class PlaybackNavigationPlugin:
         """Play a random track from the list."""
         import random
 
-        main_window = self.context.app
-        if hasattr(main_window, "track_list"):
-            track_list = main_window.track_list
-            if track_list.count() > 0:
-                random_row = random.randint(0, track_list.count() - 1)
-                track_list.setCurrentRow(random_row)
-                item = track_list.item(random_row)
-                if item:
-                    track_list._on_item_clicked(item)
+        track_list = self.context.app.track_list
+        if track_list.count() > 0:
+            random_row = random.randint(0, track_list.count() - 1)
+            track_list.setCurrentRow(random_row)
+            item = track_list.item(random_row)
+            if item:
+                track_list._on_item_clicked(item)
 
     def _toggle_auto_play_from_menu(self) -> None:
         """Toggle auto-play from menu action."""

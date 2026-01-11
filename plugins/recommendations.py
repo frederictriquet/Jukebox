@@ -34,14 +34,13 @@ class RecommendationsPlugin:
         self.context.emit(Events.SEARCH_PERFORMED, results=recommendations)
 
         # For now, just display in track list
-        if hasattr(self.context.app, "track_list"):
-            self.context.app.track_list.clear_tracks()
-            for track in recommendations:
-                from pathlib import Path
+        from pathlib import Path
 
-                self.context.app.track_list.add_track(
-                    Path(track["filepath"]), track["title"], track["artist"]
-                )
+        self.context.app.track_list.clear_tracks()
+        for track in recommendations:
+            self.context.app.track_list.add_track(
+                Path(track["filepath"]), track["title"], track["artist"]
+            )
 
     def _get_recommendations(self, limit: int = 10) -> list[Any]:
         """Get track recommendations."""

@@ -85,17 +85,15 @@ class ModeSwitcherPlugin:
 
         try:
             # Clear event bus subscribers from old plugins
-            if hasattr(main_window, "event_bus"):
-                main_window.event_bus.clear_all_subscribers()
+            main_window.event_bus.clear_all_subscribers()
 
             # Clear plugin UI elements
-            if hasattr(main_window, "ui_builder"):
-                logging.info(
-                    f"Clearing {len(main_window.ui_builder.plugin_menus)} menus "
-                    f"and {len(main_window.ui_builder.plugin_widgets)} widgets"
-                )
-                main_window.ui_builder.clear_plugin_menus()
-                main_window.ui_builder.clear_all_plugin_widgets()
+            logging.info(
+                f"Clearing {len(main_window.ui_builder.plugin_menus)} menus "
+                f"and {len(main_window.ui_builder.plugin_widgets)} widgets"
+            )
+            main_window.ui_builder.clear_plugin_menus()
+            main_window.ui_builder.clear_all_plugin_widgets()
 
             # Clear plugin toolbar if it exists
             if hasattr(main_window, "_plugin_toolbar"):
@@ -112,10 +110,9 @@ class ModeSwitcherPlugin:
             )
 
             # Re-register shortcuts for new plugins
-            if hasattr(main_window, "shortcut_manager"):
-                for plugin in main_window.plugin_manager.get_all_plugins():
-                    if hasattr(plugin, "register_shortcuts"):
-                        plugin.register_shortcuts(main_window.shortcut_manager)
+            for plugin in main_window.plugin_manager.get_all_plugins():
+                if hasattr(plugin, "register_shortcuts"):
+                    plugin.register_shortcuts(main_window.shortcut_manager)
 
             # Re-emit current track loaded event if a track is playing
             if hasattr(main_window.player, "current_file") and main_window.player.current_file:

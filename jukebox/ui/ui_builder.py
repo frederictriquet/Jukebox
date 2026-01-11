@@ -62,11 +62,10 @@ class UIBuilder:
     def add_bottom_widget(self, widget: QWidget) -> None:
         """Add widget at bottom of main layout and track it."""
         # Access main layout and add widget at bottom
-        if hasattr(self.main_window, "centralWidget"):
-            central = self.main_window.centralWidget()
-            if central and central.layout():
-                central.layout().addWidget(widget)
-                self.plugin_widgets.append(widget)
+        central = self.main_window.centralWidget()
+        if central and central.layout():
+            central.layout().addWidget(widget)
+            self.plugin_widgets.append(widget)
 
     def insert_widget_in_layout(
         self, layout: Any, index: int, widget: QWidget
