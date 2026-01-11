@@ -92,6 +92,7 @@ plugins:
     - recommendations
     - file_curator
     - waveform_visualizer
+    - audio_analyzer
 
 logging:
   level: "INFO"

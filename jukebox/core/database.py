@@ -138,6 +138,26 @@ class Database:
         """
         )
 
+        # Audio analysis
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS audio_analysis (
+                track_id INTEGER PRIMARY KEY,
+                tempo REAL,
+                energy REAL,
+                bass_energy REAL,
+                mid_energy REAL,
+                treble_energy REAL,
+                spectral_centroid REAL,
+                zero_crossing_rate REAL,
+                rms_energy REAL,
+                dynamic_range REAL,
+                analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+            )
+        """
+        )
+
         self.conn.commit()
 
     def add_track(self, track_data: dict[str, Any]) -> int:

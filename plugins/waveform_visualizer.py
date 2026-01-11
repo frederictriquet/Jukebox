@@ -311,6 +311,34 @@ class WaveformVisualizerPlugin:
         full_mid = gen["full_mid"][:actual_length]
         full_treble = gen["full_treble"][:actual_length]
 
+        # Calculate audio analysis metrics from waveform data
+        bass_energy = float(np.mean(full_bass))
+        mid_energy = float(np.mean(full_mid))
+        treble_energy = float(np.mean(full_treble))
+        energy = bass_energy + mid_energy + treble_energy
+        dynamic_range = float(
+            20 * np.log10(np.max(full_bass + full_mid + full_treble) + 1e-10)
+            - 20 * np.log10(np.mean(full_bass + full_mid + full_treble) + 1e-10)
+        )
+
+        # Store analysis in database
+        try:
+            self.context.database.conn.execute(
+                """
+                INSERT OR REPLACE INTO audio_analysis (
+                    track_id, energy, bass_energy, mid_energy, treble_energy, dynamic_range
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+            """,
+                (gen["track_id"], energy, bass_energy, mid_energy, treble_energy, dynamic_range),
+            )
+            self.context.database.conn.commit()
+
+            # Emit event to notify that analysis is complete
+            self.context.emit("audio_analysis_complete", track_id=gen["track_id"])
+        except Exception as e:
+            logging.error(f"Failed to save audio analysis: {e}")
+
         # Final normalization
         bass_wave = full_bass / np.max(full_bass) if np.max(full_bass) > 0 else full_bass
         mid_wave = full_mid / np.max(full_mid) if np.max(full_mid) > 0 else full_mid
