@@ -71,6 +71,27 @@ class WaveformConfig(BaseModel):
     chunk_duration: float = Field(gt=0, default=10.0)
 
 
+class MetadataFieldConfig(BaseModel):
+    """Configuration for a single metadata field."""
+
+    tag: str
+    label: str
+    width: int | None = None
+
+
+class MetadataEditorConfig(BaseModel):
+    """Metadata editor configuration."""
+
+    fields: list[MetadataFieldConfig] = [
+        MetadataFieldConfig(tag="artist", label="Artist"),
+        MetadataFieldConfig(tag="title", label="Title"),
+        MetadataFieldConfig(tag="album", label="Album"),
+        MetadataFieldConfig(tag="albumartist", label="Album Artist"),
+        MetadataFieldConfig(tag="genre", label="Genre"),
+        MetadataFieldConfig(tag="date", label="Year", width=80),
+    ]
+
+
 class PluginsConfig(BaseModel):
     """Plugins configuration."""
 
@@ -96,6 +117,7 @@ class JukeboxConfig(BaseModel):
         default_factory=PlaybackNavigationConfig
     )
     waveform: WaveformConfig = Field(default_factory=WaveformConfig)
+    metadata_editor: MetadataEditorConfig = Field(default_factory=MetadataEditorConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     logging: LoggingConfig
 

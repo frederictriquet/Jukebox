@@ -46,6 +46,22 @@ waveform:
   height: 60
   chunk_duration: 10.0 # Duration in seconds for progressive waveform calculation
 
+metadata_editor:
+  fields:
+    - tag: "artist"
+      label: "Artist"
+    - tag: "title"
+      label: "Title"
+    - tag: "album"
+      label: "Album"
+    - tag: "albumartist"
+      label: "Album Artist"
+    - tag: "genre"
+      label: "Genre"
+    - tag: "date"
+      label: "Year"
+      width: 80
+
 plugins:
   enabled:
     - mode_switcher

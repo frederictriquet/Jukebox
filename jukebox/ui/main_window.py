@@ -55,6 +55,11 @@ class MainWindow(QMainWindow):
         # Event bus
         self.event_bus = EventBus()
 
+        # Subscribe to events
+        from jukebox.core.event_bus import Events
+
+        self.event_bus.subscribe(Events.TRACKS_ADDED, self._on_tracks_changed)
+
         # Timer for updating position
         self.position_timer = QTimer()
         self.position_timer.setInterval(100)
@@ -212,6 +217,10 @@ class MainWindow(QMainWindow):
         tracks = self.database.get_all_tracks()
         for track in tracks:
             self.track_list.add_track(Path(track["filepath"]), track["title"], track["artist"])
+
+    def _on_tracks_changed(self) -> None:
+        """Handle tracks added/changed event - reload track list."""
+        self._load_tracks_from_db()
 
     def _load_and_play(self, filepath: Path) -> None:
         """Load and play selected track.
