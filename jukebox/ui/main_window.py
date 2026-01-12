@@ -100,7 +100,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.search_bar)
 
         # Track list (with stretch to take all available space)
-        self.track_list = TrackList()
+        self.track_list = TrackList(database=self.database, event_bus=self.event_bus)
         layout.addWidget(self.track_list, stretch=1)
 
         # Player controls (no stretch - fixed height)
@@ -215,24 +215,33 @@ class MainWindow(QMainWindow):
         self.track_list.clear_tracks()
         tracks = self.database.get_all_tracks() if not query else self.database.search_tracks(query)
         for track in tracks:
-            self.track_list.add_track(Path(track["filepath"]), track["title"], track["artist"])
+            self.track_list.add_track(
+                Path(track["filepath"]),
+                track["title"],
+                track["artist"],
+                track["genre"] if "genre" in track.keys() else None,
+                track["duration_seconds"] if "duration_seconds" in track.keys() else None,
+            )
 
         # Restore selection of current playing track
         if current_track:
-            for i in range(self.track_list.count()):
-                item = self.track_list.item(i)
-                if item:
-                    item_path = item.data(Qt.ItemDataRole.UserRole)
-                    if item_path == current_track:
-                        self.track_list.setCurrentRow(i)
-                        break
+            model = self.track_list.model()
+            row = model.find_row_by_filepath(current_track)
+            if row >= 0:
+                self.track_list.selectRow(row)
 
     def _load_tracks_from_db(self) -> None:
         """Load all tracks from database."""
         self.track_list.clear_tracks()
         tracks = self.database.get_all_tracks()
         for track in tracks:
-            self.track_list.add_track(Path(track["filepath"]), track["title"], track["artist"])
+            self.track_list.add_track(
+                Path(track["filepath"]),
+                track["title"],
+                track["artist"],
+                track["genre"] if "genre" in track.keys() else None,
+                track["duration_seconds"] if "duration_seconds" in track.keys() else None,
+            )
 
     def _on_tracks_changed(self) -> None:
         """Handle tracks added/changed event - reload track list."""
@@ -246,13 +255,10 @@ class MainWindow(QMainWindow):
 
         # Restore selection of current playing track
         if current_track:
-            for i in range(self.track_list.count()):
-                item = self.track_list.item(i)
-                if item:
-                    item_path = item.data(Qt.ItemDataRole.UserRole)
-                    if item_path == current_track:
-                        self.track_list.setCurrentRow(i)
-                        break
+            model = self.track_list.model()
+            row = model.find_row_by_filepath(current_track)
+            if row >= 0:
+                self.track_list.selectRow(row)
 
     def _on_files_dropped(self, paths: list[Path]) -> None:
         """Handle files/directories dropped on track list."""

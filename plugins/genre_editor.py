@@ -145,6 +145,10 @@ class GenreEditorPlugin:
         )
         self.context.database.conn.commit()
 
+        # Emit event to update track list display
+        from pathlib import Path
+        self.context.emit("track_metadata_updated", filepath=Path(filepath))
+
         # Update file tags
         try:
             from mutagen import File
