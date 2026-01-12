@@ -12,11 +12,14 @@ class ModeSwitcherPlugin:
     name = "mode_switcher"
     version = "1.0.0"
     description = "Switch between jukebox and curating modes"
+    modes = ["jukebox", "curating"]  # Active in all modes
 
     def __init__(self) -> None:
         """Initialize plugin."""
         self.context: Any = None
         self.mode_manager: ModeManager | None = None
+        self.jukebox_action: Any = None
+        self.curating_action: Any = None
 
     def initialize(self, context: Any) -> None:
         """Initialize plugin."""
@@ -36,12 +39,21 @@ class ModeSwitcherPlugin:
         """Register mode switcher in menu."""
         menu = ui_builder.add_menu("&Mode")
 
-        ui_builder.add_menu_action(
+        # Create checkable actions for modes
+        self.jukebox_action = ui_builder.add_menu_action(
             menu, "Jukebox Mode", lambda: self._set_mode(AppMode.JUKEBOX)
         )
-        ui_builder.add_menu_action(
+        self.jukebox_action.setCheckable(True)
+
+        self.curating_action = ui_builder.add_menu_action(
             menu, "Curating Mode", lambda: self._set_mode(AppMode.CURATING)
         )
+        self.curating_action.setCheckable(True)
+
+        # Set initial check based on current mode
+        if self.mode_manager:
+            self._update_menu_checks(self.mode_manager.get_mode())
+
         menu.addSeparator()
         ui_builder.add_menu_action(menu, "Toggle Mode", self._toggle_mode, shortcut="Ctrl+M")
 
@@ -55,9 +67,19 @@ class ModeSwitcherPlugin:
         if self.mode_manager:
             self.mode_manager.toggle_mode()
 
+    def _update_menu_checks(self, mode: AppMode) -> None:
+        """Update menu checkmarks to reflect current mode."""
+        if self.jukebox_action:
+            self.jukebox_action.setChecked(mode == AppMode.JUKEBOX)
+        if self.curating_action:
+            self.curating_action.setChecked(mode == AppMode.CURATING)
+
     def _on_mode_changed(self, mode: AppMode) -> None:
         """Handle mode change and reload plugins."""
         logging.info(f"Switching to {mode.value} mode...")
+
+        # Update menu checks
+        self._update_menu_checks(mode)
 
         main_window = self.context.app
 
@@ -84,39 +106,13 @@ class ModeSwitcherPlugin:
         main_window.setUpdatesEnabled(False)
 
         try:
-            # Clear event bus subscribers from old plugins
-            main_window.event_bus.clear_all_subscribers()
-
-            # Clear plugin UI elements
-            logging.info(
-                f"Clearing {len(main_window.ui_builder.plugin_menus)} menus "
-                f"and {len(main_window.ui_builder.plugin_widgets)} widgets"
-            )
-            main_window.ui_builder.clear_plugin_menus()
-            main_window.ui_builder.clear_all_plugin_widgets()
-
-            # Clear plugin toolbar if it exists
-            if hasattr(main_window, "_plugin_toolbar"):
-                main_window.removeToolBar(main_window._plugin_toolbar)
-                main_window._plugin_toolbar.deleteLater()
-                delattr(main_window, "_plugin_toolbar")
-
-            # Create new UIBuilder for new plugin set
-            from jukebox.ui.ui_builder import UIBuilder
-
-            main_window.ui_builder = UIBuilder(main_window)
-            loaded = main_window.plugin_manager.reload_plugins_for_mode(
-                mode.value, main_window.ui_builder
-            )
-
-            # Re-register shortcuts for new plugins
-            for plugin in main_window.plugin_manager.get_all_plugins():
-                if hasattr(plugin, "register_shortcuts"):
-                    plugin.register_shortcuts(main_window.shortcut_manager)
+            # Switch mode (plugins stay loaded, just activate/deactivate)
+            # Event subscriptions remain active
+            main_window.plugin_manager.switch_mode(mode.value)
 
             # Re-emit current track loaded event if a track is playing
+            # (so newly activated plugins can update their UI)
             if hasattr(main_window.player, "current_file") and main_window.player.current_file:
-                # Find current track ID
                 track = main_window.database.conn.execute(
                     "SELECT id FROM tracks WHERE filepath = ?",
                     (str(main_window.player.current_file),),
@@ -126,7 +122,7 @@ class ModeSwitcherPlugin:
 
                     main_window.event_bus.emit(Events.TRACK_LOADED, track_id=track["id"])
 
-            logging.info(f"Reloaded {loaded} plugins for {mode.value} mode")
+            logging.info(f"Switched to {mode.value} mode")
 
         finally:
             # Re-enable updates
@@ -146,6 +142,16 @@ class ModeSwitcherPlugin:
         # Ctrl+M is already registered via menu action
         pass
 
+    def activate(self, mode: str) -> None:
+        """Activate plugin for this mode."""
+        # Mode switcher always active
+        pass
+
+    def deactivate(self, mode: str) -> None:
+        """Deactivate plugin for this mode."""
+        # Mode switcher always active
+        pass
+
     def shutdown(self) -> None:
-        """Cleanup."""
+        """Cleanup on application exit."""
         pass

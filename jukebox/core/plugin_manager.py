@@ -13,17 +13,26 @@ class JukeboxPlugin(Protocol):
     name: str
     version: str
     description: str
+    modes: list[str]  # Modes where this plugin is active (default: all modes)
 
     def initialize(self, context: Any) -> None:
-        """Called when plugin is loaded."""
+        """Called when plugin is loaded (once at startup)."""
         ...
 
     def register_ui(self, ui_builder: Any) -> None:
-        """Register UI elements."""
+        """Register UI elements (once at startup)."""
+        ...
+
+    def activate(self, mode: str) -> None:
+        """Called when entering a mode where this plugin is active."""
+        ...
+
+    def deactivate(self, mode: str) -> None:
+        """Called when leaving a mode where this plugin is active."""
         ...
 
     def shutdown(self) -> None:
-        """Called when plugin is unloaded."""
+        """Called when application closes (once at exit)."""
         ...
 
 
@@ -57,6 +66,7 @@ class PluginManager:
         self.plugins_dir = plugins_dir
         self.context = context
         self.plugins: dict[str, Any] = {}
+        self.current_mode: str | None = None
 
     def discover_plugins(self) -> list[str]:
         """Discover available plugins."""
@@ -84,35 +94,48 @@ class PluginManager:
             return False
 
     def load_all_plugins(self, mode: str | None = None) -> int:
-        """Load all plugins for the current mode.
+        """Load all plugins (called once at startup).
 
         Args:
-            mode: Optional mode ("jukebox" or "curating"). If None, uses enabled list.
+            mode: Initial mode ("jukebox" or "curating")
 
         Returns:
             Number of plugins loaded
         """
         loaded = 0
         enabled_plugins = getattr(self.context.config, "plugins", None)
+        enabled_list = enabled_plugins.enabled if enabled_plugins else None
 
-        # Determine which plugins to load based on mode
-        if mode and enabled_plugins:
-            mode_attr = f"{mode}_mode"
-            enabled_list = getattr(enabled_plugins, mode_attr, None)
-            # Fallback to enabled if mode-specific list not defined
-            if enabled_list is None:
-                enabled_list = enabled_plugins.enabled
-        else:
-            enabled_list = enabled_plugins.enabled if enabled_plugins else None
-
+        # Load ALL enabled plugins regardless of mode
         for plugin_name in self.discover_plugins():
-            # Check if plugin is enabled for this mode
             if enabled_list and plugin_name not in enabled_list:
-                logging.info(f"Plugin {plugin_name} disabled in {mode or 'default'} mode")
+                logging.info(f"Plugin {plugin_name} disabled")
                 continue
 
             if self.load_plugin(plugin_name):
                 loaded += 1
+
+        # Set initial mode and activate appropriate plugins
+        if mode:
+            self.current_mode = mode
+            for plugin in self.plugins.values():
+                plugin_modes = getattr(plugin, "modes", ["jukebox", "curating"])
+                if mode in plugin_modes:
+                    if hasattr(plugin, "activate"):
+                        try:
+                            plugin.activate(mode)
+                            logging.debug(f"Initially activated plugin: {plugin.name} for {mode}")
+                        except Exception as e:
+                            logging.error(f"Error initially activating plugin {plugin.name}: {e}")
+                else:
+                    # Plugin not active in this mode, deactivate it
+                    if hasattr(plugin, "deactivate"):
+                        try:
+                            plugin.deactivate(mode)
+                            logging.debug(f"Initially deactivated plugin: {plugin.name}")
+                        except Exception as e:
+                            logging.error(f"Error initially deactivating plugin {plugin.name}: {e}")
+
         return loaded
 
     def get_all_plugins(self) -> list[Any]:
@@ -130,16 +153,51 @@ class PluginManager:
 
         self.plugins.clear()
 
-    def reload_plugins_for_mode(self, mode: str, ui_builder: Any) -> int:
-        """Reload plugins for a different mode.
+    def switch_mode(self, new_mode: str) -> None:
+        """Switch to a different mode without reloading plugins.
 
         Args:
-            mode: Mode to load plugins for ("jukebox" or "curating")
-            ui_builder: UIBuilder instance for plugin UI registration
-
-        Returns:
-            Number of plugins loaded
+            new_mode: Mode to switch to ("jukebox" or "curating")
         """
+        if self.current_mode == new_mode:
+            logging.debug(f"Already in {new_mode} mode")
+            return
+
+        old_mode = self.current_mode
+
+        # Deactivate plugins that were active in old mode
+        if old_mode:
+            for plugin in self.plugins.values():
+                plugin_modes = getattr(plugin, "modes", ["jukebox", "curating"])
+                if old_mode in plugin_modes:
+                    if hasattr(plugin, "deactivate"):
+                        try:
+                            plugin.deactivate(old_mode)
+                            logging.debug(f"Deactivated plugin: {plugin.name}")
+                        except Exception as e:
+                            logging.error(f"Error deactivating plugin {plugin.name}: {e}")
+
+        # Activate plugins for new mode
+        for plugin in self.plugins.values():
+            plugin_modes = getattr(plugin, "modes", ["jukebox", "curating"])
+            if new_mode in plugin_modes:
+                if hasattr(plugin, "activate"):
+                    try:
+                        plugin.activate(new_mode)
+                        logging.debug(f"Activated plugin: {plugin.name}")
+                    except Exception as e:
+                        logging.error(f"Error activating plugin {plugin.name}: {e}")
+
+        self.current_mode = new_mode
+        logging.info(f"Switched to {new_mode} mode")
+
+    def reload_plugins_for_mode(self, mode: str, ui_builder: Any) -> int:
+        """DEPRECATED: Use switch_mode() instead.
+
+        Kept for backwards compatibility during transition.
+        """
+        logging.warning("reload_plugins_for_mode is deprecated, use switch_mode instead")
+
         # Unload all current plugins
         self.unload_all_plugins()
 

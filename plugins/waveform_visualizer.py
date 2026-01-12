@@ -15,25 +15,35 @@ class WaveformVisualizerPlugin:
     name = "waveform_visualizer"
     version = "1.0.0"
     description = "Display track waveforms"
+    modes = ["jukebox", "curating"]  # Active in both modes (waveform always visible)
 
-    # Class variable to keep orphan workers alive until they finish
-    _orphan_workers: list[Any] = []
+    # Class variable to keep batch processor alive (contains orphan workers)
+    _batch_processor: Any = None
 
     def __init__(self) -> None:
         """Initialize plugin."""
         self.context: Any = None
         self.waveform_widget: WaveformWidget | None = None
-        self.current_generation: dict[str, Any] | None = None  # Generation state tracking
-        self.current_worker: WaveformWorker | None = None  # Keep reference to current worker
+        self.current_track_id: int | None = None  # Currently displayed track
 
     def initialize(self, context: Any) -> None:
         """Initialize plugin."""
         self.context = context
 
-        # Subscribe to track loaded event
+        # Subscribe to events
         from jukebox.core.event_bus import Events
 
         self.context.subscribe(Events.TRACK_LOADED, self._on_track_loaded)
+        self.context.subscribe(Events.TRACKS_ADDED, self._on_tracks_added)
+
+        # Auto-start batch waveform generation at startup
+        # Use a timer to defer until after UI is fully loaded
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(1000, self._start_batch_waveform)
+
+    def _on_tracks_added(self) -> None:
+        """Auto-generate missing waveforms when tracks are added."""
+        self._start_batch_waveform()
 
     def register_ui(self, ui_builder: Any) -> None:
         """Add waveform widget."""
@@ -60,9 +70,12 @@ class WaveformVisualizerPlugin:
         self.context.player.set_position(position)
 
     def _on_track_loaded(self, track_id: int) -> None:
-        """Generate and show waveform."""
+        """Display waveform from cache, or add to priority queue if not cached."""
         if not self.waveform_widget:
             return
+
+        # Store current track ID
+        self.current_track_id = track_id
 
         # Check cache
         cached = self.context.database.conn.execute(
@@ -77,313 +90,38 @@ class WaveformVisualizerPlugin:
                 waveform = pickle.loads(cached[0])
                 self.waveform_widget.display_waveform(waveform)
             except Exception:
-                # Old format, clear and regenerate
+                # Corrupted cache, clear
                 self.waveform_widget.clear_waveform()
+        else:
+            # Not in cache - add to priority queue if batch is running
+            self.waveform_widget.clear_waveform()
+
+            if WaveformVisualizerPlugin._batch_processor and WaveformVisualizerPlugin._batch_processor.is_running:
+                # Get filepath
                 track = self.context.database.conn.execute(
                     "SELECT filepath FROM tracks WHERE id = ?", (track_id,)
                 ).fetchone()
+
                 if track:
-                    self._generate_waveform(track_id, track["filepath"])
-        else:
-            # Not in cache - clear previous and generate in background
-            self.waveform_widget.clear_waveform()
-
-            track = self.context.database.conn.execute(
-                "SELECT filepath FROM tracks WHERE id = ?", (track_id,)
-            ).fetchone()
-
-            if track:
-                self._generate_waveform(track_id, track["filepath"])
-
-    def _generate_waveform(self, track_id: int, filepath: str) -> None:
-        """Generate waveform progressively using one thread per chunk."""
-        # Clear waveform display immediately
-        if self.waveform_widget:
-            self.waveform_widget.clear_waveform()
-
-        # If already generating for a different track, cancel by not continuing
-        # (current chunk will finish naturally in ~1-2 seconds)
-        if self.current_generation:
-            # Disconnect current worker's signals before cancelling
-            if self.current_worker:
-                try:
-                    self.current_worker.chunk_ready.disconnect()
-                    self.current_worker.error.disconnect()
-                except (RuntimeError, TypeError):
-                    pass
-                # Detach worker from parent and keep in orphan list
-                self.current_worker.setParent(None)
-                WaveformVisualizerPlugin._orphan_workers.append(self.current_worker)
-                # Clean up finished workers from orphan list
-                WaveformVisualizerPlugin._orphan_workers = [
-                    w for w in WaveformVisualizerPlugin._orphan_workers if w.isRunning()
-                ]
-            # Mark old generation as cancelled
-            self.current_generation = None
-            self.current_worker = None
-
-        # Initialize generation state
-        try:
-            import librosa
-
-            # Get audio info to know total duration
-            duration = librosa.get_duration(path=filepath)
-
-            # Skip if duration is zero or very short
-            if duration < 0.1:
-                logging.warning(f"Track too short or empty: {duration}s for {filepath}")
-                return
-
-            sr = 11025  # Target sample rate
-            hop = 2048  # Downsampling hop
-
-            # Calculate expected total length for pre-allocation
-            total_samples = int(duration * sr)
-            expected_length = max((total_samples // hop) + 1, 1)
-
-            # Pre-calculate filter coefficients (reuse for all chunks)
-            from scipy import signal
-
-            sos_bass = signal.butter(4, 250, "lp", fs=sr, output="sos")
-            sos_mid = signal.butter(4, [250, 4000], "bandpass", fs=sr, output="sos")
-            sos_treble = signal.butter(4, 4000, "hp", fs=sr, output="sos")
-
-            # Initialize generation state
-            self.current_generation = {
-                "track_id": track_id,
-                "filepath": filepath,
-                "duration": duration,
-                "sr": sr,
-                "hop": hop,
-                "expected_length": expected_length,
-                "sos_bass": sos_bass,
-                "sos_mid": sos_mid,
-                "sos_treble": sos_treble,
-                "full_bass": np.zeros(expected_length),
-                "full_mid": np.zeros(expected_length),
-                "full_treble": np.zeros(expected_length),
-                "write_index": 0,
-                "offset": 0.0,
-            }
-
-            # Start first chunk
-            self._start_next_chunk()
-
-        except Exception as e:
-            logging.error(f"Failed to initialize waveform generation for {filepath}: {e}")
-            self.current_generation = None
-
-    def _start_next_chunk(self) -> None:
-        """Start processing the next chunk."""
-        if not self.current_generation:
-            return
-
-        gen = self.current_generation
-        chunk_duration = self.context.config.waveform.chunk_duration
-
-        # Check if we're done
-        if gen["offset"] >= gen["duration"]:
-            self._finalize_waveform()
-            return
-
-        # Calculate chunk duration (last chunk may be shorter)
-        actual_chunk_duration = min(chunk_duration, gen["duration"] - gen["offset"])
-
-        # Create worker for this chunk
-        self.current_worker = WaveformWorker(
-            track_id=gen["track_id"],
-            filepath=gen["filepath"],
-            offset=gen["offset"],
-            chunk_duration=actual_chunk_duration,
-            sr=gen["sr"],
-            hop=gen["hop"],
-            sos_bass=gen["sos_bass"],
-            sos_mid=gen["sos_mid"],
-            sos_treble=gen["sos_treble"],
-        )
-
-        # Connect signals
-        self.current_worker.chunk_ready.connect(self._on_chunk_complete)
-        self.current_worker.error.connect(self._on_chunk_error)
-
-        # Start worker
-        self.current_worker.start()
-
-    def _on_chunk_complete(
-        self, track_id: int, bass_chunk: np.ndarray, mid_chunk: np.ndarray, treble_chunk: np.ndarray
-    ) -> None:
-        """Handle chunk completion."""
-        # Check if this is still the current generation
-        if not self.current_generation or self.current_generation["track_id"] != track_id:
-            # Stale chunk from cancelled generation, ignore
-            return
-
-        gen = self.current_generation
-
-        # Skip if chunk is empty
-        if len(bass_chunk) == 0:
-            gen["offset"] += self.context.config.waveform.chunk_duration
-            self._start_next_chunk()
-            return
-
-        # Write to pre-allocated arrays at correct position
-        chunk_len = len(bass_chunk)
-        end_index = min(gen["write_index"] + chunk_len, gen["expected_length"])
-        actual_len = end_index - gen["write_index"]
-
-        gen["full_bass"][gen["write_index"] : end_index] = bass_chunk[:actual_len]
-        gen["full_mid"][gen["write_index"] : end_index] = mid_chunk[:actual_len]
-        gen["full_treble"][gen["write_index"] : end_index] = treble_chunk[:actual_len]
-
-        gen["write_index"] = end_index
-
-        # Emit progressive update with partial data (normalized)
-        current_data = gen["write_index"]
-
-        # Skip progressive update if no data yet
-        if current_data == 0 or gen["expected_length"] == 0:
-            gen["offset"] += self.context.config.waveform.chunk_duration
-            self._start_next_chunk()
-            return
-
-        bass_partial = gen["full_bass"][:current_data]
-        mid_partial = gen["full_mid"][:current_data]
-        treble_partial = gen["full_treble"][:current_data]
-
-        # Normalize each band for progressive display
-        bass_norm = bass_partial / np.max(bass_partial) if np.max(bass_partial) > 0 else bass_partial
-        mid_norm = mid_partial / np.max(mid_partial) if np.max(mid_partial) > 0 else mid_partial
-        treble_norm = (
-            treble_partial / np.max(treble_partial) if np.max(treble_partial) > 0 else treble_partial
-        )
-
-        # Pad with zeros to expected length for stable display
-        bass_display = np.zeros(gen["expected_length"])
-        mid_display = np.zeros(gen["expected_length"])
-        treble_display = np.zeros(gen["expected_length"])
-
-        bass_display[:current_data] = bass_norm
-        mid_display[:current_data] = mid_norm
-        treble_display[:current_data] = treble_norm
-
-        chunk_data = {"bass": bass_display, "mid": mid_display, "treble": treble_display}
-
-        # Display partial waveform
-        if self.waveform_widget:
-            self.waveform_widget.display_waveform(chunk_data)
-
-        # Move to next chunk
-        gen["offset"] += self.context.config.waveform.chunk_duration
-        self._start_next_chunk()
-
-    def _on_chunk_error(self, track_id: int, error_msg: str) -> None:
-        """Handle chunk error."""
-        logging.error(f"Chunk error for track {track_id}: {error_msg}")
-
-        # Check if this is still the current generation
-        if not self.current_generation or self.current_generation["track_id"] != track_id:
-            return
-
-        # Disconnect worker signals before cancelling
-        if self.current_worker:
-            try:
-                self.current_worker.chunk_ready.disconnect()
-                self.current_worker.error.disconnect()
-            except (RuntimeError, TypeError):
-                pass
-
-        # Cancel generation on error
-        self.current_generation = None
-        self.current_worker = None
-
-    def _finalize_waveform(self) -> None:
-        """Finalize waveform generation and cache results."""
-        if not self.current_generation:
-            return
-
-        gen = self.current_generation
-        actual_length = gen["write_index"]
-
-        # Skip if no data was written
-        if actual_length == 0:
-            logging.warning(f"No waveform data generated for track {gen['track_id']}")
-            self.current_generation = None
-            return
-
-        # Trim to actual length
-        full_bass = gen["full_bass"][:actual_length]
-        full_mid = gen["full_mid"][:actual_length]
-        full_treble = gen["full_treble"][:actual_length]
-
-        # Calculate audio analysis metrics from waveform data
-        bass_energy = float(np.mean(full_bass))
-        mid_energy = float(np.mean(full_mid))
-        treble_energy = float(np.mean(full_treble))
-        energy = bass_energy + mid_energy + treble_energy
-        dynamic_range = float(
-            20 * np.log10(np.max(full_bass + full_mid + full_treble) + 1e-10)
-            - 20 * np.log10(np.mean(full_bass + full_mid + full_treble) + 1e-10)
-        )
-
-        # Store analysis in database
-        try:
-            self.context.database.conn.execute(
-                """
-                INSERT OR REPLACE INTO audio_analysis (
-                    track_id, energy, bass_energy, mid_energy, treble_energy, dynamic_range
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-            """,
-                (gen["track_id"], energy, bass_energy, mid_energy, treble_energy, dynamic_range),
-            )
-            self.context.database.conn.commit()
-
-            # Emit event to notify that analysis is complete
-            self.context.emit("audio_analysis_complete", track_id=gen["track_id"])
-        except Exception as e:
-            logging.error(f"Failed to save audio analysis: {e}")
-
-        # Final normalization
-        bass_wave = full_bass / np.max(full_bass) if np.max(full_bass) > 0 else full_bass
-        mid_wave = full_mid / np.max(full_mid) if np.max(full_mid) > 0 else full_mid
-        treble_wave = full_treble / np.max(full_treble) if np.max(full_treble) > 0 else full_treble
-
-        waveform_data = {"bass": bass_wave, "mid": mid_wave, "treble": treble_wave}
-
-        # Cache in database
-        try:
-            import pickle
-
-            waveform_bytes = pickle.dumps(waveform_data)
-
-            self.context.database.conn.execute(
-                """
-                INSERT OR REPLACE INTO waveform_cache (track_id, waveform_data)
-                VALUES (?, ?)
-            """,
-                (gen["track_id"], waveform_bytes),
-            )
-            self.context.database.conn.commit()
-        except Exception as e:
-            logging.error(f"Failed to cache waveform: {e}")
-
-        # Display final waveform
-        if self.waveform_widget:
-            self.waveform_widget.display_waveform(waveform_data)
-
-        # Clear generation state
-        self.current_generation = None
-        self.current_worker = None
+                    item = (track_id, track["filepath"])
+                    added = WaveformVisualizerPlugin._batch_processor.add_priority_item(item)
+                    if added:
+                        logging.info(f"[Waveform] Track {track_id} added to priority queue")
 
     def _start_batch_waveform(self) -> None:
         """Start batch waveform generation for all tracks."""
+        # Stop any running batch
+        if WaveformVisualizerPlugin._batch_processor and WaveformVisualizerPlugin._batch_processor.is_running:
+            logging.info("Batch processor already running, stopping it first")
+            WaveformVisualizerPlugin._batch_processor.stop()
+
         # Get all tracks
         tracks = self.context.database.conn.execute(
             "SELECT id, filepath FROM tracks ORDER BY id"
         ).fetchall()
 
         if not tracks:
-            logging.info("No tracks to generate waveforms for")
+            logging.info("[Batch Waveform] No tracks to generate waveforms for")
             return
 
         # Filter tracks without waveforms
@@ -406,48 +144,135 @@ class WaveformVisualizerPlugin:
                 logging.info(f"  Track {track['id']}: {filename} - already has waveform")
 
         logging.info(
-            f"\nWaveform batch status: {already_generated} already done, {len(tracks_to_generate)} to generate (total: {len(tracks)})\n"
+            f"[Batch Waveform] Status: {already_generated} already done, {len(tracks_to_generate)} to generate (total: {len(tracks)})"
         )
 
         if not tracks_to_generate:
-            logging.info("All tracks already have waveforms")
+            logging.info("[Batch Waveform] All tracks already have waveforms")
             self.context.emit("status_message", message="All waveforms generated", color="#00FF00")
             return
 
-        logging.info(f"Starting batch waveform generation for {len(tracks_to_generate)} tracks")
-        self.context.emit(
-            "status_message",
-            message=f"Generating {len(tracks_to_generate)} waveforms...",
-            color="#00FF00",
+        # Create batch processor
+        from jukebox.core.batch_processor import BatchProcessor
+
+        def worker_factory(item: tuple[int, str]) -> QThread:
+            """Create a complete waveform worker for a track."""
+            track_id, filepath = item
+            worker = CompleteWaveformWorker(
+                track_id=track_id,
+                filepath=filepath,
+                chunk_duration=self.context.config.waveform.chunk_duration,
+            )
+            # Connect progress updates for progressive display
+            worker.progress_update.connect(self._on_waveform_progress)
+            return worker
+
+        WaveformVisualizerPlugin._batch_processor = BatchProcessor(
+            name="Waveform Generation",
+            worker_factory=worker_factory,
+            context=self.context,
         )
 
-        # Generate waveforms one by one (uses existing chunk-based system)
-        for idx, (track_id, filepath) in enumerate(tracks_to_generate, 1):
-            logging.info(f"[{idx}/{len(tracks_to_generate)}] Generating waveform for track {track_id}")
-            self._generate_waveform(track_id, filepath)
-            # Note: This is asynchronous, so they'll queue up
+        # Connect signals
+        WaveformVisualizerPlugin._batch_processor.item_complete.connect(self._on_batch_waveform_complete)
+        WaveformVisualizerPlugin._batch_processor.item_error.connect(self._on_batch_waveform_error)
+
+        # Start batch processing
+        WaveformVisualizerPlugin._batch_processor.start(tracks_to_generate)
+
+    def _on_waveform_progress(self, track_id: int, partial_waveform: dict[str, Any]) -> None:
+        """Handle progressive waveform updates during generation."""
+        # Only display if this is the currently displayed track
+        if track_id == self.current_track_id and self.waveform_widget:
+            self.waveform_widget.display_waveform(partial_waveform)
+
+    def _on_batch_waveform_complete(
+        self, item: tuple[int, str], result: dict[str, Any]
+    ) -> None:
+        """Handle single waveform completion in batch."""
+        track_id, filepath = item
+
+        # Save to database (safe in main thread)
+        try:
+            import pickle
+            import os
+
+            # Cache waveform
+            waveform_bytes = pickle.dumps(result["waveform_data"])
+            self.context.database.conn.execute(
+                """
+                INSERT OR REPLACE INTO waveform_cache (track_id, waveform_data)
+                VALUES (?, ?)
+            """,
+                (track_id, waveform_bytes),
+            )
+
+            # Save audio analysis
+            self.context.database.conn.execute(
+                """
+                INSERT OR REPLACE INTO audio_analysis (
+                    track_id, energy, bass_energy, mid_energy, treble_energy, dynamic_range
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    track_id,
+                    result["energy"],
+                    result["bass_energy"],
+                    result["mid_energy"],
+                    result["treble_energy"],
+                    result["dynamic_range"],
+                ),
+            )
+
+            self.context.database.conn.commit()
+
+            # If this is the currently displayed track, show the waveform
+            if track_id == self.current_track_id and self.waveform_widget:
+                self.waveform_widget.display_waveform(result["waveform_data"])
+                logging.debug(f"[Waveform] Displayed waveform for current track {track_id}")
+
+            # Emit event to notify analysis complete
+            self.context.emit("audio_analysis_complete", track_id=track_id)
+
+            # DEBUG level: show filename
+            filename = os.path.basename(filepath)
+            logging.debug(f"[Batch Waveform] Saved: {filename}")
+
+        except Exception as e:
+            logging.error(f"[Batch Waveform] Failed to save results for track {track_id}: {e}")
+
+    def _on_batch_waveform_error(self, item: tuple[int, str], error: str) -> None:
+        """Handle batch waveform error."""
+        track_id, filepath = item
+        import os
+        filename = os.path.basename(filepath)
+        # DEBUG level: show which file failed (BatchProcessor already logged the error)
+        logging.debug(f"[Batch Waveform] Failed file: {filename}")
+
+    def activate(self, mode: str) -> None:
+        """Activate plugin for this mode."""
+        # Waveform always visible in both modes
+        logging.debug(f"[Waveform] Activated for {mode} mode")
+
+    def deactivate(self, mode: str) -> None:
+        """Deactivate plugin for this mode."""
+        # Never called since active in both modes
+        logging.debug(f"[Waveform] Deactivated for {mode} mode")
 
     def shutdown(self) -> None:
-        """Cleanup."""
-        # Disconnect signals from current worker
-        if self.current_worker:
+        """Cleanup on application exit."""
+        # Stop batch processor if running (but keep it alive in class variable)
+        if WaveformVisualizerPlugin._batch_processor:
+            logging.debug("[Waveform] Stopping batch processor during shutdown")
+            WaveformVisualizerPlugin._batch_processor.stop()
+            # Disconnect all signals from batch processor
             try:
-                self.current_worker.chunk_ready.disconnect()
-                self.current_worker.error.disconnect()
+                WaveformVisualizerPlugin._batch_processor.item_complete.disconnect()
+                WaveformVisualizerPlugin._batch_processor.item_error.disconnect()
             except (RuntimeError, TypeError):
                 pass
-
-            # Detach worker from parent and keep in orphan list
-            self.current_worker.setParent(None)
-            WaveformVisualizerPlugin._orphan_workers.append(self.current_worker)
-            # Clean up finished workers from orphan list
-            WaveformVisualizerPlugin._orphan_workers = [
-                w for w in WaveformVisualizerPlugin._orphan_workers if w.isRunning()
-            ]
-
-        # Clear generation state - worker will finish naturally
-        self.current_generation = None
-        self.current_worker = None
+        # Don't set to None - keep it alive so orphan workers can finish
 
 
 class WaveformWidget(QWidget):
@@ -459,6 +284,7 @@ class WaveformWidget(QWidget):
         """Initialize widget."""
         super().__init__()
         self.waveform_data: np.ndarray | None = None
+        self.expected_length: int = 0  # Expected total length (for stable cursor during progressive display)
         self.cursor_line: Any = None
         self.waveform_config = waveform_config
         self._init_ui(waveform_config)
@@ -521,6 +347,10 @@ class WaveformWidget(QWidget):
 
         # Stack 3 bands vertically (Engine DJ style) - cumulative stacking
         if len(bass) > 0 and len(mid) > 0 and len(treble) > 0:
+            # Update expected length (for stable cursor positioning)
+            # This is the full length, even for partial waveforms (padded with zeros)
+            self.expected_length = len(bass)
+
             x = np.arange(len(bass))
 
             # Get colors from config
@@ -552,12 +382,13 @@ class WaveformWidget(QWidget):
         # Re-add cursor line after clear (cleared removes it)
         if self.cursor_line:
             self.plot_widget.addItem(self.cursor_line)
-            self.cursor_line.setPos(0)
+            # Don't reset position - keep current position stable
 
     def clear_waveform(self) -> None:
         """Clear waveform display."""
         self.plot_widget.clear()
         self.waveform_data = None
+        self.expected_length = 0
         # Re-add cursor line after clear
         if self.cursor_line:
             self.plot_widget.addItem(self.cursor_line)
@@ -566,8 +397,10 @@ class WaveformWidget(QWidget):
     def set_position(self, position: float) -> None:
         """Set playback position (0.0-1.0)."""
         if self.cursor_line:
-            if self.waveform_data is not None and len(self.waveform_data) > 0:
-                x = position * len(self.waveform_data)
+            # Use expected_length for stable cursor positioning
+            # (even during progressive waveform display)
+            if self.expected_length > 0:
+                x = position * self.expected_length
                 self.cursor_line.setPos(x)
             else:
                 # No waveform yet, use fixed range 0-100
@@ -590,78 +423,168 @@ class WaveformWidget(QWidget):
         self.position_clicked.emit(position)
 
 
-class WaveformWorker(QThread):
-    """Background worker to generate one waveform chunk."""
+class CompleteWaveformWorker(QThread):
+    """Worker to generate complete waveform for a track (all chunks)."""
 
-    chunk_ready = Signal(int, object, object, object)  # track_id, bass, mid, treble arrays
-    error = Signal(int, str)  # track_id, error message
+    complete = Signal(dict)  # Result dict with waveform_data and analysis metrics
+    error = Signal(str)  # Error message
+    progress_update = Signal(int, dict)  # track_id, partial waveform data
 
-    def __init__(
-        self,
-        track_id: int,
-        filepath: str,
-        offset: float,
-        chunk_duration: float,
-        sr: int,
-        hop: int,
-        sos_bass: Any,
-        sos_mid: Any,
-        sos_treble: Any,
-        parent: Any = None,
-    ):
-        """Initialize worker for single chunk.
+    def __init__(self, track_id: int, filepath: str, chunk_duration: float, parent: Any = None):
+        """Initialize worker.
 
         Args:
-            track_id: Track ID for this chunk
+            track_id: Track ID
             filepath: Path to audio file
-            offset: Starting position in seconds
-            chunk_duration: Duration of this chunk in seconds
-            sr: Sample rate
-            hop: Downsampling hop
-            sos_bass: Pre-calculated bass filter coefficients
-            sos_mid: Pre-calculated mid filter coefficients
-            sos_treble: Pre-calculated treble filter coefficients
+            chunk_duration: Duration of each chunk in seconds
             parent: Parent object
         """
         super().__init__(parent)
         self.track_id = track_id
         self.filepath = filepath
-        self.offset = offset
         self.chunk_duration = chunk_duration
-        self.sr = sr
-        self.hop = hop
-        self.sos_bass = sos_bass
-        self.sos_mid = sos_mid
-        self.sos_treble = sos_treble
+        # Set thread name for debugging
+        import os
+        self.setObjectName(f"WaveformWorker-{track_id}-{os.path.basename(filepath)[:20]}")
 
     def run(self) -> None:
-        """Process single chunk."""
+        """Generate complete waveform."""
         try:
             import librosa
             from scipy import signal
 
-            # Load chunk
-            y, _ = librosa.load(
-                self.filepath, sr=self.sr, mono=True, offset=self.offset, duration=self.chunk_duration
-            )
+            # Get audio duration
+            duration = librosa.get_duration(path=self.filepath)
 
-            # Check if audio is empty
-            if len(y) == 0:
-                self.error.emit(self.track_id, "Empty audio chunk")
+            if duration < 0.1:
+                self.error.emit(f"Track too short or empty: {duration}s")
                 return
 
-            # Separate frequency bands
-            bass = signal.sosfilt(self.sos_bass, y)
-            mid = signal.sosfilt(self.sos_mid, y)
-            treble = signal.sosfilt(self.sos_treble, y)
+            # Parameters
+            sr = 11025
+            hop = 2048
 
-            # Downsample for visualization
-            bass_chunk = np.abs(bass[:: self.hop])
-            mid_chunk = np.abs(mid[:: self.hop])
-            treble_chunk = np.abs(treble[:: self.hop])
+            # Pre-calculate filter coefficients
+            sos_bass = signal.butter(4, 250, "lp", fs=sr, output="sos")
+            sos_mid = signal.butter(4, [250, 4000], "bandpass", fs=sr, output="sos")
+            sos_treble = signal.butter(4, 4000, "hp", fs=sr, output="sos")
 
-            # Emit chunk data
-            self.chunk_ready.emit(self.track_id, bass_chunk, mid_chunk, treble_chunk)
+            # Pre-allocate arrays
+            total_samples = int(duration * sr)
+            expected_length = max((total_samples // hop) + 1, 1)
+
+            full_bass = np.zeros(expected_length)
+            full_mid = np.zeros(expected_length)
+            full_treble = np.zeros(expected_length)
+
+            write_index = 0
+            offset = 0.0
+
+            # Process all chunks
+            while offset < duration:
+                actual_chunk_duration = min(self.chunk_duration, duration - offset)
+
+                # Load chunk
+                y, _ = librosa.load(
+                    self.filepath, sr=sr, mono=True, offset=offset, duration=actual_chunk_duration
+                )
+
+                if len(y) == 0:
+                    break
+
+                # Separate frequency bands
+                bass = signal.sosfilt(sos_bass, y)
+                mid = signal.sosfilt(sos_mid, y)
+                treble = signal.sosfilt(sos_treble, y)
+
+                # Downsample
+                bass_chunk = np.abs(bass[::hop])
+                mid_chunk = np.abs(mid[::hop])
+                treble_chunk = np.abs(treble[::hop])
+
+                # Write to arrays
+                chunk_len = len(bass_chunk)
+                end_index = min(write_index + chunk_len, expected_length)
+                actual_len = end_index - write_index
+
+                full_bass[write_index:end_index] = bass_chunk[:actual_len]
+                full_mid[write_index:end_index] = mid_chunk[:actual_len]
+                full_treble[write_index:end_index] = treble_chunk[:actual_len]
+
+                write_index = end_index
+                offset += self.chunk_duration
+
+                # Emit progressive update after each chunk
+                if write_index > 0:
+                    # Create partial normalized waveforms for display
+                    bass_partial = full_bass[:write_index]
+                    mid_partial = full_mid[:write_index]
+                    treble_partial = full_treble[:write_index]
+
+                    # Normalize
+                    bass_norm = bass_partial / np.max(bass_partial) if np.max(bass_partial) > 0 else bass_partial
+                    mid_norm = mid_partial / np.max(mid_partial) if np.max(mid_partial) > 0 else mid_partial
+                    treble_norm = treble_partial / np.max(treble_partial) if np.max(treble_partial) > 0 else treble_partial
+
+                    # Pad to expected length for stable display
+                    bass_display = np.zeros(expected_length)
+                    mid_display = np.zeros(expected_length)
+                    treble_display = np.zeros(expected_length)
+
+                    bass_display[:write_index] = bass_norm
+                    mid_display[:write_index] = mid_norm
+                    treble_display[:write_index] = treble_norm
+
+                    partial_waveform = {
+                        "bass": bass_display,
+                        "mid": mid_display,
+                        "treble": treble_display,
+                    }
+
+                    # Emit progress update
+                    self.progress_update.emit(self.track_id, partial_waveform)
+
+            # Trim to actual length
+            full_bass = full_bass[:write_index]
+            full_mid = full_mid[:write_index]
+            full_treble = full_treble[:write_index]
+
+            if write_index == 0:
+                self.error.emit("No waveform data generated")
+                return
+
+            # Calculate analysis metrics
+            bass_energy = float(np.mean(full_bass))
+            mid_energy = float(np.mean(full_mid))
+            treble_energy = float(np.mean(full_treble))
+            energy = bass_energy + mid_energy + treble_energy
+            dynamic_range = float(
+                20 * np.log10(np.max(full_bass + full_mid + full_treble) + 1e-10)
+                - 20 * np.log10(np.mean(full_bass + full_mid + full_treble) + 1e-10)
+            )
+
+            # Normalize
+            bass_wave = full_bass / np.max(full_bass) if np.max(full_bass) > 0 else full_bass
+            mid_wave = full_mid / np.max(full_mid) if np.max(full_mid) > 0 else full_mid
+            treble_wave = (
+                full_treble / np.max(full_treble) if np.max(full_treble) > 0 else full_treble
+            )
+
+            # Emit result
+            result = {
+                "waveform_data": {
+                    "bass": bass_wave,
+                    "mid": mid_wave,
+                    "treble": treble_wave,
+                },
+                "energy": energy,
+                "bass_energy": bass_energy,
+                "mid_energy": mid_energy,
+                "treble_energy": treble_energy,
+                "dynamic_range": dynamic_range,
+            }
+
+            self.complete.emit(result)
 
         except Exception as e:
-            self.error.emit(self.track_id, str(e))
+            self.error.emit(str(e))

@@ -62,32 +62,41 @@ class AudioAnalyzerPlugin:
     name = "audio_analyzer"
     version = "1.0.0"
     description = "Audio feature extraction (tempo, energy, etc.)"
+    modes = ["curating"]  # Only show stats in curating mode (batch always runs)
 
-    # Class variable to keep orphan workers alive
-    _orphan_workers: list[Any] = []
+    # Class variable to keep batch processor alive (contains orphan workers)
+    _batch_processor: Any = None
 
     def __init__(self) -> None:
         """Initialize plugin."""
         self.context: Any = None
         self.analysis_widget: AnalysisWidget | None = None
-        self.current_worker: Any = None
         self.current_track_id: int | None = None
-        self.batch_worker: Any = None
 
     def initialize(self, context: Any) -> None:
         """Initialize plugin."""
         self.context = context
 
-        # Subscribe to track loaded event
+        # Subscribe to events
         from jukebox.core.event_bus import Events
 
         context.subscribe(Events.TRACK_LOADED, self._on_track_loaded)
         context.subscribe("audio_analysis_complete", self._on_analysis_complete)
+        context.subscribe(Events.TRACKS_ADDED, self._on_tracks_added)
+
+        # Auto-start batch analysis at startup (after waveforms)
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(2000, self._start_batch_analysis)  # 2s delay to let waveforms start first
+
+    def _on_tracks_added(self) -> None:
+        """Auto-analyze tracks when they are added."""
+        # Use a delay to let waveforms generate first
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(1000, self._start_batch_analysis)
 
     def register_ui(self, ui_builder: Any) -> None:
         """Register analysis widget."""
         self.analysis_widget = AnalysisWidget()
-        self.analysis_widget.analyze_more_clicked.connect(self._on_analyze_more_clicked)
         ui_builder.add_bottom_widget(self.analysis_widget)
 
         # Add menu for batch analysis
@@ -95,7 +104,7 @@ class AudioAnalyzerPlugin:
         ui_builder.add_menu_action(menu, "Analyze All Tracks (Batch)", self._start_batch_analysis)
 
     def _on_track_loaded(self, track_id: int) -> None:
-        """Display track analysis when loaded."""
+        """Display track analysis when loaded, or add to priority queue if not cached."""
         if not self.analysis_widget:
             return
 
@@ -123,8 +132,20 @@ class AudioAnalyzerPlugin:
                 }
             )
         else:
-            # Analysis not available yet (waveform not calculated)
+            # Analysis not available yet - add to priority queue if batch is running
             self.analysis_widget.show_analyzing()
+
+            if AudioAnalyzerPlugin._batch_processor and AudioAnalyzerPlugin._batch_processor.is_running:
+                # Get filepath
+                track = self.context.database.conn.execute(
+                    "SELECT filepath FROM tracks WHERE id = ?", (track_id,)
+                ).fetchone()
+
+                if track:
+                    item = (track_id, track["filepath"])
+                    added = AudioAnalyzerPlugin._batch_processor.add_priority_item(item)
+                    if added:
+                        logging.info(f"[Audio Analysis] Track {track_id} added to priority queue")
 
     def _on_analysis_complete(self, track_id: int) -> None:
         """Handle audio analysis completion event."""
@@ -155,96 +176,23 @@ class AudioAnalyzerPlugin:
                 }
             )
 
-    def _on_analyze_more_clicked(self) -> None:
-        """Handle analyze more button click."""
-        if self.current_track_id is None:
-            return
-
-        # Get filepath
-        track = self.context.database.conn.execute(
-            "SELECT filepath FROM tracks WHERE id = ?", (self.current_track_id,)
-        ).fetchone()
-
-        if not track:
-            return
-
-        # Cancel previous worker if running
-        if self.current_worker:
-            try:
-                self.current_worker.analysis_complete.disconnect()
-                self.current_worker.error.disconnect()
-            except (RuntimeError, TypeError):
-                pass
-            self.current_worker.setParent(None)
-            AudioAnalyzerPlugin._orphan_workers.append(self.current_worker)
-            AudioAnalyzerPlugin._orphan_workers = [
-                w for w in AudioAnalyzerPlugin._orphan_workers if w.isRunning()
-            ]
-
-        # Show analyzing state
-        if self.analysis_widget:
-            self.analysis_widget.set_button_state("analyzing")
-
-        # Start advanced analysis
-        self.current_worker = AdvancedAnalysisWorker(self.current_track_id, track["filepath"])
-        self.current_worker.analysis_complete.connect(self._on_advanced_analysis_complete)
-        self.current_worker.error.connect(self._on_advanced_analysis_error)
-        self.current_worker.start()
-
-    def _on_advanced_analysis_complete(self, track_id: int, analysis: dict[str, float]) -> None:
-        """Handle advanced analysis completion."""
-        if track_id != self.current_track_id:
-            return
-
-        # Update database with additional metrics
-        try:
-            self.context.database.conn.execute(
-                """
-                UPDATE audio_analysis
-                SET tempo = ?, spectral_centroid = ?, zero_crossing_rate = ?, rms_energy = ?
-                WHERE track_id = ?
-            """,
-                (
-                    analysis["tempo"],
-                    analysis["spectral_centroid"],
-                    analysis["zero_crossing_rate"],
-                    analysis["rms_energy"],
-                    track_id,
-                ),
-            )
-            self.context.database.conn.commit()
-
-            # Emit event to refresh display
-            self.context.emit("audio_analysis_complete", track_id=track_id)
-        except Exception as e:
-            logging.error(f"Failed to save advanced analysis: {e}")
-
-        if self.analysis_widget:
-            self.analysis_widget.set_button_state("idle")
-
-    def _on_advanced_analysis_error(self, track_id: int, error_msg: str) -> None:
-        """Handle advanced analysis error."""
-        if track_id != self.current_track_id:
-            return
-
-        logging.error(f"Advanced analysis error for track {track_id}: {error_msg}")
-        if self.analysis_widget:
-            self.analysis_widget.set_button_state("error")
-            self.analysis_widget.show_error(error_msg)
-
     def _start_batch_analysis(self) -> None:
         """Start batch analysis of all tracks."""
+        # Stop any running batch
+        if AudioAnalyzerPlugin._batch_processor and AudioAnalyzerPlugin._batch_processor.is_running:
+            logging.info("[Batch Analysis] Already running, stopping it first")
+            AudioAnalyzerPlugin._batch_processor.stop()
+
         # Get all tracks from database
         tracks = self.context.database.conn.execute(
             "SELECT id, filepath FROM tracks ORDER BY id"
         ).fetchall()
 
         if not tracks:
-            logging.info("No tracks to analyze")
+            logging.info("[Batch Analysis] No tracks to analyze")
             return
 
         total_tracks = len(tracks)
-        logging.info(f"Checking analysis status for {total_tracks} tracks...")
 
         # Filter tracks that don't have complete analysis
         tracks_to_analyze = []
@@ -272,7 +220,7 @@ class AudioAnalyzerPlugin:
                 tracks_to_analyze.append((track["id"], track["filepath"]))
                 if analysis:
                     logging.info(
-                        f"  Track {track['id']}: {filename} - NEEDS ANALYSIS (incomplete: tempo={analysis['tempo']}, centroid={analysis['spectral_centroid']}, zcr={analysis['zero_crossing_rate']}, rms={analysis['rms_energy']})"
+                        f"  Track {track['id']}: {filename} - NEEDS ANALYSIS (incomplete)"
                     )
                 else:
                     logging.info(f"  Track {track['id']}: {filename} - NEEDS ANALYSIS (no record)")
@@ -280,37 +228,46 @@ class AudioAnalyzerPlugin:
                 already_analyzed += 1
                 logging.info(f"  Track {track['id']}: {filename} - already analyzed")
 
-        logging.info(f"\nBatch analysis status: {already_analyzed} already done, {len(tracks_to_analyze)} to analyze (total: {total_tracks})\n")
+        logging.info(
+            f"[Batch Analysis] Status: {already_analyzed} already done, {len(tracks_to_analyze)} to analyze (total: {total_tracks})"
+        )
 
         if not tracks_to_analyze:
-            logging.info("All tracks already have complete analysis")
+            logging.info("[Batch Analysis] All tracks already have complete analysis")
             self.context.emit("status_message", message="All tracks analyzed", color="#00FF00")
             return
 
-        logging.info(f"Starting batch analysis of {len(tracks_to_analyze)} tracks")
+        # Create batch processor
+        from jukebox.core.batch_processor import BatchProcessor
 
-        # Start batch worker
-        self.batch_worker = BatchAnalysisWorker(tracks_to_analyze)
-        self.batch_worker.progress.connect(self._on_batch_progress)
-        self.batch_worker.track_analyzed.connect(self._on_batch_track_analyzed)
-        self.batch_worker.finished_signal.connect(self._on_batch_finished)
-        self.batch_worker.start()
+        def worker_factory(item: tuple[int, str]) -> QThread:
+            """Create analysis worker for a track."""
+            track_id, filepath = item
+            return AnalysisWorker(track_id=track_id, filepath=filepath)
 
-    def _on_batch_progress(self, current: int, total: int, track_id: int) -> None:
-        """Handle batch analysis progress."""
-        message = f"Analyzing track {current}/{total}"
-        logging.info(f"Batch analysis: {current}/{total} - Track ID {track_id}")
-        # Send to status bar
-        self.context.emit("status_message", message=message, color="#00FF00")
+        AudioAnalyzerPlugin._batch_processor = BatchProcessor(
+            name="Audio Analysis",
+            worker_factory=worker_factory,
+            context=self.context,
+        )
 
-    def _on_batch_track_analyzed(self, track_id: int, analysis: dict[str, float]) -> None:
-        """Handle single track analysis completion in batch (runs in main thread)."""
-        # Check if context still valid (app not shutting down)
-        if not self.context or not self.context.database or not self.context.database.conn:
-            return
+        # Connect signals
+        AudioAnalyzerPlugin._batch_processor.item_complete.connect(self._on_batch_analysis_complete)
+        AudioAnalyzerPlugin._batch_processor.item_error.connect(self._on_batch_analysis_error)
+
+        # Start batch processing
+        AudioAnalyzerPlugin._batch_processor.start(tracks_to_analyze)
+
+    def _on_batch_analysis_complete(
+        self, item: tuple[int, str], result: dict[str, float]
+    ) -> None:
+        """Handle single analysis completion in batch."""
+        track_id, filepath = item
 
         # Save to database (safe in main thread)
         try:
+            import os
+
             # Check if row exists (created by waveform)
             existing = self.context.database.conn.execute(
                 "SELECT track_id FROM audio_analysis WHERE track_id = ?", (track_id,)
@@ -325,10 +282,10 @@ class AudioAnalyzerPlugin:
                     WHERE track_id = ?
                 """,
                     (
-                        analysis["tempo"],
-                        analysis["spectral_centroid"],
-                        analysis["zero_crossing_rate"],
-                        analysis["rms_energy"],
+                        result["tempo"],
+                        result["spectral_centroid"],
+                        result["zero_crossing_rate"],
+                        result["rms_energy"],
                         track_id,
                     ),
                 )
@@ -343,10 +300,10 @@ class AudioAnalyzerPlugin:
                 """,
                     (
                         track_id,
-                        analysis["tempo"],
-                        analysis["spectral_centroid"],
-                        analysis["zero_crossing_rate"],
-                        analysis["rms_energy"],
+                        result["tempo"],
+                        result["spectral_centroid"],
+                        result["zero_crossing_rate"],
+                        result["rms_energy"],
                     ),
                 )
 
@@ -355,49 +312,52 @@ class AudioAnalyzerPlugin:
             # Emit event to update UI if this track is currently displayed
             self.context.emit("audio_analysis_complete", track_id=track_id)
 
-        except Exception as e:
-            logging.error(f"Failed to save batch analysis for track {track_id}: {e}")
+            # DEBUG level: show filename
+            filename = os.path.basename(filepath)
+            logging.debug(f"[Batch Analysis] Saved: {filename}")
 
-    def _on_batch_finished(self, analyzed: int) -> None:
-        """Handle batch analysis completion."""
-        message = f"Batch analysis complete: {analyzed} tracks"
-        logging.info(f"Batch analysis complete: {analyzed} tracks analyzed")
-        # Send to status bar
-        self.context.emit("status_message", message=message, color="#00FF00")
-        self.batch_worker = None
+        except Exception as e:
+            logging.error(f"[Batch Analysis] Failed to save results for track {track_id}: {e}")
+
+    def _on_batch_analysis_error(self, item: tuple[int, str], error: str) -> None:
+        """Handle batch analysis error."""
+        track_id, filepath = item
+        import os
+        filename = os.path.basename(filepath)
+        # DEBUG level: show which file failed (BatchProcessor already logged the error)
+        logging.debug(f"[Batch Analysis] Failed file: {filename}")
+
+    def activate(self, mode: str) -> None:
+        """Activate plugin for this mode."""
+        # Show stats widget in curating mode
+        if self.analysis_widget:
+            self.analysis_widget.setVisible(True)
+        logging.debug(f"[Audio Analysis] Activated for {mode} mode")
+
+    def deactivate(self, mode: str) -> None:
+        """Deactivate plugin for this mode."""
+        # Hide stats widget in jukebox mode (batch continues)
+        if self.analysis_widget:
+            self.analysis_widget.setVisible(False)
+        logging.debug(f"[Audio Analysis] Deactivated for {mode} mode")
 
     def shutdown(self) -> None:
-        """Cleanup."""
-        if self.current_worker:
+        """Cleanup on application exit."""
+        # Stop batch processor if running (but keep it alive in class variable)
+        if AudioAnalyzerPlugin._batch_processor:
+            logging.debug("[Audio Analysis] Stopping batch processor during shutdown")
+            AudioAnalyzerPlugin._batch_processor.stop()
+            # Disconnect all signals from batch processor
             try:
-                self.current_worker.analysis_complete.disconnect()
-                self.current_worker.error.disconnect()
+                AudioAnalyzerPlugin._batch_processor.item_complete.disconnect()
+                AudioAnalyzerPlugin._batch_processor.item_error.disconnect()
             except (RuntimeError, TypeError):
                 pass
-            self.current_worker.setParent(None)
-            AudioAnalyzerPlugin._orphan_workers.append(self.current_worker)
-            AudioAnalyzerPlugin._orphan_workers = [
-                w for w in AudioAnalyzerPlugin._orphan_workers if w.isRunning()
-            ]
-        self.current_worker = None
-
-        # Disconnect batch worker signals to prevent crashes
-        if self.batch_worker:
-            try:
-                self.batch_worker.progress.disconnect()
-                self.batch_worker.track_analyzed.disconnect()
-                self.batch_worker.finished_signal.disconnect()
-            except (RuntimeError, TypeError):
-                pass
-            # Don't wait for it - let it finish in background
-            self.batch_worker.setParent(None)
-        self.batch_worker = None
+        # Don't set to None - keep it alive so orphan workers can finish
 
 
 class AnalysisWidget(QWidget):
     """Widget to display audio analysis results."""
-
-    analyze_more_clicked = Signal()
 
     def __init__(self) -> None:
         """Initialize widget."""
@@ -406,9 +366,11 @@ class AnalysisWidget(QWidget):
 
     def _init_ui(self) -> None:
         """Initialize UI."""
-        layout = QHBoxLayout()
-        layout.setContentsMargins(10, 5, 10, 5)
-        layout.setSpacing(15)
+        from PySide6.QtWidgets import QVBoxLayout
+
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(10, 5, 10, 5)
+        main_layout.setSpacing(3)
 
         # Create labels with compact formatting
         self.energy_label = QLabel("Energy: --")
@@ -421,27 +383,32 @@ class AnalysisWidget(QWidget):
         self.zcr_label = QLabel("Percussive: --")
         self.rms_label = QLabel("RMS: --")
 
-        # Analyze more button
-        self.analyze_button = QPushButton("Analyze More")
-        self.analyze_button.setMaximumWidth(120)
-        self.analyze_button.clicked.connect(self.analyze_more_clicked.emit)
+        # First row: waveform-based metrics
+        row1 = QHBoxLayout()
+        row1.setSpacing(15)
+        row1.addWidget(QLabel("<b>Waveform:</b>"))
+        row1.addWidget(self.energy_label)
+        row1.addWidget(self.bass_label)
+        row1.addWidget(self.mid_label)
+        row1.addWidget(self.treble_label)
+        row1.addWidget(self.dynamic_label)
+        row1.addStretch()
 
-        # Add to horizontal layout with stretch between groups
-        layout.addWidget(QLabel("<b>Analysis:</b>"))
-        layout.addWidget(self.energy_label)
-        layout.addWidget(self.bass_label)
-        layout.addWidget(self.mid_label)
-        layout.addWidget(self.treble_label)
-        layout.addWidget(self.dynamic_label)
-        layout.addWidget(self.tempo_label)
-        layout.addWidget(self.centroid_label)
-        layout.addWidget(self.zcr_label)
-        layout.addWidget(self.rms_label)
-        layout.addStretch()
-        layout.addWidget(self.analyze_button)
+        # Second row: advanced analysis metrics
+        row2 = QHBoxLayout()
+        row2.setSpacing(15)
+        row2.addWidget(QLabel("<b>Analysis:</b>"))
+        row2.addWidget(self.tempo_label)
+        row2.addWidget(self.centroid_label)
+        row2.addWidget(self.zcr_label)
+        row2.addWidget(self.rms_label)
+        row2.addStretch()
 
-        self.setLayout(layout)
-        self.setMaximumHeight(30)
+        main_layout.addLayout(row1)
+        main_layout.addLayout(row2)
+
+        self.setLayout(main_layout)
+        self.setMaximumHeight(55)
 
     def show_analyzing(self) -> None:
         """Show analyzing state."""
@@ -450,22 +417,6 @@ class AnalysisWidget(QWidget):
         self.mid_label.setText("Mid: --")
         self.treble_label.setText("Treble: --")
         self.dynamic_label.setText("Dynamic: --")
-
-    def show_error(self, error: str) -> None:
-        """Show error state."""
-        self.energy_label.setText(f"Error: {error}")
-
-    def set_button_state(self, state: str) -> None:
-        """Set button state (idle, analyzing, error)."""
-        if state == "analyzing":
-            self.analyze_button.setText("Analyzing...")
-            self.analyze_button.setEnabled(False)
-        elif state == "error":
-            self.analyze_button.setText("Error")
-            self.analyze_button.setEnabled(True)
-        else:  # idle
-            self.analyze_button.setText("Analyze More")
-            self.analyze_button.setEnabled(True)
 
     def display_analysis(self, analysis: dict[str, float | None]) -> None:
         """Display analysis results."""
@@ -497,67 +448,31 @@ class AnalysisWidget(QWidget):
         self.rms_label.setText(f"RMS: {rms:.3f}" if rms else "RMS: --")
 
 
-class AdvancedAnalysisWorker(QThread):
-    """Background worker for advanced audio analysis (tempo, spectral features)."""
+class AnalysisWorker(QThread):
+    """Worker for batch audio analysis (for BatchProcessor)."""
 
-    analysis_complete = Signal(int, dict)  # track_id, analysis dict
-    error = Signal(int, str)  # track_id, error message
+    complete = Signal(dict)  # Result dict with analysis metrics
+    error = Signal(str)  # Error message
 
     def __init__(self, track_id: int, filepath: str, parent: Any = None):
-        """Initialize worker."""
-        super().__init__(parent)
-        self.track_id = track_id
-        self.filepath = filepath
-
-    def run(self) -> None:
-        """Perform advanced analysis."""
-        try:
-            analysis = analyze_audio_file(self.filepath)
-            self.analysis_complete.emit(self.track_id, analysis)
-        except Exception as e:
-            self.error.emit(self.track_id, str(e))
-
-
-class BatchAnalysisWorker(QThread):
-    """Background worker for batch analysis of multiple tracks."""
-
-    progress = Signal(int, int, int)  # current, total, track_id
-    track_analyzed = Signal(int, dict)  # track_id, analysis results
-    finished_signal = Signal(int)  # number of tracks analyzed
-
-    def __init__(self, tracks: list[tuple[int, str]], parent: Any = None):
         """Initialize worker.
 
         Args:
-            tracks: List of (track_id, filepath) tuples to analyze
+            track_id: Track ID
+            filepath: Path to audio file
             parent: Parent object
         """
         super().__init__(parent)
-        self.tracks = tracks
+        self.track_id = track_id
+        self.filepath = filepath
+        # Set thread name for debugging
+        import os
+        self.setObjectName(f"AnalysisWorker-{track_id}-{os.path.basename(filepath)[:20]}")
 
     def run(self) -> None:
-        """Analyze all tracks in batch."""
-        total = len(self.tracks)
-        analyzed = 0
-
-        for idx, (track_id, filepath) in enumerate(self.tracks, 1):
-            try:
-                self.progress.emit(idx, total, track_id)
-
-                # Log which file we're analyzing
-                import os
-                filename = os.path.basename(filepath)
-                logging.info(f"[{idx}/{total}] Analyzing: {filename}")
-
-                # Analyze file
-                analysis = analyze_audio_file(filepath)
-
-                # Emit results to main thread for database saving
-                self.track_analyzed.emit(track_id, analysis)
-
-                analyzed += 1
-
-            except Exception as e:
-                logging.error(f"Batch analysis error for track {track_id} ({filepath}): {e}")
-
-        self.finished_signal.emit(analyzed)
+        """Perform analysis."""
+        try:
+            analysis = analyze_audio_file(self.filepath)
+            self.complete.emit(analysis)
+        except Exception as e:
+            self.error.emit(str(e))

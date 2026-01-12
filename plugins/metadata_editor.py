@@ -64,11 +64,13 @@ class MetadataEditorPlugin:
     name = "metadata_editor"
     version = "2.0.0"
     description = "Edit track metadata (configurable fields)"
+    modes = ["curating"]  # Only active in curating mode
 
     def __init__(self) -> None:
         """Initialize plugin."""
         self.context: Any = None
         self.editor_widget: MetadataEditorWidget | None = None
+        self.tab_event_filter: TabEventFilter | None = None
         self.current_track_id: int | None = None
 
     def initialize(self, context: Any) -> None:
@@ -87,6 +89,9 @@ class MetadataEditorPlugin:
 
         self.editor_widget = MetadataEditorWidget(field_configs)
         self.editor_widget.save_clicked.connect(self._on_save_metadata)
+
+        # Store reference to TAB event filter
+        self.tab_event_filter = self.editor_widget.tab_filter
 
         # Add below player controls in main layout
         ui_builder.add_bottom_widget(self.editor_widget)
@@ -240,8 +245,26 @@ class MetadataEditorPlugin:
         # Note: We don't emit TRACKS_ADDED here to avoid reloading the entire track list
         # The track list display will update on next full reload
 
+    def activate(self, mode: str) -> None:
+        """Activate plugin for this mode."""
+        if self.editor_widget:
+            self.editor_widget.setVisible(True)
+        # Enable TAB event filter
+        if self.tab_event_filter:
+            self.tab_event_filter.setEnabled(True)
+        logging.debug(f"[Metadata Editor] Activated for {mode} mode")
+
+    def deactivate(self, mode: str) -> None:
+        """Deactivate plugin for this mode."""
+        if self.editor_widget:
+            self.editor_widget.setVisible(False)
+        # Disable TAB event filter
+        if self.tab_event_filter:
+            self.tab_event_filter.setEnabled(False)
+        logging.debug(f"[Metadata Editor] Deactivated for {mode} mode")
+
     def shutdown(self) -> None:
-        """Cleanup."""
+        """Cleanup on application exit."""
         pass
 
 

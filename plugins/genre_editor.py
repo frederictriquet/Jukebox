@@ -13,12 +13,14 @@ class GenreEditorPlugin:
     name = "genre_editor"
     version = "1.0.0"
     description = "Genre editor with code-based system"
+    modes = ["curating"]  # Only active in curating mode
 
     def __init__(self) -> None:
         """Initialize plugin."""
         self.context: Any = None
         self.current_track_id: int | None = None
         self.current_genre: str = ""
+        self.shortcuts: list[Any] = []  # Keep references to shortcuts
 
     def initialize(self, context: Any) -> None:
         """Initialize plugin."""
@@ -39,10 +41,16 @@ class GenreEditorPlugin:
         genre_config = self.context.config.genre_editor
 
         for code_config in genre_config.codes:
-            shortcut_manager.register(code_config.key, lambda c=code_config.code: self._toggle_code(c))
+            shortcut = shortcut_manager.register(
+                code_config.key,
+                lambda c=code_config.code: self._toggle_code(c),
+                plugin_name=self.name
+            )
+            self.shortcuts.append(shortcut)
 
         # Register rating shortcut
-        shortcut_manager.register(genre_config.rating_key, self._cycle_rating)
+        shortcut = shortcut_manager.register(genre_config.rating_key, self._cycle_rating, plugin_name=self.name)
+        self.shortcuts.append(shortcut)
 
     def _on_track_loaded(self, track_id: int) -> None:
         """Load current genre when track loads."""
@@ -179,6 +187,20 @@ class GenreEditorPlugin:
         # Note: We don't emit TRACKS_ADDED here to avoid reloading the entire track list
         # The track list display will update on next full reload
 
+    def activate(self, mode: str) -> None:
+        """Activate plugin for this mode."""
+        # Enable all shortcuts
+        for shortcut in self.shortcuts:
+            shortcut.setEnabled(True)
+        logging.debug(f"[Genre Editor] Activated for {mode} mode")
+
+    def deactivate(self, mode: str) -> None:
+        """Deactivate plugin for this mode."""
+        # Disable all shortcuts
+        for shortcut in self.shortcuts:
+            shortcut.setEnabled(False)
+        logging.debug(f"[Genre Editor] Deactivated for {mode} mode")
+
     def shutdown(self) -> None:
-        """Cleanup."""
+        """Cleanup on application exit."""
         pass

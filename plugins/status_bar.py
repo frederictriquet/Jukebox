@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
+from PySide6.QtWidgets import QLabel, QStatusBar
 
 
 class StatusBarPlugin:
@@ -11,9 +11,11 @@ class StatusBarPlugin:
     name = "status_bar"
     version = "1.0.0"
     description = "Status bar for system messages"
+    modes = ["jukebox", "curating"]  # Active in all modes
 
-    # Class variable to share status widget across plugins
-    _status_widget: "StatusBarWidget | None" = None
+    # Class variable to share status bar across plugins
+    _status_bar: QStatusBar | None = None
+    _status_label: QLabel | None = None
 
     def __init__(self) -> None:
         """Initialize plugin."""
@@ -27,60 +29,34 @@ class StatusBarPlugin:
         context.subscribe("status_message", self._on_status_message)
 
     def register_ui(self, ui_builder: Any) -> None:
-        """Register status bar widget."""
-        StatusBarPlugin._status_widget = StatusBarWidget()
-        ui_builder.add_bottom_widget(StatusBarPlugin._status_widget)
+        """Register status bar."""
+        # Use Qt's built-in status bar (always at bottom, visible in all modes)
+        StatusBarPlugin._status_bar = QStatusBar()
+        StatusBarPlugin._status_label = QLabel("")
+        # No fixed color - use theme's default text color
+
+        StatusBarPlugin._status_bar.addPermanentWidget(StatusBarPlugin._status_label)
+        ui_builder.main_window.setStatusBar(StatusBarPlugin._status_bar)
 
     def _on_status_message(self, message: str, color: str | None = None) -> None:
-        """Handle status message event."""
-        if StatusBarPlugin._status_widget:
-            StatusBarPlugin._status_widget.set_message(message, color)
+        """Handle status message event.
+
+        Note: color parameter is ignored - always uses theme default color.
+        """
+        if StatusBarPlugin._status_label:
+            StatusBarPlugin._status_label.setText(message)
+
+    def activate(self, mode: str) -> None:
+        """Activate plugin for this mode."""
+        # Status bar always visible
+        pass
+
+    def deactivate(self, mode: str) -> None:
+        """Deactivate plugin for this mode."""
+        # Status bar always visible
+        pass
 
     def shutdown(self) -> None:
-        """Cleanup."""
-        StatusBarPlugin._status_widget = None
-
-    @staticmethod
-    def get_widget() -> "StatusBarWidget | None":
-        """Get the status widget instance."""
-        return StatusBarPlugin._status_widget
-
-
-class StatusBarWidget(QWidget):
-    """Widget to display status messages."""
-
-    def __init__(self) -> None:
-        """Initialize widget."""
-        super().__init__()
-        self._init_ui()
-
-    def _init_ui(self) -> None:
-        """Initialize UI."""
-        layout = QHBoxLayout()
-        layout.setContentsMargins(10, 2, 10, 2)
-
-        self.status_label = QLabel("")
-        self.status_label.setStyleSheet("color: #888888;")  # Gray by default
-
-        layout.addWidget(self.status_label)
-        layout.addStretch()
-
-        self.setLayout(layout)
-        self.setMaximumHeight(20)
-
-    def set_message(self, message: str, color: str | None = None) -> None:
-        """Set status message.
-
-        Args:
-            message: Message to display
-            color: Optional color (hex string like "#00FF00")
-        """
-        self.status_label.setText(message)
-        if color:
-            self.status_label.setStyleSheet(f"color: {color};")
-        else:
-            self.status_label.setStyleSheet("color: #888888;")
-
-    def clear(self) -> None:
-        """Clear status message."""
-        self.status_label.setText("")
+        """Cleanup on application exit."""
+        StatusBarPlugin._status_bar = None
+        StatusBarPlugin._status_label = None

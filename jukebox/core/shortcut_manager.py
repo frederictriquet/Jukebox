@@ -19,13 +19,18 @@ class ShortcutManager(QObject):
         super().__init__(parent)
         self.parent_widget = parent
         self.shortcuts: dict[str, QShortcut] = {}
+        self.shortcut_owners: dict[str, str] = {}  # key_sequence -> plugin_name
 
-    def register(self, key_sequence: str, callback: Callable[[], None]) -> None:
+    def register(self, key_sequence: str, callback: Callable[[], None], plugin_name: str | None = None) -> QShortcut:
         """Register a keyboard shortcut.
 
         Args:
             key_sequence: Key sequence (e.g., "Ctrl+P", "Space")
             callback: Function to call when shortcut is activated
+            plugin_name: Optional plugin name (for mode-based enable/disable)
+
+        Returns:
+            The created QShortcut instance
         """
         # Unregister existing shortcut with same key sequence
         if key_sequence in self.shortcuts:
@@ -34,6 +39,11 @@ class ShortcutManager(QObject):
         shortcut = QShortcut(QKeySequence(key_sequence), self.parent_widget)
         shortcut.activated.connect(callback)
         self.shortcuts[key_sequence] = shortcut
+
+        if plugin_name:
+            self.shortcut_owners[key_sequence] = plugin_name
+
+        return shortcut
 
     def unregister(self, key_sequence: str) -> bool:
         """Unregister a keyboard shortcut.
@@ -77,3 +87,25 @@ class ShortcutManager(QObject):
         """Clear all registered shortcuts."""
         for key_sequence in list(self.shortcuts.keys()):
             self.unregister(key_sequence)
+
+    def enable_for_plugin(self, plugin_name: str) -> None:
+        """Enable all shortcuts for a plugin.
+
+        Args:
+            plugin_name: Name of the plugin
+        """
+        for key_sequence, owner in self.shortcut_owners.items():
+            if owner == plugin_name and key_sequence in self.shortcuts:
+                self.shortcuts[key_sequence].setEnabled(True)
+                logging.debug(f"Enabled shortcut {key_sequence} for {plugin_name}")
+
+    def disable_for_plugin(self, plugin_name: str) -> None:
+        """Disable all shortcuts for a plugin.
+
+        Args:
+            plugin_name: Name of the plugin
+        """
+        for key_sequence, owner in self.shortcut_owners.items():
+            if owner == plugin_name and key_sequence in self.shortcuts:
+                self.shortcuts[key_sequence].setEnabled(False)
+                logging.debug(f"Disabled shortcut {key_sequence} for {plugin_name}")
