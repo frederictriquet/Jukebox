@@ -135,7 +135,7 @@ class TrackList(QListWidget):
             if item:
                 self._on_item_clicked(item)
 
-    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
         """Handle drag enter event."""
         import logging
 
@@ -147,14 +147,14 @@ class TrackList(QListWidget):
             event.ignore()
             logging.info("Drag rejected")
 
-    def dragMoveEvent(self, event: Any) -> None:
+    def dragMoveEvent(self, event: Any) -> None:  # noqa: N802
         """Handle drag move event."""
         if event.mimeData().hasUrls():
             event.accept()
         else:
             event.ignore()
 
-    def dropEvent(self, event: QDropEvent) -> None:
+    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
         """Handle drop event."""
         import logging
 

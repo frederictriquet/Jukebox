@@ -42,7 +42,7 @@ class SearchBar(QLineEdit):
         """Emit search signal."""
         self.search_triggered.emit(self.text())
 
-    def keyPressEvent(self, event: QKeyEvent) -> None:
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         """Handle key press events."""
         if event.key() == Qt.Key.Key_Escape:
             # Clear focus on ESC
