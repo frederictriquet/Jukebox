@@ -39,6 +39,7 @@ class WaveformVisualizerPlugin:
         # Auto-start batch waveform generation at startup
         # Use a timer to defer until after UI is fully loaded
         from PySide6.QtCore import QTimer
+
         QTimer.singleShot(1000, self._start_batch_waveform)
 
     def _on_tracks_added(self) -> None:
@@ -58,7 +59,9 @@ class WaveformVisualizerPlugin:
 
         # Add menu for batch waveform generation
         menu = ui_builder.add_menu("&Waveform")
-        ui_builder.add_menu_action(menu, "Generate All Waveforms (Batch)", self._start_batch_waveform)
+        ui_builder.add_menu_action(
+            menu, "Generate All Waveforms (Batch)", self._start_batch_waveform
+        )
 
     def _update_cursor(self, position: float) -> None:
         """Update cursor position."""
@@ -96,7 +99,10 @@ class WaveformVisualizerPlugin:
             # Not in cache - add to priority queue if batch is running
             self.waveform_widget.clear_waveform()
 
-            if WaveformVisualizerPlugin._batch_processor and WaveformVisualizerPlugin._batch_processor.is_running:
+            if (
+                WaveformVisualizerPlugin._batch_processor
+                and WaveformVisualizerPlugin._batch_processor.is_running
+            ):
                 # Get filepath
                 track = self.context.database.conn.execute(
                     "SELECT filepath FROM tracks WHERE id = ?", (track_id,)
@@ -111,7 +117,10 @@ class WaveformVisualizerPlugin:
     def _start_batch_waveform(self) -> None:
         """Start batch waveform generation for all tracks."""
         # Stop any running batch
-        if WaveformVisualizerPlugin._batch_processor and WaveformVisualizerPlugin._batch_processor.is_running:
+        if (
+            WaveformVisualizerPlugin._batch_processor
+            and WaveformVisualizerPlugin._batch_processor.is_running
+        ):
             logging.info("Batch processor already running, stopping it first")
             WaveformVisualizerPlugin._batch_processor.stop()
 
@@ -129,6 +138,7 @@ class WaveformVisualizerPlugin:
         already_generated = 0
 
         import os
+
         for track in tracks:
             cached = self.context.database.conn.execute(
                 "SELECT track_id FROM waveform_cache WHERE track_id = ?", (track["id"],)
@@ -174,7 +184,9 @@ class WaveformVisualizerPlugin:
         )
 
         # Connect signals
-        WaveformVisualizerPlugin._batch_processor.item_complete.connect(self._on_batch_waveform_complete)
+        WaveformVisualizerPlugin._batch_processor.item_complete.connect(
+            self._on_batch_waveform_complete
+        )
         WaveformVisualizerPlugin._batch_processor.item_error.connect(self._on_batch_waveform_error)
 
         # Start batch processing
@@ -186,16 +198,14 @@ class WaveformVisualizerPlugin:
         if track_id == self.current_track_id and self.waveform_widget:
             self.waveform_widget.display_waveform(partial_waveform)
 
-    def _on_batch_waveform_complete(
-        self, item: tuple[int, str], result: dict[str, Any]
-    ) -> None:
+    def _on_batch_waveform_complete(self, item: tuple[int, str], result: dict[str, Any]) -> None:
         """Handle single waveform completion in batch."""
         track_id, filepath = item
 
         # Save to database (safe in main thread)
         try:
-            import pickle
             import os
+            import pickle
 
             # Cache waveform
             waveform_bytes = pickle.dumps(result["waveform_data"])
@@ -246,6 +256,7 @@ class WaveformVisualizerPlugin:
         """Handle batch waveform error."""
         track_id, filepath = item
         import os
+
         filename = os.path.basename(filepath)
         # DEBUG level: show which file failed (BatchProcessor already logged the error)
         logging.debug(f"[Batch Waveform] Failed file: {filename}")
@@ -284,7 +295,9 @@ class WaveformWidget(QWidget):
         """Initialize widget."""
         super().__init__()
         self.waveform_data: np.ndarray | None = None
-        self.expected_length: int = 0  # Expected total length (for stable cursor during progressive display)
+        self.expected_length: int = (
+            0  # Expected total length (for stable cursor during progressive display)
+        )
         self.cursor_line: Any = None
         self.waveform_config = waveform_config
         self._init_ui(waveform_config)
@@ -445,6 +458,7 @@ class CompleteWaveformWorker(QThread):
         self.chunk_duration = chunk_duration
         # Set thread name for debugging
         import os
+
         self.setObjectName(f"WaveformWorker-{track_id}-{os.path.basename(filepath)[:20]}")
 
     def run(self) -> None:
@@ -522,9 +536,21 @@ class CompleteWaveformWorker(QThread):
                     treble_partial = full_treble[:write_index]
 
                     # Normalize
-                    bass_norm = bass_partial / np.max(bass_partial) if np.max(bass_partial) > 0 else bass_partial
-                    mid_norm = mid_partial / np.max(mid_partial) if np.max(mid_partial) > 0 else mid_partial
-                    treble_norm = treble_partial / np.max(treble_partial) if np.max(treble_partial) > 0 else treble_partial
+                    bass_norm = (
+                        bass_partial / np.max(bass_partial)
+                        if np.max(bass_partial) > 0
+                        else bass_partial
+                    )
+                    mid_norm = (
+                        mid_partial / np.max(mid_partial)
+                        if np.max(mid_partial) > 0
+                        else mid_partial
+                    )
+                    treble_norm = (
+                        treble_partial / np.max(treble_partial)
+                        if np.max(treble_partial) > 0
+                        else treble_partial
+                    )
 
                     # Pad to expected length for stable display
                     bass_display = np.zeros(expected_length)

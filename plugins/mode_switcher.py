@@ -91,9 +91,7 @@ class ModeSwitcherPlugin:
         from PySide6.QtWidgets import QApplication, QLabel
 
         overlay = QLabel(main_window)
-        overlay.setStyleSheet(
-            "background-color: #1e1e1e; color: #ffffff; font-size: 16px;"
-        )
+        overlay.setStyleSheet("background-color: #1e1e1e; color: #ffffff; font-size: 16px;")
         overlay.setGeometry(0, 0, main_window.width(), main_window.height())
         overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         overlay.raise_()

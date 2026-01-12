@@ -256,14 +256,14 @@ class MainWindow(QMainWindow):
 
     def _on_files_dropped(self, paths: list[Path]) -> None:
         """Handle files/directories dropped on track list."""
-        from jukebox.utils.scanner import FileScanner
         from jukebox.utils.metadata import MetadataExtractor
+        from jukebox.utils.scanner import FileScanner
 
         # Scan all paths (files and directories)
         for path in paths:
             if path.is_file():
                 # Single file - check if it's a supported format
-                if path.suffix.lower().lstrip('.') in self.config.audio.supported_formats:
+                if path.suffix.lower().lstrip(".") in self.config.audio.supported_formats:
                     # Extract metadata and add to database
                     metadata = MetadataExtractor.extract(path)
                     self.database.add_track(metadata)

@@ -4,8 +4,6 @@ import logging
 import re
 from typing import Any
 
-from PySide6.QtWidgets import QLabel, QWidget
-
 
 class GenreEditorPlugin:
     """Edit genre using keyboard shortcuts for code toggles."""
@@ -44,12 +42,14 @@ class GenreEditorPlugin:
             shortcut = shortcut_manager.register(
                 code_config.key,
                 lambda c=code_config.code: self._toggle_code(c),
-                plugin_name=self.name
+                plugin_name=self.name,
             )
             self.shortcuts.append(shortcut)
 
         # Register rating shortcut
-        shortcut = shortcut_manager.register(genre_config.rating_key, self._cycle_rating, plugin_name=self.name)
+        shortcut = shortcut_manager.register(
+            genre_config.rating_key, self._cycle_rating, plugin_name=self.name
+        )
         self.shortcuts.append(shortcut)
 
     def _on_track_loaded(self, track_id: int) -> None:

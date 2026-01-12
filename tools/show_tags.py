@@ -49,11 +49,46 @@ def show_tags(filepath: str) -> None:
 
             # ID3v2 text frames and common Vorbis/FLAC tags
             ALLOWED_TAGS = {
-                "TIT2", "TPE1", "TALB", "TPE2", "TCON", "TDRC", "TYER", "TRCK", "TPOS",
-                "TCOM", "TPUB", "TSRC", "TENC", "TCOP", "TBPM", "TKEY", "TSST", "COMM",
-                "TXXX", "USLT", "TIT1", "TIT3", "TOAL", "TOFN", "TOLY", "TOWN", "TRSN",
-                "ALBUM", "ARTIST", "TITLE", "ALBUMARTIST", "GENRE", "DATE", "COMMENT",
-                "COMPOSER", "PUBLISHER", "TRACKNUMBER", "DISCNUMBER", "BPM", "KEY"
+                "TIT2",
+                "TPE1",
+                "TALB",
+                "TPE2",
+                "TCON",
+                "TDRC",
+                "TYER",
+                "TRCK",
+                "TPOS",
+                "TCOM",
+                "TPUB",
+                "TSRC",
+                "TENC",
+                "TCOP",
+                "TBPM",
+                "TKEY",
+                "TSST",
+                "COMM",
+                "TXXX",
+                "USLT",
+                "TIT1",
+                "TIT3",
+                "TOAL",
+                "TOFN",
+                "TOLY",
+                "TOWN",
+                "TRSN",
+                "ALBUM",
+                "ARTIST",
+                "TITLE",
+                "ALBUMARTIST",
+                "GENRE",
+                "DATE",
+                "COMMENT",
+                "COMPOSER",
+                "PUBLISHER",
+                "TRACKNUMBER",
+                "DISCNUMBER",
+                "BPM",
+                "KEY",
             }
 
             # Translation map for ID3v2 codes to readable names
@@ -116,6 +151,7 @@ def show_tags(filepath: str) -> None:
     except Exception as e:
         print(f"Error reading file: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 

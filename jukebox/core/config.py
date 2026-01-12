@@ -131,9 +131,7 @@ class JukeboxConfig(BaseModel):
     audio: AudioConfig
     ui: UIConfig
     shortcuts: ShortcutsConfig = Field(default_factory=ShortcutsConfig)
-    playback_navigation: PlaybackNavigationConfig = Field(
-        default_factory=PlaybackNavigationConfig
-    )
+    playback_navigation: PlaybackNavigationConfig = Field(default_factory=PlaybackNavigationConfig)
     waveform: WaveformConfig = Field(default_factory=WaveformConfig)
     metadata_editor: MetadataEditorConfig = Field(default_factory=MetadataEditorConfig)
     genre_editor: GenreEditorConfig = Field(default_factory=GenreEditorConfig)

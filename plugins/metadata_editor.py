@@ -179,7 +179,7 @@ class MetadataEditorPlugin:
             else:
                 db_updates[db_column] = value
 
-        set_clause = ", ".join(f"{col} = ?" for col in db_updates.keys())
+        set_clause = ", ".join(f"{col} = ?" for col in db_updates)
         query = f"UPDATE tracks SET {set_clause} WHERE id = ?"
         values = list(db_updates.values()) + [self.current_track_id]
 
@@ -189,8 +189,8 @@ class MetadataEditorPlugin:
         # Update file tags
         try:
             from mutagen import File
-            from mutagen.id3 import ID3, ID3NoHeaderError
             from mutagen.easyid3 import EasyID3
+            from mutagen.id3 import ID3NoHeaderError
 
             # Try to determine file format
             if filepath.lower().endswith(".mp3"):

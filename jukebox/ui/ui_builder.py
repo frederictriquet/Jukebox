@@ -67,9 +67,7 @@ class UIBuilder:
             central.layout().addWidget(widget)
             self.plugin_widgets.append(widget)
 
-    def insert_widget_in_layout(
-        self, layout: Any, index: int, widget: QWidget
-    ) -> None:
+    def insert_widget_in_layout(self, layout: Any, index: int, widget: QWidget) -> None:
         """Insert widget in a layout at specific index and track it.
 
         Args:
@@ -86,7 +84,7 @@ class UIBuilder:
             # Remove widget from its parent layout first
             if widget.parent():
                 parent = widget.parent()
-                if hasattr(parent, 'layout') and parent.layout():
+                if hasattr(parent, "layout") and parent.layout():
                     parent.layout().removeWidget(widget)
 
             # Hide widget immediately before deletion

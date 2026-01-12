@@ -199,9 +199,7 @@ class BatchProcessor(QObject):
                     lambda result: self._on_item_complete(item, result)
                 )
             if hasattr(self.current_worker, "error"):
-                self.current_worker.error.connect(
-                    lambda error: self._on_item_error(item, error)
-                )
+                self.current_worker.error.connect(lambda error: self._on_item_error(item, error))
 
             # Start worker
             self.current_worker.start()
@@ -221,7 +219,9 @@ class BatchProcessor(QObject):
         duration = time.time() - self.current_item_start_time
 
         # Log with duration (INFO level)
-        logging.info(f"[{self.name}] [{self.current_index + 1}/{self.total_items}] ✓ Complete ({duration:.1f}s)")
+        logging.info(
+            f"[{self.name}] [{self.current_index + 1}/{self.total_items}] ✓ Complete ({duration:.1f}s)"
+        )
 
         # DEBUG level: show the actual item
         logging.debug(f"[{self.name}] Completed item: {item}")
@@ -249,7 +249,9 @@ class BatchProcessor(QObject):
         duration = time.time() - self.current_item_start_time
 
         # Log error with duration
-        logging.error(f"[{self.name}] [{self.current_index + 1}/{self.total_items}] ✗ Error ({duration:.1f}s): {error}")
+        logging.error(
+            f"[{self.name}] [{self.current_index + 1}/{self.total_items}] ✗ Error ({duration:.1f}s): {error}"
+        )
 
         # DEBUG level: show the actual item
         logging.debug(f"[{self.name}] Failed item: {item}")
@@ -273,8 +275,11 @@ class BatchProcessor(QObject):
         # Disconnect custom signals only (not Qt internal signals)
         # Qt internal signals to skip: destroyed, objectNameChanged, started, finished
         qt_internal_signals = {
-            b"destroyed", b"objectNameChanged", b"started", b"finished",
-            b"deleteLater"
+            b"destroyed",
+            b"objectNameChanged",
+            b"started",
+            b"finished",
+            b"deleteLater",
         }
 
         try:
@@ -312,7 +317,9 @@ class BatchProcessor(QObject):
         BatchProcessor._global_orphan_workers.append(self.current_worker)
 
         # Cleanup finished orphans
-        BatchProcessor._global_orphan_workers = [w for w in BatchProcessor._global_orphan_workers if w.isRunning()]
+        BatchProcessor._global_orphan_workers = [
+            w for w in BatchProcessor._global_orphan_workers if w.isRunning()
+        ]
 
         self.current_worker = None
 
@@ -326,10 +333,7 @@ class BatchProcessor(QObject):
         seconds = total_duration % 60
 
         # Format duration
-        if minutes > 0:
-            duration_str = f"{minutes}m {seconds:.0f}s"
-        else:
-            duration_str = f"{seconds:.1f}s"
+        duration_str = f"{minutes}m {seconds:.0f}s" if minutes > 0 else f"{seconds:.1f}s"
 
         failed_count = self.total_items - self.completed_count
 

@@ -1,5 +1,6 @@
 """Keyboard shortcut management."""
 
+import logging
 from collections.abc import Callable
 
 from PySide6.QtCore import QObject
@@ -21,7 +22,9 @@ class ShortcutManager(QObject):
         self.shortcuts: dict[str, QShortcut] = {}
         self.shortcut_owners: dict[str, str] = {}  # key_sequence -> plugin_name
 
-    def register(self, key_sequence: str, callback: Callable[[], None], plugin_name: str | None = None) -> QShortcut:
+    def register(
+        self, key_sequence: str, callback: Callable[[], None], plugin_name: str | None = None
+    ) -> QShortcut:
         """Register a keyboard shortcut.
 
         Args:

@@ -169,24 +169,22 @@ class PluginManager:
         if old_mode:
             for plugin in self.plugins.values():
                 plugin_modes = getattr(plugin, "modes", ["jukebox", "curating"])
-                if old_mode in plugin_modes:
-                    if hasattr(plugin, "deactivate"):
-                        try:
-                            plugin.deactivate(old_mode)
-                            logging.debug(f"Deactivated plugin: {plugin.name}")
-                        except Exception as e:
-                            logging.error(f"Error deactivating plugin {plugin.name}: {e}")
+                if old_mode in plugin_modes and hasattr(plugin, "deactivate"):
+                    try:
+                        plugin.deactivate(old_mode)
+                        logging.debug(f"Deactivated plugin: {plugin.name}")
+                    except Exception as e:
+                        logging.error(f"Error deactivating plugin {plugin.name}: {e}")
 
         # Activate plugins for new mode
         for plugin in self.plugins.values():
             plugin_modes = getattr(plugin, "modes", ["jukebox", "curating"])
-            if new_mode in plugin_modes:
-                if hasattr(plugin, "activate"):
-                    try:
-                        plugin.activate(new_mode)
-                        logging.debug(f"Activated plugin: {plugin.name}")
-                    except Exception as e:
-                        logging.error(f"Error activating plugin {plugin.name}: {e}")
+            if new_mode in plugin_modes and hasattr(plugin, "activate"):
+                try:
+                    plugin.activate(new_mode)
+                    logging.debug(f"Activated plugin: {plugin.name}")
+                except Exception as e:
+                    logging.error(f"Error activating plugin {plugin.name}: {e}")
 
         self.current_mode = new_mode
         logging.info(f"Switched to {new_mode} mode")

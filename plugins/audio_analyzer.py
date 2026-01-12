@@ -4,8 +4,8 @@ import logging
 from typing import Any
 
 import numpy as np
-from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
+from PySide6.QtCore import QThread, Signal
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 
 def analyze_audio_file(filepath: str) -> dict[str, float]:
@@ -20,8 +20,9 @@ def analyze_audio_file(filepath: str) -> dict[str, float]:
     Raises:
         Exception: If analysis fails
     """
-    import librosa
     import warnings
+
+    import librosa
 
     # Suppress librosa/audioread warnings for corrupted files
     warnings.filterwarnings("ignore", category=UserWarning, module="librosa")
@@ -86,12 +87,14 @@ class AudioAnalyzerPlugin:
 
         # Auto-start batch analysis at startup (after waveforms)
         from PySide6.QtCore import QTimer
+
         QTimer.singleShot(2000, self._start_batch_analysis)  # 2s delay to let waveforms start first
 
     def _on_tracks_added(self) -> None:
         """Auto-analyze tracks when they are added."""
         # Use a delay to let waveforms generate first
         from PySide6.QtCore import QTimer
+
         QTimer.singleShot(1000, self._start_batch_analysis)
 
     def register_ui(self, ui_builder: Any) -> None:
@@ -135,7 +138,10 @@ class AudioAnalyzerPlugin:
             # Analysis not available yet - add to priority queue if batch is running
             self.analysis_widget.show_analyzing()
 
-            if AudioAnalyzerPlugin._batch_processor and AudioAnalyzerPlugin._batch_processor.is_running:
+            if (
+                AudioAnalyzerPlugin._batch_processor
+                and AudioAnalyzerPlugin._batch_processor.is_running
+            ):
                 # Get filepath
                 track = self.context.database.conn.execute(
                     "SELECT filepath FROM tracks WHERE id = ?", (track_id,)
@@ -199,6 +205,7 @@ class AudioAnalyzerPlugin:
         already_analyzed = 0
 
         import os
+
         for track in tracks:
             analysis = self.context.database.conn.execute(
                 "SELECT tempo, spectral_centroid, zero_crossing_rate, rms_energy FROM audio_analysis WHERE track_id = ?",
@@ -219,9 +226,7 @@ class AudioAnalyzerPlugin:
             if needs_analysis:
                 tracks_to_analyze.append((track["id"], track["filepath"]))
                 if analysis:
-                    logging.info(
-                        f"  Track {track['id']}: {filename} - NEEDS ANALYSIS (incomplete)"
-                    )
+                    logging.info(f"  Track {track['id']}: {filename} - NEEDS ANALYSIS (incomplete)")
                 else:
                     logging.info(f"  Track {track['id']}: {filename} - NEEDS ANALYSIS (no record)")
             else:
@@ -258,9 +263,7 @@ class AudioAnalyzerPlugin:
         # Start batch processing
         AudioAnalyzerPlugin._batch_processor.start(tracks_to_analyze)
 
-    def _on_batch_analysis_complete(
-        self, item: tuple[int, str], result: dict[str, float]
-    ) -> None:
+    def _on_batch_analysis_complete(self, item: tuple[int, str], result: dict[str, float]) -> None:
         """Handle single analysis completion in batch."""
         track_id, filepath = item
 
@@ -323,6 +326,7 @@ class AudioAnalyzerPlugin:
         """Handle batch analysis error."""
         track_id, filepath = item
         import os
+
         filename = os.path.basename(filepath)
         # DEBUG level: show which file failed (BatchProcessor already logged the error)
         logging.debug(f"[Batch Analysis] Failed file: {filename}")
@@ -439,7 +443,9 @@ class AnalysisWidget(QWidget):
         self.tempo_label.setText(f"Tempo: {tempo:.0f} BPM" if tempo else "Tempo: --")
 
         centroid = analysis.get("spectral_centroid")
-        self.centroid_label.setText(f"Brightness: {centroid:.0f} Hz" if centroid else "Brightness: --")
+        self.centroid_label.setText(
+            f"Brightness: {centroid:.0f} Hz" if centroid else "Brightness: --"
+        )
 
         zcr = analysis.get("zero_crossing_rate")
         self.zcr_label.setText(f"Percussive: {zcr:.3f}" if zcr else "Percussive: --")
@@ -467,6 +473,7 @@ class AnalysisWorker(QThread):
         self.filepath = filepath
         # Set thread name for debugging
         import os
+
         self.setObjectName(f"AnalysisWorker-{track_id}-{os.path.basename(filepath)[:20]}")
 
     def run(self) -> None:
