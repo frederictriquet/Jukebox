@@ -209,10 +209,23 @@ class MainWindow(QMainWindow):
 
     def _perform_search(self, query: str) -> None:
         """Perform FTS5 search."""
+        # Save current playing track
+        current_track = self.player.current_file if self.player.current_file else None
+
         self.track_list.clear_tracks()
         tracks = self.database.get_all_tracks() if not query else self.database.search_tracks(query)
         for track in tracks:
             self.track_list.add_track(Path(track["filepath"]), track["title"], track["artist"])
+
+        # Restore selection of current playing track
+        if current_track:
+            for i in range(self.track_list.count()):
+                item = self.track_list.item(i)
+                if item:
+                    item_path = item.data(Qt.ItemDataRole.UserRole)
+                    if item_path == current_track:
+                        self.track_list.setCurrentRow(i)
+                        break
 
     def _load_tracks_from_db(self) -> None:
         """Load all tracks from database."""
@@ -223,7 +236,23 @@ class MainWindow(QMainWindow):
 
     def _on_tracks_changed(self) -> None:
         """Handle tracks added/changed event - reload track list."""
+        # Save current selection (track filepath)
+        current_track = None
+        if self.player.current_file:
+            current_track = self.player.current_file
+
+        # Reload tracks
         self._load_tracks_from_db()
+
+        # Restore selection of current playing track
+        if current_track:
+            for i in range(self.track_list.count()):
+                item = self.track_list.item(i)
+                if item:
+                    item_path = item.data(Qt.ItemDataRole.UserRole)
+                    if item_path == current_track:
+                        self.track_list.setCurrentRow(i)
+                        break
 
     def _on_files_dropped(self, paths: list[Path]) -> None:
         """Handle files/directories dropped on track list."""
@@ -282,8 +311,16 @@ class MainWindow(QMainWindow):
 
     def _on_pause(self) -> None:
         """Handle pause button click."""
+        # Pause toggles play/pause in VLC
+        was_playing = self.player.is_playing()
         self.player.pause()
-        self.position_timer.stop()
+
+        # If we were playing, we're now paused -> stop timer
+        # If we were paused, we're now playing -> start timer
+        if was_playing:
+            self.position_timer.stop()
+        else:
+            self.position_timer.start()
 
     def _on_stop(self) -> None:
         """Handle stop button click."""

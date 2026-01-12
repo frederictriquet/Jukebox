@@ -237,10 +237,8 @@ class MetadataEditorPlugin:
         except Exception as e:
             logging.error(f"Failed to save file tags: {e}")
 
-        # Emit event to notify that track metadata was updated
-        from jukebox.core.event_bus import Events
-
-        self.context.emit(Events.TRACKS_ADDED)
+        # Note: We don't emit TRACKS_ADDED here to avoid reloading the entire track list
+        # The track list display will update on next full reload
 
     def shutdown(self) -> None:
         """Cleanup."""

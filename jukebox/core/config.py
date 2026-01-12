@@ -92,6 +92,24 @@ class MetadataEditorConfig(BaseModel):
     ]
 
 
+class GenreCodeConfig(BaseModel):
+    """Configuration for a single genre code."""
+
+    key: str
+    code: str
+
+
+class GenreEditorConfig(BaseModel):
+    """Genre editor configuration."""
+
+    codes: list[GenreCodeConfig] = [
+        GenreCodeConfig(key="D", code="D"),
+        GenreCodeConfig(key="C", code="C"),
+        GenreCodeConfig(key="P", code="P"),
+    ]
+    rating_key: str = "*"
+
+
 class PluginsConfig(BaseModel):
     """Plugins configuration."""
 
@@ -118,6 +136,7 @@ class JukeboxConfig(BaseModel):
     )
     waveform: WaveformConfig = Field(default_factory=WaveformConfig)
     metadata_editor: MetadataEditorConfig = Field(default_factory=MetadataEditorConfig)
+    genre_editor: GenreEditorConfig = Field(default_factory=GenreEditorConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     logging: LoggingConfig
 

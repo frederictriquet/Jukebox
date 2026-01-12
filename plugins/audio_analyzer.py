@@ -8,6 +8,54 @@ from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 
+def analyze_audio_file(filepath: str) -> dict[str, float]:
+    """Analyze audio file and extract features.
+
+    Args:
+        filepath: Path to audio file
+
+    Returns:
+        Dict with tempo, spectral_centroid, zero_crossing_rate, rms_energy
+
+    Raises:
+        Exception: If analysis fails
+    """
+    import librosa
+    import warnings
+
+    # Suppress librosa/audioread warnings for corrupted files
+    warnings.filterwarnings("ignore", category=UserWarning, module="librosa")
+
+    # Load audio
+    y, sr = librosa.load(filepath, sr=None, mono=True)
+
+    if len(y) == 0:
+        raise ValueError("Empty audio file")
+
+    # Tempo detection
+    tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+    tempo = float(tempo) if tempo else 0.0
+
+    # RMS energy
+    rms = librosa.feature.rms(y=y)[0]
+    rms_energy = float(np.mean(rms))
+
+    # Spectral centroid (brightness)
+    centroid = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
+    spectral_centroid = float(np.mean(centroid))
+
+    # Zero crossing rate (percussiveness)
+    zcr = librosa.feature.zero_crossing_rate(y)[0]
+    zero_crossing_rate = float(np.mean(zcr))
+
+    return {
+        "tempo": tempo,
+        "spectral_centroid": spectral_centroid,
+        "zero_crossing_rate": zero_crossing_rate,
+        "rms_energy": rms_energy,
+    }
+
+
 class AudioAnalyzerPlugin:
     """Analyze audio tracks and extract musical features."""
 
@@ -24,6 +72,7 @@ class AudioAnalyzerPlugin:
         self.analysis_widget: AnalysisWidget | None = None
         self.current_worker: Any = None
         self.current_track_id: int | None = None
+        self.batch_worker: Any = None
 
     def initialize(self, context: Any) -> None:
         """Initialize plugin."""
@@ -40,6 +89,10 @@ class AudioAnalyzerPlugin:
         self.analysis_widget = AnalysisWidget()
         self.analysis_widget.analyze_more_clicked.connect(self._on_analyze_more_clicked)
         ui_builder.add_bottom_widget(self.analysis_widget)
+
+        # Add menu for batch analysis
+        menu = ui_builder.add_menu("&Analysis")
+        ui_builder.add_menu_action(menu, "Analyze All Tracks (Batch)", self._start_batch_analysis)
 
     def _on_track_loaded(self, track_id: int) -> None:
         """Display track analysis when loaded."""
@@ -76,6 +129,10 @@ class AudioAnalyzerPlugin:
     def _on_analysis_complete(self, track_id: int) -> None:
         """Handle audio analysis completion event."""
         if not self.analysis_widget:
+            return
+
+        # Only update if this is the currently displayed track
+        if track_id != self.current_track_id:
             return
 
         # Reload analysis from database
@@ -175,6 +232,140 @@ class AudioAnalyzerPlugin:
             self.analysis_widget.set_button_state("error")
             self.analysis_widget.show_error(error_msg)
 
+    def _start_batch_analysis(self) -> None:
+        """Start batch analysis of all tracks."""
+        # Get all tracks from database
+        tracks = self.context.database.conn.execute(
+            "SELECT id, filepath FROM tracks ORDER BY id"
+        ).fetchall()
+
+        if not tracks:
+            logging.info("No tracks to analyze")
+            return
+
+        total_tracks = len(tracks)
+        logging.info(f"Checking analysis status for {total_tracks} tracks...")
+
+        # Filter tracks that don't have complete analysis
+        tracks_to_analyze = []
+        already_analyzed = 0
+
+        import os
+        for track in tracks:
+            analysis = self.context.database.conn.execute(
+                "SELECT tempo, spectral_centroid, zero_crossing_rate, rms_energy FROM audio_analysis WHERE track_id = ?",
+                (track["id"],),
+            ).fetchone()
+
+            filename = os.path.basename(track["filepath"])
+
+            # Analyze if no analysis record OR if any advanced field is NULL
+            needs_analysis = (
+                not analysis
+                or analysis["tempo"] is None
+                or analysis["spectral_centroid"] is None
+                or analysis["zero_crossing_rate"] is None
+                or analysis["rms_energy"] is None
+            )
+
+            if needs_analysis:
+                tracks_to_analyze.append((track["id"], track["filepath"]))
+                if analysis:
+                    logging.info(
+                        f"  Track {track['id']}: {filename} - NEEDS ANALYSIS (incomplete: tempo={analysis['tempo']}, centroid={analysis['spectral_centroid']}, zcr={analysis['zero_crossing_rate']}, rms={analysis['rms_energy']})"
+                    )
+                else:
+                    logging.info(f"  Track {track['id']}: {filename} - NEEDS ANALYSIS (no record)")
+            else:
+                already_analyzed += 1
+                logging.info(f"  Track {track['id']}: {filename} - already analyzed")
+
+        logging.info(f"\nBatch analysis status: {already_analyzed} already done, {len(tracks_to_analyze)} to analyze (total: {total_tracks})\n")
+
+        if not tracks_to_analyze:
+            logging.info("All tracks already have complete analysis")
+            self.context.emit("status_message", message="All tracks analyzed", color="#00FF00")
+            return
+
+        logging.info(f"Starting batch analysis of {len(tracks_to_analyze)} tracks")
+
+        # Start batch worker
+        self.batch_worker = BatchAnalysisWorker(tracks_to_analyze)
+        self.batch_worker.progress.connect(self._on_batch_progress)
+        self.batch_worker.track_analyzed.connect(self._on_batch_track_analyzed)
+        self.batch_worker.finished_signal.connect(self._on_batch_finished)
+        self.batch_worker.start()
+
+    def _on_batch_progress(self, current: int, total: int, track_id: int) -> None:
+        """Handle batch analysis progress."""
+        message = f"Analyzing track {current}/{total}"
+        logging.info(f"Batch analysis: {current}/{total} - Track ID {track_id}")
+        # Send to status bar
+        self.context.emit("status_message", message=message, color="#00FF00")
+
+    def _on_batch_track_analyzed(self, track_id: int, analysis: dict[str, float]) -> None:
+        """Handle single track analysis completion in batch (runs in main thread)."""
+        # Check if context still valid (app not shutting down)
+        if not self.context or not self.context.database or not self.context.database.conn:
+            return
+
+        # Save to database (safe in main thread)
+        try:
+            # Check if row exists (created by waveform)
+            existing = self.context.database.conn.execute(
+                "SELECT track_id FROM audio_analysis WHERE track_id = ?", (track_id,)
+            ).fetchone()
+
+            if existing:
+                # Update existing row
+                self.context.database.conn.execute(
+                    """
+                    UPDATE audio_analysis
+                    SET tempo = ?, spectral_centroid = ?, zero_crossing_rate = ?, rms_energy = ?
+                    WHERE track_id = ?
+                """,
+                    (
+                        analysis["tempo"],
+                        analysis["spectral_centroid"],
+                        analysis["zero_crossing_rate"],
+                        analysis["rms_energy"],
+                        track_id,
+                    ),
+                )
+            else:
+                # Create new row with only advanced analysis (no waveform data)
+                self.context.database.conn.execute(
+                    """
+                    INSERT INTO audio_analysis (
+                        track_id, tempo, spectral_centroid, zero_crossing_rate, rms_energy
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                """,
+                    (
+                        track_id,
+                        analysis["tempo"],
+                        analysis["spectral_centroid"],
+                        analysis["zero_crossing_rate"],
+                        analysis["rms_energy"],
+                    ),
+                )
+
+            self.context.database.conn.commit()
+
+            # Emit event to update UI if this track is currently displayed
+            self.context.emit("audio_analysis_complete", track_id=track_id)
+
+        except Exception as e:
+            logging.error(f"Failed to save batch analysis for track {track_id}: {e}")
+
+    def _on_batch_finished(self, analyzed: int) -> None:
+        """Handle batch analysis completion."""
+        message = f"Batch analysis complete: {analyzed} tracks"
+        logging.info(f"Batch analysis complete: {analyzed} tracks analyzed")
+        # Send to status bar
+        self.context.emit("status_message", message=message, color="#00FF00")
+        self.batch_worker = None
+
     def shutdown(self) -> None:
         """Cleanup."""
         if self.current_worker:
@@ -189,6 +380,18 @@ class AudioAnalyzerPlugin:
                 w for w in AudioAnalyzerPlugin._orphan_workers if w.isRunning()
             ]
         self.current_worker = None
+
+        # Disconnect batch worker signals to prevent crashes
+        if self.batch_worker:
+            try:
+                self.batch_worker.progress.disconnect()
+                self.batch_worker.track_analyzed.disconnect()
+                self.batch_worker.finished_signal.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            # Don't wait for it - let it finish in background
+            self.batch_worker.setParent(None)
+        self.batch_worker = None
 
 
 class AnalysisWidget(QWidget):
@@ -309,39 +512,52 @@ class AdvancedAnalysisWorker(QThread):
     def run(self) -> None:
         """Perform advanced analysis."""
         try:
-            import librosa
-
-            # Load audio
-            y, sr = librosa.load(self.filepath, sr=None, mono=True)
-
-            if len(y) == 0:
-                self.error.emit(self.track_id, "Empty audio file")
-                return
-
-            # Tempo detection
-            tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-            tempo = float(tempo) if tempo else 0.0
-
-            # RMS energy
-            rms = librosa.feature.rms(y=y)[0]
-            rms_energy = float(np.mean(rms))
-
-            # Spectral centroid (brightness)
-            centroid = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
-            spectral_centroid = float(np.mean(centroid))
-
-            # Zero crossing rate (percussiveness)
-            zcr = librosa.feature.zero_crossing_rate(y)[0]
-            zero_crossing_rate = float(np.mean(zcr))
-
-            analysis = {
-                "tempo": tempo,
-                "spectral_centroid": spectral_centroid,
-                "zero_crossing_rate": zero_crossing_rate,
-                "rms_energy": rms_energy,
-            }
-
+            analysis = analyze_audio_file(self.filepath)
             self.analysis_complete.emit(self.track_id, analysis)
-
         except Exception as e:
             self.error.emit(self.track_id, str(e))
+
+
+class BatchAnalysisWorker(QThread):
+    """Background worker for batch analysis of multiple tracks."""
+
+    progress = Signal(int, int, int)  # current, total, track_id
+    track_analyzed = Signal(int, dict)  # track_id, analysis results
+    finished_signal = Signal(int)  # number of tracks analyzed
+
+    def __init__(self, tracks: list[tuple[int, str]], parent: Any = None):
+        """Initialize worker.
+
+        Args:
+            tracks: List of (track_id, filepath) tuples to analyze
+            parent: Parent object
+        """
+        super().__init__(parent)
+        self.tracks = tracks
+
+    def run(self) -> None:
+        """Analyze all tracks in batch."""
+        total = len(self.tracks)
+        analyzed = 0
+
+        for idx, (track_id, filepath) in enumerate(self.tracks, 1):
+            try:
+                self.progress.emit(idx, total, track_id)
+
+                # Log which file we're analyzing
+                import os
+                filename = os.path.basename(filepath)
+                logging.info(f"[{idx}/{total}] Analyzing: {filename}")
+
+                # Analyze file
+                analysis = analyze_audio_file(filepath)
+
+                # Emit results to main thread for database saving
+                self.track_analyzed.emit(track_id, analysis)
+
+                analyzed += 1
+
+            except Exception as e:
+                logging.error(f"Batch analysis error for track {track_id} ({filepath}): {e}")
+
+        self.finished_signal.emit(analyzed)

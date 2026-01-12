@@ -62,6 +62,22 @@ metadata_editor:
       label: "Year"
       width: 80
 
+genre_editor:
+  codes:
+    - key: "D"
+      code: "D"
+    - key: "C"
+      code: "C"
+    - key: "P"
+      code: "P"
+    - key: "T"
+      code: "T"
+    - key: "H"
+      code: "H"
+    - key: "E"
+      code: "E"
+  rating_key: "*"
+
 plugins:
   enabled:
     - mode_switcher
@@ -81,11 +97,13 @@ plugins:
     - playlists_plugin
     - waveform_visualizer
   curating_mode:
+    - status_bar
     - mode_switcher
     - theme_switcher
     - playback_navigation
     - track_info
     - metadata_editor
+    - genre_editor
     - stats_plugin
     - playlists_plugin
     - duplicate_finder

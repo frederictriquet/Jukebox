@@ -27,6 +27,9 @@ class TrackList(QListWidget):
         self.customContextMenuRequested.connect(self._show_context_menu)
         self.playlists: list[Any] = []
 
+        # Never take keyboard focus - global shortcuts always active
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
         # Enable drag and drop
         self.setAcceptDrops(True)
 

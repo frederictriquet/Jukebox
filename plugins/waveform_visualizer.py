@@ -46,6 +46,10 @@ class WaveformVisualizerPlugin:
 
         ui_builder.add_bottom_widget(self.waveform_widget)
 
+        # Add menu for batch waveform generation
+        menu = ui_builder.add_menu("&Waveform")
+        ui_builder.add_menu_action(menu, "Generate All Waveforms (Batch)", self._start_batch_waveform)
+
     def _update_cursor(self, position: float) -> None:
         """Update cursor position."""
         if self.waveform_widget:
@@ -370,6 +374,58 @@ class WaveformVisualizerPlugin:
         # Clear generation state
         self.current_generation = None
         self.current_worker = None
+
+    def _start_batch_waveform(self) -> None:
+        """Start batch waveform generation for all tracks."""
+        # Get all tracks
+        tracks = self.context.database.conn.execute(
+            "SELECT id, filepath FROM tracks ORDER BY id"
+        ).fetchall()
+
+        if not tracks:
+            logging.info("No tracks to generate waveforms for")
+            return
+
+        # Filter tracks without waveforms
+        tracks_to_generate = []
+        already_generated = 0
+
+        import os
+        for track in tracks:
+            cached = self.context.database.conn.execute(
+                "SELECT track_id FROM waveform_cache WHERE track_id = ?", (track["id"],)
+            ).fetchone()
+
+            filename = os.path.basename(track["filepath"])
+
+            if not cached:
+                tracks_to_generate.append((track["id"], track["filepath"]))
+                logging.info(f"  Track {track['id']}: {filename} - NEEDS WAVEFORM")
+            else:
+                already_generated += 1
+                logging.info(f"  Track {track['id']}: {filename} - already has waveform")
+
+        logging.info(
+            f"\nWaveform batch status: {already_generated} already done, {len(tracks_to_generate)} to generate (total: {len(tracks)})\n"
+        )
+
+        if not tracks_to_generate:
+            logging.info("All tracks already have waveforms")
+            self.context.emit("status_message", message="All waveforms generated", color="#00FF00")
+            return
+
+        logging.info(f"Starting batch waveform generation for {len(tracks_to_generate)} tracks")
+        self.context.emit(
+            "status_message",
+            message=f"Generating {len(tracks_to_generate)} waveforms...",
+            color="#00FF00",
+        )
+
+        # Generate waveforms one by one (uses existing chunk-based system)
+        for idx, (track_id, filepath) in enumerate(tracks_to_generate, 1):
+            logging.info(f"[{idx}/{len(tracks_to_generate)}] Generating waveform for track {track_id}")
+            self._generate_waveform(track_id, filepath)
+            # Note: This is asynchronous, so they'll queue up
 
     def shutdown(self) -> None:
         """Cleanup."""
