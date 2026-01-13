@@ -109,6 +109,9 @@ genre_editor:
     - key: "O"
       code: "O"
       name: "Organic"
+    - key: "N"
+      code: "N"
+      name: "Namaste"
   rating_key: "*"
 
 file_manager:
