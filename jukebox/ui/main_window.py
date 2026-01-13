@@ -59,6 +59,12 @@ class MainWindow(QMainWindow):
         self.event_bus.subscribe(Events.TRACKS_ADDED, self._on_tracks_changed)
         # Subscribe to TRACK_DELETED early so MainWindow is called BEFORE TrackListModel
         self.event_bus.subscribe(Events.TRACK_DELETED, self._on_track_deleted)
+        # Subscribe to navigation events
+        self.event_bus.subscribe(Events.SELECT_NEXT_TRACK, self._on_select_next_track)
+        self.event_bus.subscribe(Events.SELECT_PREVIOUS_TRACK, self._on_select_previous_track)
+        self.event_bus.subscribe(Events.SELECT_RANDOM_TRACK, self._on_select_random_track)
+        # Subscribe to track list manipulation events
+        self.event_bus.subscribe(Events.LOAD_TRACK_LIST, self._on_load_track_list)
 
         # Timer for updating position
         self.position_timer = QTimer()
@@ -472,3 +478,47 @@ class MainWindow(QMainWindow):
             layout = central.layout() if central else None
             if layout:
                 layout.addWidget(self.fallback_position_slider)
+
+    def _on_select_next_track(self) -> None:
+        """Handle SELECT_NEXT_TRACK event."""
+        self.track_list.select_next_track()
+
+    def _on_select_previous_track(self) -> None:
+        """Handle SELECT_PREVIOUS_TRACK event."""
+        self.track_list.select_previous_track()
+
+    def _on_select_random_track(self) -> None:
+        """Handle SELECT_RANDOM_TRACK event."""
+        import random
+
+        model = self.track_list.model()
+        if model.rowCount() > 0:
+            random_row = random.randint(0, model.rowCount() - 1)
+            self.track_list.selectRow(random_row)
+            filepath = model.data(model.index(random_row, 0), Qt.ItemDataRole.UserRole)
+            if filepath:
+                self._load_and_play(filepath)
+
+    def _on_load_track_list(self, filepaths: list[Path]) -> None:
+        """Handle LOAD_TRACK_LIST event - load specific tracks into the list.
+
+        Args:
+            filepaths: List of track filepaths to load
+        """
+        self.track_list.clear_tracks()
+
+        # Load track data from database for each filepath
+        for filepath in filepaths:
+            track = self.database.conn.execute(
+                "SELECT title, artist, genre, duration_seconds FROM tracks WHERE filepath = ?",
+                (str(filepath),),
+            ).fetchone()
+
+            if track:
+                self.track_list.add_track(
+                    filepath,
+                    track["title"],
+                    track["artist"],
+                    track["genre"] if "genre" in track.keys() else None,
+                    track["duration_seconds"] if "duration_seconds" in track.keys() else None,
+                )

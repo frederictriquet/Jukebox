@@ -169,11 +169,11 @@ class PlaylistDialog(QDialog):
 
         from pathlib import Path
 
-        self.context.app.track_list.clear_tracks()
-        for track in tracks:
-            self.context.app.track_list.add_track(
-                Path(track["filepath"]), track["title"], track["artist"]
-            )
+        from jukebox.core.event_bus import Events
+
+        # Emit event to load playlist tracks into track list
+        track_filepaths = [Path(track["filepath"]) for track in tracks]
+        self.context.emit(Events.LOAD_TRACK_LIST, filepaths=track_filepaths)
 
         self.close()
 

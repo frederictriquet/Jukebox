@@ -33,14 +33,14 @@ class RecommendationsPlugin:
 
         self.context.emit(Events.SEARCH_PERFORMED, results=recommendations)
 
-        # For now, just display in track list
+        # Emit event to load recommendations into track list
         from pathlib import Path
 
-        self.context.app.track_list.clear_tracks()
-        for track in recommendations:
-            self.context.app.track_list.add_track(
-                Path(track["filepath"]), track["title"], track["artist"]
-            )
+        from jukebox.core.event_bus import Events
+
+        # Convert to list of filepaths
+        track_filepaths = [Path(track["filepath"]) for track in recommendations]
+        self.context.emit(Events.LOAD_TRACK_LIST, filepaths=track_filepaths)
 
     def _get_recommendations(self, limit: int = 10) -> list[Any]:
         """Get track recommendations."""

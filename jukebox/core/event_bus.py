@@ -66,3 +66,11 @@ class Events:
     TRACKS_ADDED = "tracks_added"
     TRACK_DELETED = "track_deleted"
     SEARCH_PERFORMED = "search_performed"
+
+    # Navigation events
+    SELECT_NEXT_TRACK = "select_next_track"
+    SELECT_PREVIOUS_TRACK = "select_previous_track"
+    SELECT_RANDOM_TRACK = "select_random_track"
+
+    # Track list manipulation events
+    LOAD_TRACK_LIST = "load_track_list"  # Load specific tracks into the list

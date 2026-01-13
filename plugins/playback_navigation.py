@@ -172,11 +172,15 @@ class PlaybackNavigationPlugin:
 
     def _next_track(self) -> None:
         """Play next track in list."""
-        self.context.app.track_list.select_next_track()
+        from jukebox.core.event_bus import Events
+
+        self.context.emit(Events.SELECT_NEXT_TRACK)
 
     def _previous_track(self) -> None:
         """Play previous track in list."""
-        self.context.app.track_list.select_previous_track()
+        from jukebox.core.event_bus import Events
+
+        self.context.emit(Events.SELECT_PREVIOUS_TRACK)
 
     def _jump_to_percent(self, percent: float) -> None:
         """Jump to specific percentage of track.
@@ -198,15 +202,9 @@ class PlaybackNavigationPlugin:
 
     def _play_random_track(self) -> None:
         """Play a random track from the list."""
-        import random
+        from jukebox.core.event_bus import Events
 
-        track_list = self.context.app.track_list
-        if track_list.count() > 0:
-            random_row = random.randint(0, track_list.count() - 1)
-            track_list.setCurrentRow(random_row)
-            item = track_list.item(random_row)
-            if item:
-                track_list._on_item_clicked(item)
+        self.context.emit(Events.SELECT_RANDOM_TRACK)
 
     def _toggle_auto_play_from_menu(self) -> None:
         """Toggle auto-play from menu action."""
