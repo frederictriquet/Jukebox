@@ -16,17 +16,25 @@ COLUMNS = ["waveform", "filename", "genre", "rating", "duration"]
 class TrackListModel(QAbstractTableModel):
     """Model for track data."""
 
-    def __init__(self, database: Any = None, event_bus: Any = None) -> None:
+    def __init__(self, database: Any = None, event_bus: Any = None, config: Any = None) -> None:
         """Initialize model.
 
         Args:
             database: Database instance (for refreshing track data)
             event_bus: Event bus instance (for subscribing to updates)
+            config: Config instance (for genre names)
         """
         super().__init__()
         self.tracks: list[dict[str, Any]] = []  # Full track data from database
         self.filepath_to_row: dict[Path, int] = {}  # Cache for fast lookup
-        self.cell_renderer = CellRenderer(COLUMNS)
+
+        # Build genre names mapping from config
+        genre_names = {}
+        if config and hasattr(config, "genre_editor"):
+            for code_config in config.genre_editor.codes:
+                genre_names[code_config.code] = code_config.name
+
+        self.cell_renderer = CellRenderer(COLUMNS, genre_names)
         self.database = database
         self.event_bus = event_bus
 
@@ -36,6 +44,8 @@ class TrackListModel(QAbstractTableModel):
             event_bus.subscribe("track_metadata_updated", self._on_track_metadata_updated)
             # Listen for waveform completion (emitted by waveform_visualizer)
             event_bus.subscribe("audio_analysis_complete", self._on_waveform_complete)
+            # Listen for track deletion (emitted by file_manager)
+            event_bus.subscribe("track_deleted", self._on_track_deleted)
 
     def _on_track_metadata_updated(self, filepath: Path) -> None:
         """Handle track metadata update event.
@@ -112,6 +122,27 @@ class TrackListModel(QAbstractTableModel):
                 self.dataChanged.emit(waveform_index, waveform_index, [])
             except Exception:
                 pass
+
+    def _on_track_deleted(self, filepath: Path) -> None:
+        """Handle track deletion event.
+
+        Args:
+            filepath: Path of the track that was deleted
+        """
+        # Find the row
+        row = self.find_row_by_filepath(filepath)
+        if row < 0:
+            return
+
+        # Remove from model
+        self.beginRemoveRows(QModelIndex(), row, row)
+        self.tracks.pop(row)
+        self.endRemoveRows()
+
+        # Rebuild filepath_to_row cache (row indices changed)
+        self.filepath_to_row.clear()
+        for idx, track in enumerate(self.tracks):
+            self.filepath_to_row[track["filepath"]] = idx
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         """Get number of rows."""
@@ -221,18 +252,19 @@ class TrackList(QTableView):
     add_to_playlist_requested = Signal(Path, int)  # filepath, playlist_id
     files_dropped = Signal(list)  # List of Path objects (files and directories)
 
-    def __init__(self, parent: Any = None, database: Any = None, event_bus: Any = None):
+    def __init__(self, parent: Any = None, database: Any = None, event_bus: Any = None, config: Any = None):
         """Initialize track list.
 
         Args:
             parent: Parent widget
             database: Database instance (for refreshing data)
             event_bus: Event bus instance (for subscribing to updates)
+            config: Config instance (for genre names)
         """
         super().__init__(parent)
 
         # Set model
-        model = TrackListModel(database, event_bus)
+        model = TrackListModel(database, event_bus, config)
         self.setModel(model)
 
         # Table configuration

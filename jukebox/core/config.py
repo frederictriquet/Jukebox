@@ -97,17 +97,34 @@ class GenreCodeConfig(BaseModel):
 
     key: str
     code: str
+    name: str
 
 
 class GenreEditorConfig(BaseModel):
     """Genre editor configuration."""
 
     codes: list[GenreCodeConfig] = [
-        GenreCodeConfig(key="D", code="D"),
-        GenreCodeConfig(key="C", code="C"),
-        GenreCodeConfig(key="P", code="P"),
+        GenreCodeConfig(key="D", code="D", name="Deep"),
+        GenreCodeConfig(key="C", code="C", name="Classic"),
+        GenreCodeConfig(key="P", code="P", name="Power"),
     ]
     rating_key: str = "*"
+
+
+class FileManagerDestinationConfig(BaseModel):
+    """Configuration for a file manager destination."""
+
+    name: str
+    path: str
+    key: str
+
+
+class FileManagerConfig(BaseModel):
+    """File manager configuration."""
+
+    destinations: list[FileManagerDestinationConfig] = []
+    trash_directory: str = ""
+    trash_key: str = "Delete"
 
 
 class PluginsConfig(BaseModel):
@@ -135,6 +152,7 @@ class JukeboxConfig(BaseModel):
     waveform: WaveformConfig = Field(default_factory=WaveformConfig)
     metadata_editor: MetadataEditorConfig = Field(default_factory=MetadataEditorConfig)
     genre_editor: GenreEditorConfig = Field(default_factory=GenreEditorConfig)
+    file_manager: FileManagerConfig = Field(default_factory=FileManagerConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     logging: LoggingConfig
 

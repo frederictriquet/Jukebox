@@ -9,17 +9,18 @@ from PySide6.QtGui import QColor, QPainter, QPixmap
 class CellRenderer:
     """Dispatch rendering to column-specific stylers."""
 
-    def __init__(self, columns: list[str]):
+    def __init__(self, columns: list[str], genre_names: dict[str, str] | None = None):
         """Initialize renderer with column names.
 
         Args:
             columns: List of column names
+            genre_names: Mapping of genre codes to full names (optional)
         """
         self.columns = columns
         self.stylers = {
             "waveform": WaveformStyler(),
             "filename": FilenameStyler(),
-            "genre": GenreStyler(),
+            "genre": GenreStyler(genre_names or {}),
             "rating": RatingStyler(),
             "duration": DurationStyler(),
         }
@@ -119,19 +120,58 @@ class FilenameStyler(Styler):
 class GenreStyler(Styler):
     """Styler for genre column."""
 
+    # Pattern to validate genre format (from PyQT project)
+    # Note: *0 is not allowed, only *1 to *5
+    GENRE_PATTERN = r"^([A-Z])(-[A-Z])*(-\*[1-5])?$"
+
+    def __init__(self, genre_names: dict[str, str]):
+        """Initialize with genre name mapping.
+
+        Args:
+            genre_names: Mapping of genre codes to full names
+        """
+        self.genre_names = genre_names
+
+    def _is_valid_genre(self, genre: str) -> bool:
+        """Check if genre matches the expected pattern."""
+        import re
+        return bool(re.match(self.GENRE_PATTERN, genre))
+
     def display(self, data: Any, track: dict[str, Any]) -> str:
         """Display genre codes without rating."""
         if not data:
             return ""
+
+        # Validate genre format - show first chars if invalid
+        if not self._is_valid_genre(data):
+            # Show first 20 characters of invalid genre
+            return data[:20] if len(data) > 20 else data
 
         # Parse genre (format: "C-D-P-*3")
         parts = data.split("-") if data else []
         codes = [p for p in parts if not p.startswith("*")]
         return "-".join(codes) if codes else ""
 
-    def decoration(self, data: Any, track: dict[str, Any]) -> QColor | None:
-        """Red if no genre."""
+    def tooltip(self, data: Any, track: dict[str, Any]) -> str | None:
+        """Show full genre names."""
         if not data:
+            return None
+
+        # Parse genre codes
+        parts = data.split("-") if data else []
+        codes = sorted([p for p in parts if not p.startswith("*")])
+
+        # Map codes to full names
+        full_names = [self.genre_names.get(code, code) for code in codes]
+
+        return " - ".join(full_names) if full_names else None
+
+    def decoration(self, data: Any, track: dict[str, Any]) -> QColor | None:
+        """Red if no genre or invalid genre."""
+        if not data:
+            return QColor(Qt.GlobalColor.red)
+        # Also show red for invalid genres
+        if not self._is_valid_genre(data):
             return QColor(Qt.GlobalColor.red)
         return None
 

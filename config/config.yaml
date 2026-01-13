@@ -66,17 +66,58 @@ genre_editor:
   codes:
     - key: "D"
       code: "D"
+      name: "Deep"
     - key: "C"
       code: "C"
+      name: "Classic"
     - key: "P"
       code: "P"
+      name: "Power"
     - key: "T"
       code: "T"
+      name: "Trance"
     - key: "H"
       code: "H"
-    - key: "E"
-      code: "E"
+      name: "House"
+    - key: "G"
+      code: "G"
+      name: "Garden"
+    - key: "I"
+      code: "I"
+      name: "Ibiza"
+    - key: "A"
+      code: "A"
+      name: "A Cappella"
+    - key: "W"
+      code: "W"
+      name: "Weed"
+    - key: "B"
+      code: "B"
+      name: "Banger"
+    - key: "F"
+      code: "F"
+      name: "Fun"
+    - key: "R"
+      code: "R"
+      name: "Retro"
+    - key: "L"
+      code: "L"
+      name: "Loop"
+    - key: "U"
+      code: "U"
+      name: "Unclassable"
+    - key: "O"
+      code: "O"
+      name: "Organic"
   rating_key: "*"
+
+file_manager:
+  destinations:
+    - name: "Good"
+      path: "~/Music/Good/2026-01"
+      key: "@"
+  trash_directory: "~/Music/dustbin"
+  trash_key: "Delete"
 
 plugins:
   enabled:
@@ -93,6 +134,7 @@ plugins:
     - audio_analyzer
     - metadata_editor
     - genre_editor
+    - file_manager
     - status_bar
 
 logging:

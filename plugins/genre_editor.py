@@ -61,7 +61,20 @@ class GenreEditorPlugin:
             "SELECT genre FROM tracks WHERE id = ?", (track_id,)
         ).fetchone()
 
-        self.current_genre = track["genre"] if track and track["genre"] else ""
+        # Validate genre format - if invalid, reset to empty
+        if track and track["genre"]:
+            genre = track["genre"]
+            # Validate against pattern (same as GenreStyler)
+            # Note: *0 is not allowed, only *1 to *5
+            genre_pattern = r"^([A-Z])(-[A-Z])*(-\*[1-5])?$"
+            if re.match(genre_pattern, genre):
+                self.current_genre = genre
+            else:
+                # Invalid genre - reset to empty
+                logging.info(f"Invalid genre format '{genre}' for track {track_id}, resetting to empty")
+                self.current_genre = ""
+        else:
+            self.current_genre = ""
 
     def _toggle_code(self, code: str) -> None:
         """Toggle a genre code in the current genre."""

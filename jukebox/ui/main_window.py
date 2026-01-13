@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 from jukebox.core.audio_player import AudioPlayer
 from jukebox.core.config import JukeboxConfig
 from jukebox.core.database import Database
-from jukebox.core.event_bus import EventBus
+from jukebox.core.event_bus import EventBus, Events
 from jukebox.core.plugin_manager import PluginContext, PluginManager
 from jukebox.core.shortcut_manager import ShortcutManager
 from jukebox.ui.components.player_controls import PlayerControls
@@ -56,8 +56,6 @@ class MainWindow(QMainWindow):
         self.event_bus = EventBus()
 
         # Subscribe to events
-        from jukebox.core.event_bus import Events
-
         self.event_bus.subscribe(Events.TRACKS_ADDED, self._on_tracks_changed)
 
         # Timer for updating position
@@ -100,7 +98,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.search_bar)
 
         # Track list (with stretch to take all available space)
-        self.track_list = TrackList(database=self.database, event_bus=self.event_bus)
+        self.track_list = TrackList(database=self.database, event_bus=self.event_bus, config=self.config)
         layout.addWidget(self.track_list, stretch=1)
 
         # Player controls (no stretch - fixed height)
@@ -207,6 +205,10 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Scan Complete", f"Added {added} tracks")
         self._load_tracks_from_db()
 
+        # Emit event to notify plugins (start batch processing)
+        if added > 0:
+            self.event_bus.emit(Events.TRACKS_ADDED)
+
     def _perform_search(self, query: str) -> None:
         """Perform FTS5 search."""
         # Save current playing track
@@ -279,8 +281,6 @@ class MainWindow(QMainWindow):
                 scanner.scan_directory(path, recursive=True)
 
         # Emit event to notify plugins
-        from jukebox.core.event_bus import Events
-
         self.event_bus.emit(Events.TRACKS_ADDED)
 
     def _load_and_play(self, filepath: Path) -> None:
@@ -296,8 +296,6 @@ class MainWindow(QMainWindow):
                     "SELECT id FROM tracks WHERE filepath = ?", (str(filepath),)
                 ).fetchone()
                 if track:
-                    from jukebox.core.event_bus import Events
-
                     self.event_bus.emit(Events.TRACK_LOADED, track_id=track["id"])
 
             self.player.play()
