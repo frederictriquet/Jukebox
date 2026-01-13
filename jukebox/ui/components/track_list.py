@@ -45,7 +45,9 @@ class TrackListModel(QAbstractTableModel):
             # Listen for waveform completion (emitted by waveform_visualizer)
             event_bus.subscribe("audio_analysis_complete", self._on_waveform_complete)
             # Listen for track deletion (emitted by file_manager)
-            event_bus.subscribe("track_deleted", self._on_track_deleted)
+            from jukebox.core.event_bus import Events
+
+            event_bus.subscribe(Events.TRACK_DELETED, self._on_track_deleted)
 
     def _on_track_metadata_updated(self, filepath: Path) -> None:
         """Handle track metadata update event.
@@ -105,7 +107,9 @@ class TrackListModel(QAbstractTableModel):
         ).fetchone()
 
         if waveform_cache:
+            import logging
             import pickle
+
             try:
                 waveform_preview = pickle.loads(waveform_cache["waveform_data"])
                 # Update track data
@@ -120,24 +124,32 @@ class TrackListModel(QAbstractTableModel):
                 # Emit dataChanged to refresh the waveform column
                 waveform_index = self.index(row, 0)  # Waveform is column 0
                 self.dataChanged.emit(waveform_index, waveform_index, [])
-            except Exception:
-                pass
+            except Exception as e:
+                logging.error(f"[TrackListModel] Failed to update waveform for {filepath}: {e}", exc_info=True)
 
-    def _on_track_deleted(self, filepath: Path) -> None:
+    def _on_track_deleted(self, filepath: Path, deleted_row: int | None = None) -> None:
         """Handle track deletion event.
 
         Args:
             filepath: Path of the track that was deleted
+            deleted_row: Row that was deleted (optional, for logging)
         """
+        import logging
+
         # Find the row
         row = self.find_row_by_filepath(filepath)
         if row < 0:
+            logging.warning(f"[TrackListModel] Could not find row for deleted track: {filepath}")
             return
+
+        logging.info(f"[TrackListModel] Deleting row {row} (total rows: {len(self.tracks)})")
 
         # Remove from model
         self.beginRemoveRows(QModelIndex(), row, row)
         self.tracks.pop(row)
         self.endRemoveRows()
+
+        logging.info(f"[TrackListModel] Row deleted, remaining rows: {len(self.tracks)}")
 
         # Rebuild filepath_to_row cache (row indices changed)
         self.filepath_to_row.clear()
@@ -203,11 +215,13 @@ class TrackListModel(QAbstractTableModel):
                 ).fetchone()
 
                 if waveform_cache:
+                    import logging
                     import pickle
+
                     try:
                         waveform_preview = pickle.loads(waveform_cache["waveform_data"])
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.error(f"[TrackListModel] Failed to load waveform for {filepath}: {e}", exc_info=True)
 
         row = len(self.tracks)
         self.beginInsertRows(QModelIndex(), row, row)

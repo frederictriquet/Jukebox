@@ -250,7 +250,7 @@ class WaveformVisualizerPlugin:
             logging.debug(f"[Batch Waveform] Saved: {filename}")
 
         except Exception as e:
-            logging.error(f"[Batch Waveform] Failed to save results for track {track_id}: {e}")
+            logging.error(f"[Batch Waveform] Failed to save results for track {track_id}: {e}", exc_info=True)
 
     def _on_batch_waveform_error(self, item: tuple[int, str], error: str) -> None:
         """Handle batch waveform error."""
@@ -613,4 +613,11 @@ class CompleteWaveformWorker(QThread):
             self.complete.emit(result)
 
         except Exception as e:
-            self.error.emit(str(e))
+            import os
+            import traceback
+
+            filename = os.path.basename(self.filepath)
+            error_msg = f"Error processing {filename}: {e}"
+            logging.error(f"[WaveformWorker] {error_msg}", exc_info=True)
+            logging.error(f"[WaveformWorker] Full traceback:\n{traceback.format_exc()}")
+            self.error.emit(error_msg)

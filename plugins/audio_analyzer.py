@@ -320,7 +320,7 @@ class AudioAnalyzerPlugin:
             logging.debug(f"[Batch Analysis] Saved: {filename}")
 
         except Exception as e:
-            logging.error(f"[Batch Analysis] Failed to save results for track {track_id}: {e}")
+            logging.error(f"[Batch Analysis] Failed to save results for track {track_id}: {e}", exc_info=True)
 
     def _on_batch_analysis_error(self, item: tuple[int, str], error: str) -> None:
         """Handle batch analysis error."""
@@ -482,4 +482,11 @@ class AnalysisWorker(QThread):
             analysis = analyze_audio_file(self.filepath)
             self.complete.emit(analysis)
         except Exception as e:
-            self.error.emit(str(e))
+            import os
+            import traceback
+
+            filename = os.path.basename(self.filepath)
+            error_msg = f"Error analyzing {filename}: {e}"
+            logging.error(f"[AudioAnalysisWorker] {error_msg}", exc_info=True)
+            logging.error(f"[AudioAnalysisWorker] Full traceback:\n{traceback.format_exc()}")
+            self.error.emit(error_msg)

@@ -57,6 +57,7 @@ class MainWindow(QMainWindow):
 
         # Subscribe to events
         self.event_bus.subscribe(Events.TRACKS_ADDED, self._on_tracks_changed)
+        self.event_bus.subscribe(Events.TRACK_DELETED, self._on_track_deleted)
 
         # Timer for updating position
         self.position_timer = QTimer()
@@ -261,6 +262,62 @@ class MainWindow(QMainWindow):
             row = model.find_row_by_filepath(current_track)
             if row >= 0:
                 self.track_list.selectRow(row)
+
+    def _on_track_deleted(self, filepath: Path) -> None:
+        """Handle track deletion - stop current playback and play next track.
+
+        Args:
+            filepath: Path of deleted track
+        """
+        # Check if the deleted file was currently playing
+        was_deleted_file_playing = (
+            self.player.current_file and self.player.current_file == filepath
+        )
+
+        logging.info(
+            f"[MainWindow] Track deleted: {filepath.name}, was_playing={was_deleted_file_playing}"
+        )
+
+        # Stop current playback if the deleted file was playing
+        if was_deleted_file_playing:
+            self.player.stop()
+            self.position_timer.stop()
+            logging.debug("[MainWindow] Stopped playback of deleted track")
+
+            # Defer playing next track to ensure TrackListModel has finished removing the row
+            # Use QTimer.singleShot to execute after event loop processes the model update
+            QTimer.singleShot(50, self._play_next_after_deletion)
+
+    def _play_next_after_deletion(self) -> None:
+        """Play next track after deletion (deferred execution)."""
+        model = self.track_list.model()
+
+        if model.rowCount() == 0:
+            # No tracks left
+            self.setWindowTitle(self.config.ui.window_title)
+            logging.info("[MainWindow] No more tracks after deletion")
+            return
+
+        # Auto-play the next track
+        # Use current selection if valid, otherwise play first track
+        play_row = 0
+
+        current_index = self.track_list.selectionModel().currentIndex()
+        if current_index.isValid() and current_index.row() < model.rowCount():
+            play_row = current_index.row()
+            logging.debug(f"[MainWindow] Using current selection row {play_row}")
+        else:
+            logging.debug("[MainWindow] No valid selection, playing row 0")
+
+        # Select and play
+        logging.info(f"[MainWindow] Selecting and playing row {play_row}")
+        self.track_list.selectRow(play_row)
+        next_filepath = model.data(model.index(play_row, 0), Qt.ItemDataRole.UserRole)
+        if next_filepath:
+            logging.info(f"[MainWindow] Loading next track: {next_filepath}")
+            self._load_and_play(next_filepath)
+        else:
+            logging.error(f"[MainWindow] Could not get filepath for row {play_row}")
 
     def _on_files_dropped(self, paths: list[Path]) -> None:
         """Handle files/directories dropped on track list."""

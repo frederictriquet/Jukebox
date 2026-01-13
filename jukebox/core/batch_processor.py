@@ -205,7 +205,7 @@ class BatchProcessor(QObject):
             self.current_worker.start()
 
         except Exception as e:
-            logging.error(f"[{self.name}] Failed to create worker: {e}")
+            logging.error(f"[{self.name}] Failed to create worker: {e}", exc_info=True)
             self._on_item_error(item, str(e))
 
     def _on_item_complete(self, item: Any, result: Any) -> None:
@@ -298,9 +298,10 @@ class BatchProcessor(QObject):
                         signal_obj = getattr(self.current_worker, signal_name_str)
                         try:
                             signal_obj.disconnect()
-                        except (RuntimeWarning, RuntimeError, TypeError):
-                            pass
-        except Exception:
+                        except (RuntimeWarning, RuntimeError, TypeError) as e:
+                            logging.debug(f"[{self.name}] Could not disconnect {signal_name_str}: {e}")
+        except Exception as e:
+            logging.warning(f"[{self.name}] Error during signal cleanup: {e}", exc_info=True)
             # Fallback: try known custom signals
             try:
                 if hasattr(self.current_worker, "complete"):
@@ -309,8 +310,8 @@ class BatchProcessor(QObject):
                     self.current_worker.error.disconnect()
                 if hasattr(self.current_worker, "progress_update"):
                     self.current_worker.progress_update.disconnect()
-            except (RuntimeWarning, RuntimeError, TypeError):
-                pass
+            except (RuntimeWarning, RuntimeError, TypeError) as e:
+                logging.debug(f"[{self.name}] Could not disconnect fallback signals: {e}")
 
         # Move to orphan list (let it finish naturally)
         self.current_worker.setParent(None)

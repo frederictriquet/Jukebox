@@ -64,4 +64,5 @@ class Events:
     TRACK_PLAYING = "track_playing"
     TRACK_STOPPED = "track_stopped"
     TRACKS_ADDED = "tracks_added"
+    TRACK_DELETED = "track_deleted"
     SEARCH_PERFORMED = "search_performed"

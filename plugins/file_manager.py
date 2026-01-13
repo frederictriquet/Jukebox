@@ -111,23 +111,26 @@ class FileManagerPlugin:
             return
 
         try:
+            # Save filepath before moving
+            old_filepath = self.current_filepath
+
             # Move file
             shutil.move(str(self.current_filepath), str(dest_path))
-            logging.info(f"Moved {self.current_filepath} -> {dest_path}")
+            logging.info(f"Moved {old_filepath} -> {dest_path}")
 
-            # Update database with new filepath
+            # Delete from database (track moved out of library)
             self.context.database.conn.execute(
-                "UPDATE tracks SET filepath = ? WHERE id = ?",
-                (str(dest_path), self.current_track_id),
+                "DELETE FROM tracks WHERE id = ?",
+                (self.current_track_id,),
             )
             self.context.database.conn.commit()
+            logging.info(f"Deleted track {self.current_track_id} from database")
 
-            # Update current filepath
-            old_filepath = self.current_filepath
-            self.current_filepath = dest_path
+            # Remove from track list and play next (via event)
+            # The MainWindow will handle playing the next track
+            from jukebox.core.event_bus import Events
 
-            # Emit event to update track list display
-            self.context.emit("track_metadata_updated", filepath=dest_path)
+            self.context.emit(Events.TRACK_DELETED, filepath=old_filepath)
 
             # Show status message
             self.context.emit(
@@ -135,7 +138,9 @@ class FileManagerPlugin:
                 message=f"Moved to {dest_config.name}: {new_filename}",
             )
 
-            logging.info(f"Updated database: {old_filepath} -> {dest_path}")
+            # Reset current track
+            self.current_track_id = None
+            self.current_filepath = None
 
         except Exception as e:
             logging.error(f"Failed to move file: {e}")
@@ -181,21 +186,17 @@ class FileManagerPlugin:
             self.context.database.conn.commit()
             logging.info(f"Deleted track {self.current_track_id} from database")
 
-            # Remove from track list (emit event with filepath)
-            self.context.emit("track_deleted", filepath=old_filepath)
+            # Remove from track list and play next (via event)
+            # The MainWindow will handle playing the next track
+            from jukebox.core.event_bus import Events
+
+            self.context.emit(Events.TRACK_DELETED, filepath=old_filepath)
 
             # Show status message
             self.context.emit(
                 "status_message",
                 message=f"Deleted: {old_filepath.name}",
             )
-
-            # Try to play next track if available
-            # Access main window's track_list widget
-            if hasattr(self.context, "app") and hasattr(self.context.app, "track_list"):
-                track_list = self.context.app.track_list
-                track_list.select_next_track()
-                logging.info("Playing next track")
 
             # Reset current track
             self.current_track_id = None
