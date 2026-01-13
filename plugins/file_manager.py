@@ -229,3 +229,22 @@ class FileManagerPlugin:
     def shutdown(self) -> None:
         """Cleanup on application exit."""
         pass
+
+    def get_settings_schema(self) -> dict[str, Any]:
+        """Return settings schema for configuration UI.
+
+        Returns:
+            Dict mapping setting keys to their configuration
+        """
+        return {
+            "trash_directory": {
+                "label": "Trash Directory",
+                "type": "directory",
+                "default": self.context.config.file_manager.trash_directory,
+            },
+            "trash_key": {
+                "label": "Trash Shortcut",
+                "type": "shortcut",
+                "default": self.context.config.file_manager.trash_key,
+            },
+        }

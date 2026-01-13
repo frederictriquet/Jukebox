@@ -158,6 +158,19 @@ class Database:
         """
         )
 
+        # Plugin settings (runtime configuration overrides)
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS plugin_settings (
+                plugin_name TEXT NOT NULL,
+                setting_key TEXT NOT NULL,
+                setting_value TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (plugin_name, setting_key)
+            )
+        """
+        )
+
         self.conn.commit()
 
     def add_track(self, track_data: dict[str, Any]) -> int:

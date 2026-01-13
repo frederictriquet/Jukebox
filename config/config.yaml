@@ -135,6 +135,7 @@ plugins:
     - metadata_editor
     - genre_editor
     - file_manager
+    - conf_manager
     - status_bar
 
 logging:

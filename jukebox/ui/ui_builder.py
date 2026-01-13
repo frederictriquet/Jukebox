@@ -22,6 +22,24 @@ class UIBuilder:
         self.plugin_menus.append(menu)
         return menu
 
+    def get_or_create_menu(self, name: str) -> QMenu:
+        """Get existing menu or create new one.
+
+        Args:
+            name: Menu name (e.g., "&Settings")
+
+        Returns:
+            QMenu instance
+        """
+        # Check if menu already exists
+        menubar = self.main_window.menuBar()
+        for action in menubar.actions():
+            if action.text() == name:
+                return action.menu()
+
+        # Create new menu
+        return self.add_menu(name)
+
     def clear_plugin_menus(self) -> None:
         """Clear all menus added by plugins."""
         menubar = self.main_window.menuBar()
