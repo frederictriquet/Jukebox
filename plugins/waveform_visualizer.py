@@ -285,6 +285,31 @@ class WaveformVisualizerPlugin:
                 pass
         # Don't set to None - keep it alive so orphan workers can finish
 
+    def get_settings_schema(self) -> dict[str, Any]:
+        """Return settings schema for configuration UI.
+
+        Returns:
+            Dict mapping setting keys to their configuration
+        """
+        return {
+            "chunk_duration": {
+                "label": "Chunk Duration",
+                "type": "int",
+                "min": 1,
+                "max": 60,
+                "suffix": " seconds",
+                "default": int(self.context.config.waveform.chunk_duration),
+            },
+            "height": {
+                "label": "Waveform Height",
+                "type": "int",
+                "min": 20,
+                "max": 200,
+                "suffix": " px",
+                "default": self.context.config.waveform.height,
+            },
+        }
+
 
 class WaveformWidget(QWidget):
     """Interactive waveform widget with playback cursor."""

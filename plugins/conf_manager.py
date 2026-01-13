@@ -182,10 +182,12 @@ class ListEditor(QWidget):
             self.table.setCellWidget(row, col, widget)
 
         # Delete button in last column
-        delete_btn = QPushButton("✕")
+        delete_btn = QPushButton("🗑")
         delete_btn.setToolTip("Delete this row")
         delete_btn.setMaximumWidth(40)
         delete_btn.setFont(delete_btn.font())  # Ensure font supports the character
+        # Override the padding for this specific button
+        delete_btn.setStyleSheet("padding: 4px;")
         delete_btn.clicked.connect(lambda checked, r=row: self._delete_row(r))
         self.table.setCellWidget(row, len(self.field_names), delete_btn)
 
@@ -425,111 +427,6 @@ class ConfigDialog(QDialog):
         # Use plugin's description or name as tab title
         tab_title = getattr(plugin, "description", plugin_name).title()
         self.tabs.addTab(widget, tab_title)
-
-    def _add_file_manager_tab_old(self) -> None:
-        """Add file manager configuration tab."""
-        widget = QWidget()
-        layout = QVBoxLayout()
-
-        # Scroll area
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll_content = QWidget()
-        form = QFormLayout()
-
-        # Trash directory (with file browser)
-        self.trash_dir_input = DirectoryInput()
-        form.addRow("Trash Directory:", self.trash_dir_input)
-
-        # Trash key (with shortcut capture)
-        self.trash_key_input = ShortcutInput()
-        form.addRow("Trash Shortcut:", self.trash_key_input)
-
-        # Note about destinations
-        info_label = QPushButton("Destinations are configured in config.yaml")
-        info_label.setEnabled(False)
-        form.addRow(info_label)
-
-        scroll_content.setLayout(form)
-        scroll.setWidget(scroll_content)
-        layout.addWidget(scroll)
-
-        widget.setLayout(layout)
-        self.tabs.addTab(widget, "File Manager")
-
-    def _add_genre_editor_tab(self) -> None:
-        """Add genre editor configuration tab."""
-        widget = QWidget()
-        layout = QVBoxLayout()
-
-        # Info
-        info_label = QPushButton("Genre codes and shortcuts are configured in config.yaml")
-        info_label.setEnabled(False)
-        layout.addWidget(info_label)
-
-        widget.setLayout(layout)
-        self.tabs.addTab(widget, "Genre Editor")
-
-    def _add_playback_navigation_tab(self) -> None:
-        """Add playback navigation configuration tab."""
-        widget = QWidget()
-        layout = QVBoxLayout()
-
-        form = QFormLayout()
-
-        # Seek amount
-        self.seek_amount_input = QSpinBox()
-        self.seek_amount_input.setRange(1, 60)
-        self.seek_amount_input.setSuffix(" seconds")
-        form.addRow("Seek Amount:", self.seek_amount_input)
-
-        # Rapid press threshold
-        self.rapid_press_input = QSpinBox()
-        self.rapid_press_input.setRange(100, 2000)
-        self.rapid_press_input.setSuffix(" ms")
-        form.addRow("Rapid Press Threshold:", self.rapid_press_input)
-
-        # Max seek multiplier
-        self.max_seek_mult_input = QSpinBox()
-        self.max_seek_mult_input.setRange(1, 10)
-        form.addRow("Max Seek Multiplier:", self.max_seek_mult_input)
-
-        layout.addLayout(form)
-        layout.addStretch()
-
-        widget.setLayout(layout)
-        self.tabs.addTab(widget, "Playback Navigation")
-
-    def _add_waveform_tab(self) -> None:
-        """Add waveform visualizer configuration tab."""
-        widget = QWidget()
-        layout = QVBoxLayout()
-
-        form = QFormLayout()
-
-        # Chunk duration
-        self.chunk_duration_input = QSpinBox()
-        self.chunk_duration_input.setRange(1, 60)
-        self.chunk_duration_input.setSuffix(" seconds")
-        form.addRow("Chunk Duration:", self.chunk_duration_input)
-
-        # Height
-        self.waveform_height_input = QSpinBox()
-        self.waveform_height_input.setRange(20, 200)
-        self.waveform_height_input.setSuffix(" px")
-        form.addRow("Waveform Height:", self.waveform_height_input)
-
-        # Colors (read-only for now)
-        bass_color_input = QLineEdit()
-        bass_color_input.setReadOnly(True)
-        bass_color_input.setPlaceholderText("Configured in config.yaml")
-        form.addRow("Bass Color:", bass_color_input)
-
-        layout.addLayout(form)
-        layout.addStretch()
-
-        widget.setLayout(layout)
-        self.tabs.addTab(widget, "Waveform")
 
     def load_settings(self) -> None:
         """Load settings from database for all plugins."""

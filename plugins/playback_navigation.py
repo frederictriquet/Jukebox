@@ -255,3 +255,35 @@ class PlaybackNavigationPlugin:
     def shutdown(self) -> None:
         """Cleanup."""
         pass
+
+    def get_settings_schema(self) -> dict[str, Any]:
+        """Return settings schema for configuration UI.
+
+        Returns:
+            Dict mapping setting keys to their configuration
+        """
+        return {
+            "seek_amount": {
+                "label": "Seek Amount",
+                "type": "int",
+                "min": 1,
+                "max": 60,
+                "suffix": " seconds",
+                "default": int(self.context.config.playback_navigation.seek_amount),
+            },
+            "rapid_press_threshold": {
+                "label": "Rapid Press Threshold",
+                "type": "int",
+                "min": 100,
+                "max": 2000,
+                "suffix": " ms",
+                "default": int(self.context.config.playback_navigation.rapid_press_threshold * 1000),
+            },
+            "max_seek_multiplier": {
+                "label": "Max Seek Multiplier",
+                "type": "int",
+                "min": 1,
+                "max": 10,
+                "default": self.context.config.playback_navigation.max_seek_multiplier,
+            },
+        }

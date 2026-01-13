@@ -221,3 +221,30 @@ class GenreEditorPlugin:
     def shutdown(self) -> None:
         """Cleanup on application exit."""
         pass
+
+    def get_settings_schema(self) -> dict[str, Any]:
+        """Return settings schema for configuration UI.
+
+        Returns:
+            Dict mapping setting keys to their configuration
+        """
+        return {
+            "genre_codes": {
+                "label": "Genre Codes",
+                "type": "list",
+                "item_schema": {
+                    "code": {"label": "Code", "type": "string"},
+                    "name": {"label": "Name", "type": "string"},
+                    "key": {"label": "Shortcut", "type": "shortcut"},
+                },
+                "default": [
+                    {"code": code.code, "name": code.name, "key": code.key}
+                    for code in self.context.config.genre_editor.codes
+                ],
+            },
+            "rating_key": {
+                "label": "Rating Shortcut",
+                "type": "shortcut",
+                "default": self.context.config.genre_editor.rating_key,
+            },
+        }
