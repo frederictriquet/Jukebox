@@ -16,6 +16,9 @@ COLUMNS = ["waveform", "filename", "genre", "rating", "duration"]
 class TrackListModel(QAbstractTableModel):
     """Model for track data."""
 
+    # Signal emitted after a row is deleted (so others can safely query the model)
+    row_deleted = Signal(int)  # deleted_row index (before deletion)
+
     def __init__(self, database: Any = None, event_bus: Any = None, config: Any = None) -> None:
         """Initialize model.
 
@@ -144,6 +147,9 @@ class TrackListModel(QAbstractTableModel):
 
         logging.info(f"[TrackListModel] Deleting row {row} (total rows: {len(self.tracks)})")
 
+        # Save deleted row before removing
+        deleted_row_index = row
+
         # Remove from model
         self.beginRemoveRows(QModelIndex(), row, row)
         self.tracks.pop(row)
@@ -155,6 +161,9 @@ class TrackListModel(QAbstractTableModel):
         self.filepath_to_row.clear()
         for idx, track in enumerate(self.tracks):
             self.filepath_to_row[track["filepath"]] = idx
+
+        # Emit signal so MainWindow can safely query the updated model
+        self.row_deleted.emit(deleted_row_index)
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         """Get number of rows."""

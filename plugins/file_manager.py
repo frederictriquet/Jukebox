@@ -127,7 +127,6 @@ class FileManagerPlugin:
             logging.info(f"Deleted track {self.current_track_id} from database")
 
             # Remove from track list and play next (via event)
-            # The MainWindow will handle playing the next track
             from jukebox.core.event_bus import Events
 
             self.context.emit(Events.TRACK_DELETED, filepath=old_filepath)
@@ -187,7 +186,6 @@ class FileManagerPlugin:
             logging.info(f"Deleted track {self.current_track_id} from database")
 
             # Remove from track list and play next (via event)
-            # The MainWindow will handle playing the next track
             from jukebox.core.event_bus import Events
 
             self.context.emit(Events.TRACK_DELETED, filepath=old_filepath)
