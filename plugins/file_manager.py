@@ -237,6 +237,19 @@ class FileManagerPlugin:
             Dict mapping setting keys to their configuration
         """
         return {
+            "destinations": {
+                "label": "Destinations",
+                "type": "list",
+                "item_schema": {
+                    "name": {"label": "Name", "type": "string"},
+                    "path": {"label": "Path", "type": "directory"},
+                    "key": {"label": "Shortcut", "type": "shortcut"},
+                },
+                "default": [
+                    {"name": dest.name, "path": dest.path, "key": dest.key}
+                    for dest in self.context.config.file_manager.destinations
+                ],
+            },
             "trash_directory": {
                 "label": "Trash Directory",
                 "type": "directory",

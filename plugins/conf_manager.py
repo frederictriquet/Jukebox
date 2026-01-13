@@ -14,10 +14,13 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLineEdit,
     QPushButton,
     QScrollArea,
     QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -73,38 +76,159 @@ class ConfManagerPlugin:
             self.conf_dialog.close()
 
 
-class DirectoryInput(QWidget):
-    """Widget for selecting a directory."""
+class DirectoryInput(QLineEdit):
+    """Widget for selecting a directory - click to browse."""
 
     def __init__(self, parent: Any = None):
         """Initialize widget."""
         super().__init__(parent)
-        layout = QHBoxLayout()
+        self.setPlaceholderText("Click to select directory...")
+        # Set cursor to indicate it's clickable
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mousePressEvent(self, event: Any) -> None:  # noqa: N802
+        """Open directory browser on click."""
+        current_dir = self.text() or str(Path.home())
+        directory = QFileDialog.getExistingDirectory(self, "Select Directory", current_dir)
+        if directory:
+            self.setText(directory)
+        super().mousePressEvent(event)
+
+
+class ListEditor(QWidget):
+    """Widget for editing a list of structured items."""
+
+    def __init__(self, item_schema: dict[str, Any], parent: Any = None):
+        """Initialize widget.
+
+        Args:
+            item_schema: Schema for each item in the list
+                {
+                    "field_name": {"label": "Label", "type": "string|directory|shortcut"},
+                    ...
+                }
+        """
+        super().__init__(parent)
+        self.item_schema = item_schema
+        self.field_names = list(item_schema.keys())
+
+        layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
 
-        self.line_edit = QLineEdit()
-        layout.addWidget(self.line_edit)
+        # Table
+        self.table = QTableWidget()
+        self.table.setColumnCount(len(self.field_names) + 1)  # +1 for delete button
+        self.table.setMinimumHeight(200)
 
-        browse_btn = QPushButton("Browse...")
-        browse_btn.clicked.connect(self._browse)
-        layout.addWidget(browse_btn)
+        # Set headers
+        headers = [schema["label"] for schema in item_schema.values()] + [""]
+        self.table.setHorizontalHeaderLabels(headers)
+
+        # Set column widths based on field types
+        header = self.table.horizontalHeader()
+        for col, (field_name, field_schema) in enumerate(item_schema.items()):
+            field_type = field_schema.get("type", "string")
+
+            if field_type == "shortcut":
+                # Shortcuts are small (e.g., "Ctrl+1", "Delete")
+                self.table.setColumnWidth(col, 120)
+                header.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            elif field_type == "string":
+                # Names are medium
+                self.table.setColumnWidth(col, 150)
+                header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+            elif field_type == "directory":
+                # Paths take most space
+                header.setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
+
+        # Delete button column: fixed size
+        header.setSectionResizeMode(len(self.field_names), QHeaderView.ResizeMode.ResizeToContents)
+
+        # Set row height
+        self.table.verticalHeader().setDefaultSectionSize(35)
+
+        layout.addWidget(self.table)
+
+        # Add button
+        add_btn = QPushButton("Add Row")
+        add_btn.clicked.connect(self._add_row)
+        layout.addWidget(add_btn)
 
         self.setLayout(layout)
 
-    def _browse(self) -> None:
-        """Open directory browser."""
-        current_dir = self.line_edit.text() or str(Path.home())
-        directory = QFileDialog.getExistingDirectory(self, "Select Directory", current_dir)
-        if directory:
-            self.line_edit.setText(directory)
+    def _add_row(self, data: dict[str, str] | None = None) -> None:
+        """Add a new row to the table.
 
-    def text(self) -> str:
-        """Get current text."""
-        return self.line_edit.text()
+        Args:
+            data: Optional data to populate the row
+        """
+        row = self.table.rowCount()
+        self.table.insertRow(row)
 
-    def setText(self, text: str) -> None:
-        """Set text."""
-        self.line_edit.setText(text)
+        # Create widgets for each column based on schema
+        for col, (field_name, field_schema) in enumerate(self.item_schema.items()):
+            field_type = field_schema.get("type", "string")
+            value = data.get(field_name, "") if data else ""
+
+            if field_type == "directory":
+                widget = DirectoryInput()
+                widget.setText(value)
+            elif field_type == "shortcut":
+                widget = ShortcutInput()
+                widget.setText(value)
+            else:  # string
+                widget = QLineEdit(value)
+
+            self.table.setCellWidget(row, col, widget)
+
+        # Delete button in last column
+        delete_btn = QPushButton("✕")
+        delete_btn.setToolTip("Delete this row")
+        delete_btn.setMaximumWidth(40)
+        delete_btn.setFont(delete_btn.font())  # Ensure font supports the character
+        delete_btn.clicked.connect(lambda checked, r=row: self._delete_row(r))
+        self.table.setCellWidget(row, len(self.field_names), delete_btn)
+
+    def _delete_row(self, row: int) -> None:
+        """Delete a row from the table."""
+        self.table.removeRow(row)
+        # Update all delete button callbacks (row indices have shifted)
+        for r in range(self.table.rowCount()):
+            delete_btn = self.table.cellWidget(r, len(self.field_names))
+            if isinstance(delete_btn, QPushButton):
+                delete_btn.clicked.disconnect()
+                delete_btn.clicked.connect(lambda checked, row_idx=r: self._delete_row(row_idx))
+
+    def get_items(self) -> list[dict[str, str]]:
+        """Get all items from the table.
+
+        Returns:
+            List of dicts with field_name: value
+        """
+        items = []
+        for row in range(self.table.rowCount()):
+            item = {}
+            for col, field_name in enumerate(self.field_names):
+                widget = self.table.cellWidget(row, col)
+                if isinstance(widget, (DirectoryInput, ShortcutInput, QLineEdit)):
+                    item[field_name] = widget.text()
+                else:
+                    item[field_name] = ""
+            items.append(item)
+        return items
+
+    def set_items(self, items: list[dict[str, str]]) -> None:
+        """Set items in the table.
+
+        Args:
+            items: List of dicts with field_name: value
+        """
+        # Clear table
+        self.table.setRowCount(0)
+
+        # Add rows
+        for item in items:
+            self._add_row(item)
 
 
 class ShortcutInput(QLineEdit):
@@ -154,53 +278,29 @@ class ConfigDialog(QDialog):
         super().__init__()
         self.context = context
         self.setWindowTitle("Plugin Configuration")
-        self.setMinimumSize(600, 400)
+        self.setMinimumSize(800, 600)
 
-        # Apply dark theme styling
-        if context.config.ui.theme == "dark":
-            self.setStyleSheet(
-                """
-                QDialog {
-                    background-color: #2b2b2b;
-                    color: #ffffff;
-                }
-                QTabWidget::pane {
-                    border: 1px solid #444444;
-                    background-color: #2b2b2b;
-                }
-                QTabBar::tab {
-                    background-color: #3c3c3c;
-                    color: #ffffff;
-                    padding: 8px 20px;
-                    border: 1px solid #444444;
-                }
-                QTabBar::tab:selected {
-                    background-color: #2b2b2b;
-                    border-bottom-color: #2b2b2b;
-                }
-                QLineEdit, QSpinBox {
-                    background-color: #3c3c3c;
-                    color: #ffffff;
-                    border: 1px solid #555555;
-                    padding: 4px;
-                }
-                QPushButton {
-                    background-color: #3c3c3c;
-                    color: #ffffff;
-                    border: 1px solid #555555;
-                    padding: 6px 16px;
-                }
-                QPushButton:hover {
-                    background-color: #4c4c4c;
-                }
-                QPushButton:disabled {
-                    color: #888888;
-                }
-                QLabel {
-                    color: #ffffff;
-                }
-                """
-            )
+        # Apply minimal styling (works for both light and dark themes)
+        # Don't hardcode colors - let Qt use the system palette
+        self.setStyleSheet(
+            """
+            QTabBar::tab {
+                padding: 8px 20px;
+            }
+            QLineEdit, QSpinBox {
+                padding: 4px;
+            }
+            QPushButton {
+                padding: 6px 16px;
+            }
+            QTableWidget::item {
+                padding: 4px;
+            }
+            QHeaderView::section {
+                padding: 6px;
+            }
+            """
+        )
 
         # Main layout
         layout = QVBoxLayout()
@@ -266,12 +366,12 @@ class ConfigDialog(QDialog):
         """
         widget = QWidget()
         layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
 
-        # Scroll area
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll_content = QWidget()
+        # Form layout for settings
         form = QFormLayout()
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
         # Store input widgets for this plugin
         if not hasattr(self, "_plugin_inputs"):
@@ -284,7 +384,11 @@ class ConfigDialog(QDialog):
             setting_type = setting_config.get("type", "string")
 
             # Create appropriate widget based on type
-            if setting_type == "directory":
+            if setting_type == "list":
+                # List of structured items
+                item_schema = setting_config.get("item_schema", {})
+                input_widget = ListEditor(item_schema)
+            elif setting_type == "directory":
                 input_widget = DirectoryInput()
             elif setting_type == "shortcut":
                 input_widget = ShortcutInput()
@@ -314,9 +418,8 @@ class ConfigDialog(QDialog):
             # Add to form
             form.addRow(f"{label}:", input_widget)
 
-        scroll_content.setLayout(form)
-        scroll.setWidget(scroll_content)
-        layout.addWidget(scroll)
+        layout.addLayout(form)
+        layout.addStretch()
 
         widget.setLayout(layout)
         # Use plugin's description or name as tab title
@@ -452,7 +555,18 @@ class ConfigDialog(QDialog):
                 value = db_value if db_value is not None else str(default_value)
 
                 # Set value based on widget type
-                if isinstance(input_widget, (DirectoryInput, ShortcutInput)):
+                if isinstance(input_widget, ListEditor):
+                    # Parse JSON list
+                    import json
+
+                    try:
+                        items = json.loads(value) if value else []
+                        input_widget.set_items(items)
+                    except (json.JSONDecodeError, ValueError):
+                        # Use default from schema
+                        default = setting_config.get("default", [])
+                        input_widget.set_items(default)
+                elif isinstance(input_widget, (DirectoryInput, ShortcutInput)):
                     input_widget.setText(value)
                 elif isinstance(input_widget, QSpinBox):
                     input_widget.setValue(int(float(value)) if value else 0)
@@ -479,7 +593,13 @@ class ConfigDialog(QDialog):
         for plugin_name, inputs in self._plugin_inputs.items():
             for setting_key, input_widget in inputs.items():
                 # Get value from widget
-                if isinstance(input_widget, (DirectoryInput, ShortcutInput, QLineEdit)):
+                if isinstance(input_widget, ListEditor):
+                    # Serialize list to JSON
+                    import json
+
+                    items = input_widget.get_items()
+                    value = json.dumps(items)
+                elif isinstance(input_widget, (DirectoryInput, ShortcutInput, QLineEdit)):
                     value = input_widget.text()
                 elif isinstance(input_widget, QSpinBox):
                     value = str(input_widget.value())
