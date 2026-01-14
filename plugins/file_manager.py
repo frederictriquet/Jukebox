@@ -20,6 +20,7 @@ class FileManagerPlugin:
         self.current_track_id: int | None = None
         self.current_filepath: Path | None = None
         self.shortcuts: list[Any] = []
+        self.shortcut_manager: Any = None
 
     def initialize(self, context: Any) -> None:
         """Initialize plugin."""
@@ -29,6 +30,8 @@ class FileManagerPlugin:
         from jukebox.core.event_bus import Events
 
         context.subscribe(Events.TRACK_LOADED, self._on_track_loaded)
+        # Subscribe to settings changes to reload shortcuts
+        context.subscribe("plugin_settings_changed", self._on_settings_changed)
 
     def register_ui(self, ui_builder: Any) -> None:
         """Register UI (just keyboard shortcuts)."""
@@ -36,12 +39,21 @@ class FileManagerPlugin:
 
     def register_shortcuts(self, shortcut_manager: Any) -> None:
         """Register file management shortcuts."""
+        # Store reference to shortcut manager for later reloading
+        self.shortcut_manager = shortcut_manager
+        self._register_all_shortcuts()
+
+    def _register_all_shortcuts(self) -> None:
+        """Register all shortcuts from config."""
+        if not self.shortcut_manager:
+            return
+
         # Get file manager config
         file_config = self.context.config.file_manager
 
         # Register destination shortcuts (move + rename)
         for dest_config in file_config.destinations:
-            shortcut = shortcut_manager.register(
+            shortcut = self.shortcut_manager.register(
                 dest_config.key,
                 lambda d=dest_config: self._move_to_destination(d),
                 plugin_name=self.name,
@@ -50,7 +62,7 @@ class FileManagerPlugin:
 
         # Register trash shortcut (move without rename)
         if file_config.trash_directory:
-            shortcut = shortcut_manager.register(
+            shortcut = self.shortcut_manager.register(
                 file_config.trash_key,
                 self._move_to_trash,
                 plugin_name=self.name,
@@ -68,6 +80,63 @@ class FileManagerPlugin:
 
         self.current_filepath = Path(track["filepath"]) if track else None
         logging.debug(f"[File Manager] Track loaded: id={track_id}, filepath={self.current_filepath}")
+
+    def _on_settings_changed(self) -> None:
+        """Reload shortcuts when settings change."""
+        logging.info("[File Manager] Reloading shortcuts after settings change")
+
+        # Unregister all current shortcuts
+        for shortcut in self.shortcuts:
+            if hasattr(shortcut, "key") and hasattr(shortcut, "key"):
+                key_seq = shortcut.key().toString()
+                if self.shortcut_manager:
+                    self.shortcut_manager.unregister(key_seq)
+        self.shortcuts.clear()
+
+        # Reload config from database
+        self._reload_config_from_db()
+
+        # Re-register shortcuts with new config
+        self._register_all_shortcuts()
+
+    def _reload_config_from_db(self) -> None:
+        """Reload file_manager config from database."""
+        # Get settings from database
+        db = self.context.database
+
+        # Load destinations
+        destinations_json = db.conn.execute(
+            "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
+            ("file_manager", "destinations"),
+        ).fetchone()
+
+        if destinations_json:
+            import json
+            try:
+                destinations_data = json.loads(destinations_json["setting_value"])
+                # Update config with new destinations
+                from jukebox.core.config import FileManagerDestinationConfig
+                self.context.config.file_manager.destinations = [
+                    FileManagerDestinationConfig(**dest) for dest in destinations_data
+                ]
+            except (json.JSONDecodeError, ValueError) as e:
+                logging.error(f"Failed to parse destinations config: {e}")
+
+        # Load trash directory
+        trash_dir = db.conn.execute(
+            "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
+            ("file_manager", "trash_directory"),
+        ).fetchone()
+        if trash_dir:
+            self.context.config.file_manager.trash_directory = trash_dir["setting_value"]
+
+        # Load trash key
+        trash_key = db.conn.execute(
+            "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
+            ("file_manager", "trash_key"),
+        ).fetchone()
+        if trash_key:
+            self.context.config.file_manager.trash_key = trash_key["setting_value"]
 
     def _move_to_destination(self, dest_config: Any) -> None:
         """Move current track to destination and rename it 'artist - title.extension'."""

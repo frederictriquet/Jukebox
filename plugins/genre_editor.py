@@ -19,6 +19,7 @@ class GenreEditorPlugin:
         self.current_track_id: int | None = None
         self.current_genre: str = ""
         self.shortcuts: list[Any] = []  # Keep references to shortcuts
+        self.shortcut_manager: Any = None
 
     def initialize(self, context: Any) -> None:
         """Initialize plugin."""
@@ -28,6 +29,8 @@ class GenreEditorPlugin:
         from jukebox.core.event_bus import Events
 
         context.subscribe(Events.TRACK_LOADED, self._on_track_loaded)
+        # Subscribe to settings changes to reload shortcuts
+        context.subscribe("plugin_settings_changed", self._on_settings_changed)
 
     def register_ui(self, ui_builder: Any) -> None:
         """Register UI (just keyboard shortcuts)."""
@@ -35,11 +38,20 @@ class GenreEditorPlugin:
 
     def register_shortcuts(self, shortcut_manager: Any) -> None:
         """Register genre code shortcuts."""
+        # Store reference to shortcut manager for later reloading
+        self.shortcut_manager = shortcut_manager
+        self._register_all_shortcuts()
+
+    def _register_all_shortcuts(self) -> None:
+        """Register all shortcuts from config."""
+        if not self.shortcut_manager:
+            return
+
         # Get genre codes from config
         genre_config = self.context.config.genre_editor
 
         for code_config in genre_config.codes:
-            shortcut = shortcut_manager.register(
+            shortcut = self.shortcut_manager.register(
                 code_config.key,
                 lambda c=code_config.code: self._toggle_code(c),
                 plugin_name=self.name,
@@ -47,7 +59,7 @@ class GenreEditorPlugin:
             self.shortcuts.append(shortcut)
 
         # Register rating shortcut
-        shortcut = shortcut_manager.register(
+        shortcut = self.shortcut_manager.register(
             genre_config.rating_key, self._cycle_rating, plugin_name=self.name
         )
         self.shortcuts.append(shortcut)
@@ -75,6 +87,54 @@ class GenreEditorPlugin:
                 self.current_genre = ""
         else:
             self.current_genre = ""
+
+    def _on_settings_changed(self) -> None:
+        """Reload shortcuts when settings change."""
+        logging.info("[Genre Editor] Reloading shortcuts after settings change")
+
+        # Unregister all current shortcuts
+        for shortcut in self.shortcuts:
+            if hasattr(shortcut, "key"):
+                key_seq = shortcut.key().toString()
+                if self.shortcut_manager:
+                    self.shortcut_manager.unregister(key_seq)
+        self.shortcuts.clear()
+
+        # Reload config from database
+        self._reload_config_from_db()
+
+        # Re-register shortcuts with new config
+        self._register_all_shortcuts()
+
+    def _reload_config_from_db(self) -> None:
+        """Reload genre_editor config from database."""
+        db = self.context.database
+
+        # Load genre codes
+        codes_json = db.conn.execute(
+            "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
+            ("genre_editor", "genre_codes"),
+        ).fetchone()
+
+        if codes_json:
+            import json
+            try:
+                codes_data = json.loads(codes_json["setting_value"])
+                # Update config with new codes
+                from jukebox.core.config import GenreCodeConfig
+                self.context.config.genre_editor.codes = [
+                    GenreCodeConfig(**code) for code in codes_data
+                ]
+            except (json.JSONDecodeError, ValueError) as e:
+                logging.error(f"Failed to parse genre codes config: {e}")
+
+        # Load rating key
+        rating_key = db.conn.execute(
+            "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
+            ("genre_editor", "rating_key"),
+        ).fetchone()
+        if rating_key:
+            self.context.config.genre_editor.rating_key = rating_key["setting_value"]
 
     def _toggle_code(self, code: str) -> None:
         """Toggle a genre code in the current genre."""
