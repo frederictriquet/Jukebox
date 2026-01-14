@@ -67,11 +67,12 @@ class FileManagerPlugin:
         ).fetchone()
 
         self.current_filepath = Path(track["filepath"]) if track else None
+        logging.debug(f"[File Manager] Track loaded: id={track_id}, filepath={self.current_filepath}")
 
     def _move_to_destination(self, dest_config: Any) -> None:
         """Move current track to destination and rename it 'artist - title.extension'."""
         if not self.current_track_id or not self.current_filepath:
-            logging.warning("No track loaded")
+            logging.warning("[File Manager] No track loaded")
             return
 
         if not self.current_filepath.exists():
@@ -126,6 +127,11 @@ class FileManagerPlugin:
             self.context.database.conn.commit()
             logging.info(f"Deleted track {self.current_track_id} from database")
 
+            # Reset current track BEFORE emitting event
+            # (because event handlers might load a new track)
+            self.current_track_id = None
+            self.current_filepath = None
+
             # Remove from track list and play next (via event)
             from jukebox.core.event_bus import Events
 
@@ -137,10 +143,6 @@ class FileManagerPlugin:
                 message=f"Moved to {dest_config.name}: {new_filename}",
             )
 
-            # Reset current track
-            self.current_track_id = None
-            self.current_filepath = None
-
         except Exception as e:
             logging.error(f"Failed to move file: {e}")
             self.context.emit("status_message", message=f"Error moving file: {e}")
@@ -148,7 +150,7 @@ class FileManagerPlugin:
     def _move_to_trash(self) -> None:
         """Move current track to trash, remove from database and tracklist, play next."""
         if not self.current_track_id or not self.current_filepath:
-            logging.warning("No track loaded")
+            logging.warning("[File Manager] No track loaded")
             return
 
         if not self.current_filepath.exists():
@@ -185,6 +187,11 @@ class FileManagerPlugin:
             self.context.database.conn.commit()
             logging.info(f"Deleted track {self.current_track_id} from database")
 
+            # Reset current track BEFORE emitting event
+            # (because event handlers might load a new track)
+            self.current_track_id = None
+            self.current_filepath = None
+
             # Remove from track list and play next (via event)
             from jukebox.core.event_bus import Events
 
@@ -195,10 +202,6 @@ class FileManagerPlugin:
                 "status_message",
                 message=f"Deleted: {old_filepath.name}",
             )
-
-            # Reset current track
-            self.current_track_id = None
-            self.current_filepath = None
 
         except Exception as e:
             logging.error(f"Failed to move file to trash: {e}")

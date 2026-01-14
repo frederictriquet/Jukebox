@@ -352,7 +352,7 @@ class MainWindow(QMainWindow):
         row = model.find_row_by_filepath(next_filepath)
 
         if row >= 0:
-            logging.info(f"[MainWindow] Playing next track at row {row}: {next_filepath.name}")
+            logging.debug(f"[MainWindow] Playing next track at row {row}: {next_filepath.name}")
             self.track_list.selectRow(row)
             self._load_and_play(next_filepath)
         else:
@@ -392,7 +392,10 @@ class MainWindow(QMainWindow):
                     "SELECT id FROM tracks WHERE filepath = ?", (str(filepath),)
                 ).fetchone()
                 if track:
+                    logging.debug(f"[MainWindow] Emitting TRACK_LOADED: id={track['id']}")
                     self.event_bus.emit(Events.TRACK_LOADED, track_id=track["id"])
+                else:
+                    logging.error(f"[MainWindow] Could not find track in database: {filepath}")
 
             self.player.play()
             self.setWindowTitle(f"{self.config.ui.window_title} - {filepath.name}")
