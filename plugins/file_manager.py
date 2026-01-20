@@ -5,6 +5,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from PySide6.QtWidgets import QPushButton
+
 from jukebox.core.event_bus import Events
 
 
@@ -14,7 +16,7 @@ class FileManagerPlugin:
     name = "file_manager"
     version = "1.0.0"
     description = "File management with keyboard shortcuts"
-    modes = ["curating"]  # Only active in curating mode
+    modes = ["curating", "jukebox"]  # Active in both modes
 
     def __init__(self) -> None:
         """Initialize plugin."""
@@ -23,6 +25,7 @@ class FileManagerPlugin:
         self.current_filepath: Path | None = None
         self.shortcuts: list[Any] = []
         self.shortcut_manager: Any = None
+        self.remove_button: QPushButton | None = None
 
     def initialize(self, context: Any) -> None:
         """Initialize plugin."""
@@ -34,8 +37,35 @@ class FileManagerPlugin:
         context.subscribe(Events.PLUGIN_SETTINGS_CHANGED, self._on_settings_changed)
 
     def register_ui(self, ui_builder: Any) -> None:
-        """Register UI (just keyboard shortcuts)."""
-        pass
+        """Register UI elements."""
+        main_window = self.context.app
+        controls = main_window.controls
+
+        if controls.layout():
+            # Add remove button for jukebox mode (removes from library but keeps file)
+            self.remove_button = QPushButton("Remove")
+            self.remove_button.setToolTip("Remove track from library (keeps file on disk)")
+            self.remove_button.clicked.connect(self._remove_from_library)
+            self.remove_button.setMaximumWidth(70)
+
+            # Set initial visibility based on current mode
+            current_mode = self.context.config.ui.mode
+            self.remove_button.setVisible(current_mode == "jukebox")
+
+            layout = controls.layout()
+            # Find the stretch item and insert button before it
+            stretch_index = -1
+            for i in range(layout.count()):
+                item = layout.itemAt(i)
+                if item and item.spacerItem():
+                    stretch_index = i
+                    break
+
+            # If stretch found, insert before it; otherwise append
+            if stretch_index >= 0:
+                ui_builder.insert_widget_in_layout(layout, stretch_index, self.remove_button)
+            else:
+                layout.addWidget(self.remove_button)
 
     def register_shortcuts(self, shortcut_manager: Any) -> None:
         """Register file management shortcuts."""
@@ -357,18 +387,73 @@ class FileManagerPlugin:
             filename = filename.replace(char, '_')
         return filename
 
+    def _remove_from_library(self) -> None:
+        """Remove current track from library (DB only, keeps file on disk).
+
+        Used in jukebox mode to remove a track without deleting the file.
+        """
+        if not self.current_track_id or not self.current_filepath:
+            logging.warning("[File Manager] No track loaded")
+            return
+
+        try:
+            # Save filepath before removing
+            old_filepath = self.current_filepath
+            filename = old_filepath.name
+
+            # Delete from database (and waveform_cache via CASCADE)
+            self.context.database.conn.execute(
+                "DELETE FROM tracks WHERE id = ?",
+                (self.current_track_id,),
+            )
+            self.context.database.conn.commit()
+            logging.info(f"Removed track {self.current_track_id} from database (file kept: {old_filepath})")
+
+            # Reset current track BEFORE emitting event
+            self.current_track_id = None
+            self.current_filepath = None
+
+            # Remove from track list and play next (via event)
+            self.context.emit(Events.TRACK_DELETED, filepath=old_filepath)
+
+            # Show status message
+            self.context.emit(
+                Events.STATUS_MESSAGE,
+                message=f"Removed from library: {filename}",
+            )
+
+        except Exception as e:
+            logging.error(f"Failed to remove track from library: {e}")
+            self.context.emit(Events.STATUS_MESSAGE, message=f"Error removing track: {e}")
+
     def activate(self, mode: str) -> None:
         """Activate plugin for this mode."""
-        # Enable all shortcuts
-        for shortcut in self.shortcuts:
-            shortcut.setEnabled(True)
+        if mode == "curating":
+            # Enable shortcuts for curating mode
+            for shortcut in self.shortcuts:
+                shortcut.setEnabled(True)
+            # Hide remove button in curating mode
+            if self.remove_button:
+                self.remove_button.setVisible(False)
+        elif mode == "jukebox":
+            # Disable curating shortcuts in jukebox mode
+            for shortcut in self.shortcuts:
+                shortcut.setEnabled(False)
+            # Show remove button in jukebox mode
+            if self.remove_button:
+                self.remove_button.setVisible(True)
         logging.debug(f"[File Manager] Activated for {mode} mode")
 
     def deactivate(self, mode: str) -> None:
         """Deactivate plugin for this mode."""
-        # Disable all shortcuts
-        for shortcut in self.shortcuts:
-            shortcut.setEnabled(False)
+        if mode == "curating":
+            # Disable shortcuts when leaving curating mode
+            for shortcut in self.shortcuts:
+                shortcut.setEnabled(False)
+        elif mode == "jukebox":
+            # Hide remove button when leaving jukebox mode
+            if self.remove_button:
+                self.remove_button.setVisible(False)
         logging.debug(f"[File Manager] Deactivated for {mode} mode")
 
     def shutdown(self) -> None:
