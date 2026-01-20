@@ -196,25 +196,69 @@ class FileManagerPlugin:
         try:
             # Save filepath before copying
             old_filepath = self.current_filepath
+            old_track_id = self.current_track_id
 
             # Copy file (keep original in curating mode)
             shutil.copy2(str(self.current_filepath), str(dest_path))
             logging.info(f"Copied {old_filepath} -> {dest_path}")
 
+            # Retrieve waveform and audio_analysis data BEFORE deleting the old track
+            waveform_data = self.context.database.conn.execute(
+                "SELECT waveform_data FROM waveform_cache WHERE track_id = ?",
+                (old_track_id,),
+            ).fetchone()
+
+            audio_analysis = self.context.database.conn.execute(
+                "SELECT * FROM audio_analysis WHERE track_id = ?",
+                (old_track_id,),
+            ).fetchone()
+
             # Add the copied file to the database in jukebox mode
             from jukebox.utils.metadata import MetadataExtractor
 
             metadata = MetadataExtractor.extract(dest_path)
-            self.context.database.add_track(metadata, mode="jukebox")
-            logging.info(f"Added {dest_path} to database in jukebox mode")
+            new_track_id = self.context.database.add_track(metadata, mode="jukebox")
+            logging.info(f"Added {dest_path} to database in jukebox mode (id={new_track_id})")
+
+            # Copy waveform data to the new track if it exists
+            needs_waveform_generation = False
+            if waveform_data:
+                self.context.database.conn.execute(
+                    """
+                    INSERT OR REPLACE INTO waveform_cache (track_id, waveform_data)
+                    VALUES (?, ?)
+                    """,
+                    (new_track_id, waveform_data["waveform_data"]),
+                )
+                logging.info(f"Copied waveform data from track {old_track_id} to {new_track_id}")
+            else:
+                needs_waveform_generation = True
+                logging.info(f"No waveform data to copy for track {old_track_id}, will trigger generation")
+
+            # Copy audio_analysis data to the new track if it exists
+            if audio_analysis:
+                # Get all column names except track_id
+                columns = [key for key in audio_analysis if key != "track_id"]
+                placeholders = ", ".join(["?"] * len(columns))
+                column_names = ", ".join(columns)
+                values = [audio_analysis[col] for col in columns]
+
+                self.context.database.conn.execute(
+                    f"""
+                    INSERT OR REPLACE INTO audio_analysis (track_id, {column_names})
+                    VALUES (?, {placeholders})
+                    """,
+                    (new_track_id, *values),
+                )
+                logging.info(f"Copied audio_analysis from track {old_track_id} to {new_track_id}")
 
             # Delete original from database (track moved out of curating library)
             self.context.database.conn.execute(
                 "DELETE FROM tracks WHERE id = ?",
-                (self.current_track_id,),
+                (old_track_id,),
             )
             self.context.database.conn.commit()
-            logging.info(f"Deleted track {self.current_track_id} from database")
+            logging.info(f"Deleted track {old_track_id} from database")
 
             # Delete original file from disk
             old_filepath.unlink()
@@ -229,6 +273,11 @@ class FileManagerPlugin:
             from jukebox.core.event_bus import Events
 
             self.context.emit(Events.TRACK_DELETED, filepath=old_filepath)
+
+            # Trigger waveform generation if the track had no waveform
+            if needs_waveform_generation:
+                self.context.emit(Events.TRACKS_ADDED)
+                logging.info(f"Emitted TRACKS_ADDED to trigger waveform generation for track {new_track_id}")
 
             # Show status message
             self.context.emit(

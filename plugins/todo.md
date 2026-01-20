@@ -18,3 +18,4 @@ Normalisation permanente des fichiers
 Modifie physiquement les fichiers audio
 Utilise pydub ou ffmpeg pour traiter les fichiers
 
+ master(1) 1h40m36s ± grepai watch
