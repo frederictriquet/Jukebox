@@ -248,10 +248,15 @@ class BatchProcessor(QObject):
         # Calculate duration
         duration = time.time() - self.current_item_start_time
 
-        # Log error with duration
-        logging.error(
-            f"[{self.name}] [{self.current_index + 1}/{self.total_items}] ✗ Error ({duration:.1f}s): {error}"
-        )
+        # Use warning level for expected errors (skipped files), error level for unexpected
+        if error.startswith("Skipping"):
+            logging.warning(
+                f"[{self.name}] [{self.current_index + 1}/{self.total_items}] ⊘ Skipped ({duration:.1f}s): {error}"
+            )
+        else:
+            logging.error(
+                f"[{self.name}] [{self.current_index + 1}/{self.total_items}] ✗ Error ({duration:.1f}s): {error}"
+            )
 
         # DEBUG level: show the actual item
         logging.debug(f"[{self.name}] Failed item: {item}")

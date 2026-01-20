@@ -1,6 +1,9 @@
 """Tests for metadata extraction."""
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from jukebox.utils.metadata import MetadataExtractor
 
@@ -57,3 +60,39 @@ class TestMetadataExtractor:
         result = MetadataExtractor._get_tag(audio, ["title", "TIT2"])
 
         assert result is None
+
+    def test_extract_empty_audio_file(self, tmp_path: Path) -> None:
+        """Test that empty audio files raise ValueError."""
+        test_file = tmp_path / "empty.mp3"
+        test_file.write_bytes(b"")  # Empty file
+
+        # Mock mutagen to return a file with zero duration
+        mock_audio = MagicMock()
+        mock_audio.info.length = 0  # Zero duration indicates empty file
+
+        with patch("mutagen.File", return_value=mock_audio):
+            with pytest.raises(ValueError, match="Empty audio file"):
+                MetadataExtractor.extract(test_file)
+
+    def test_extract_no_duration_raises_error(self, tmp_path: Path) -> None:
+        """Test that audio files without duration raise ValueError."""
+        test_file = tmp_path / "no_duration.mp3"
+        test_file.write_bytes(b"dummy")
+
+        # Mock mutagen to return a file without duration attribute
+        mock_audio = MagicMock()
+        del mock_audio.info.length  # No duration attribute
+
+        with patch("mutagen.File", return_value=mock_audio):
+            with pytest.raises(ValueError, match="Cannot determine duration"):
+                MetadataExtractor.extract(test_file)
+
+    def test_extract_invalid_file_raises_error(self, tmp_path: Path) -> None:
+        """Test that invalid audio files raise ValueError."""
+        test_file = tmp_path / "invalid.mp3"
+        test_file.write_bytes(b"dummy")
+
+        # Mock mutagen to return None (invalid file)
+        with patch("mutagen.File", return_value=None):
+            with pytest.raises(ValueError, match="Invalid audio file"):
+                MetadataExtractor.extract(test_file)

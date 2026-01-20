@@ -58,9 +58,10 @@ class WaveformVisualizerPlugin:
         ui_builder.add_bottom_widget(self.waveform_widget)
 
         # Add menu for batch waveform generation
-        menu = ui_builder.add_menu("&Waveform")
+        menu = ui_builder.get_or_create_menu("&View")
+        ui_builder.add_menu_separator(menu)
         ui_builder.add_menu_action(
-            menu, "Generate All Waveforms (Batch)", self._start_batch_waveform
+            menu, "Generate All Waveforms", self._start_batch_waveform
         )
 
     def _update_cursor(self, position: float) -> None:

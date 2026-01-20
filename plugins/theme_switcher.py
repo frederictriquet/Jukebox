@@ -27,10 +27,10 @@ class ThemeSwitcherPlugin:
 
     def register_ui(self, ui_builder: Any) -> None:
         """Register theme switcher in menu."""
-        menu = ui_builder.add_menu("&View")
+        menu = ui_builder.get_or_create_menu("&View")
         ui_builder.add_menu_action(menu, "Dark Theme", lambda: self._switch_theme("dark"))
         ui_builder.add_menu_action(menu, "Light Theme", lambda: self._switch_theme("light"))
-        menu.addSeparator()
+        ui_builder.add_menu_separator(menu)
         ui_builder.add_menu_action(menu, "Toggle Theme", self._toggle_theme, shortcut="Ctrl+T")
 
     def register_shortcuts(self, shortcut_manager: Any) -> None:

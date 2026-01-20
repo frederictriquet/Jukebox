@@ -22,8 +22,8 @@ class StatsPlugin:
 
     def register_ui(self, ui_builder: Any) -> None:
         """Register UI."""
-        menu = ui_builder.add_menu("&Tools")
-        ui_builder.add_menu_action(menu, "Show Stats", self._show_stats)
+        menu = ui_builder.get_or_create_menu("&Library")
+        ui_builder.add_menu_action(menu, "Statistics...", self._show_stats)
 
     def _show_stats(self) -> None:
         """Show statistics."""

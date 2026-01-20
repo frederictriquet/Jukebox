@@ -19,12 +19,15 @@ class MetadataExtractor:
 
         Returns:
             Dictionary with metadata
+
+        Raises:
+            ValueError: If audio file is empty or invalid
         """
         try:
             audio = mutagen.File(filepath)
             if audio is None:
                 logging.warning(f"Mutagen returned None for {filepath}")
-                return MetadataExtractor._basic_info(filepath)
+                raise ValueError(f"Invalid audio file: {filepath}")
 
             metadata: dict[str, Any] = {
                 "filepath": str(filepath),
@@ -33,9 +36,15 @@ class MetadataExtractor:
                 "date_modified": filepath.stat().st_mtime,
             }
 
-            # Duration
+            # Duration - validate that file has content
             if hasattr(audio.info, "length"):
-                metadata["duration_seconds"] = audio.info.length
+                duration = audio.info.length
+                if duration <= 0:
+                    raise ValueError(f"Empty audio file (duration: {duration}): {filepath}")
+                metadata["duration_seconds"] = duration
+            else:
+                # If we can't determine duration, file is likely invalid
+                raise ValueError(f"Cannot determine duration for: {filepath}")
 
             # Bitrate
             if hasattr(audio.info, "bitrate"):
@@ -51,9 +60,12 @@ class MetadataExtractor:
 
             return metadata
 
+        except ValueError:
+            # Re-raise ValueError (empty/invalid file)
+            raise
         except Exception as e:
             logging.error(f"Error extracting metadata from {filepath}: {e}", exc_info=True)
-            return MetadataExtractor._basic_info(filepath)
+            raise ValueError(f"Failed to extract metadata from {filepath}: {e}")
 
     @staticmethod
     def _extract_tags(audio: Any) -> dict[str, Any]:

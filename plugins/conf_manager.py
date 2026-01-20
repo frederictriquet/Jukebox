@@ -358,7 +358,7 @@ class ConfigDialog(QDialog):
                 {
                     "setting_key": {
                         "label": "Display Label",
-                        "type": "directory" | "shortcut" | "int" | "float" | "string",
+                        "type": "directory" | "shortcut" | "int" | "float" | "string" | "bool",
                         "default": default_value,
                         "min": min_value (for int/float),
                         "max": max_value (for int/float),
@@ -390,6 +390,9 @@ class ConfigDialog(QDialog):
                 # List of structured items
                 item_schema = setting_config.get("item_schema", {})
                 input_widget = ListEditor(item_schema)
+            elif setting_type == "bool":
+                input_widget = QCheckBox()
+                input_widget.setChecked(setting_config.get("default", False))
             elif setting_type == "directory":
                 input_widget = DirectoryInput()
             elif setting_type == "shortcut":
@@ -463,6 +466,10 @@ class ConfigDialog(QDialog):
                         # Use default from schema
                         default = setting_config.get("default", [])
                         input_widget.set_items(default)
+                elif isinstance(input_widget, QCheckBox):
+                    # Parse boolean
+                    bool_value = value.lower() in ("true", "1", "yes") if value else False
+                    input_widget.setChecked(bool_value)
                 elif isinstance(input_widget, (DirectoryInput, ShortcutInput)):
                     input_widget.setText(value)
                 elif isinstance(input_widget, QSpinBox):
@@ -496,6 +503,8 @@ class ConfigDialog(QDialog):
 
                     items = input_widget.get_items()
                     value = json.dumps(items)
+                elif isinstance(input_widget, QCheckBox):
+                    value = "true" if input_widget.isChecked() else "false"
                 elif isinstance(input_widget, (DirectoryInput, ShortcutInput, QLineEdit)):
                     value = input_widget.text()
                 elif isinstance(input_widget, QSpinBox):

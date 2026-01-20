@@ -71,6 +71,12 @@ class WaveformConfig(BaseModel):
     chunk_duration: float = Field(gt=0, default=10.0)
 
 
+class AudioAnalysisConfig(BaseModel):
+    """Audio analysis configuration."""
+
+    enable_ml_features: bool = False  # Extract comprehensive ML features (slower)
+
+
 class MetadataFieldConfig(BaseModel):
     """Configuration for a single metadata field."""
 
@@ -150,6 +156,7 @@ class JukeboxConfig(BaseModel):
     shortcuts: ShortcutsConfig = Field(default_factory=ShortcutsConfig)
     playback_navigation: PlaybackNavigationConfig = Field(default_factory=PlaybackNavigationConfig)
     waveform: WaveformConfig = Field(default_factory=WaveformConfig)
+    audio_analysis: AudioAnalysisConfig = Field(default_factory=AudioAnalysisConfig)
     metadata_editor: MetadataEditorConfig = Field(default_factory=MetadataEditorConfig)
     genre_editor: GenreEditorConfig = Field(default_factory=GenreEditorConfig)
     file_manager: FileManagerConfig = Field(default_factory=FileManagerConfig)

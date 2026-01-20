@@ -158,8 +158,21 @@ class FileManagerPlugin:
             logging.error(f"Track {self.current_track_id} not found in database")
             return
 
-        artist = track["artist"] or "Unknown Artist"
-        title = track["title"] or "Unknown Title"
+        artist = track["artist"]
+        title = track["title"]
+
+        # Prevent copying if artist or title is unknown
+        if not artist or not title:
+            missing = []
+            if not artist:
+                missing.append("artist")
+            if not title:
+                missing.append("title")
+            error_msg = f"Cannot copy: missing {' and '.join(missing)}"
+            logging.warning(f"[File Manager] {error_msg} for track {self.current_track_id}")
+            self.context.emit("status_message", message=error_msg)
+            return
+
         extension = self.current_filepath.suffix
 
         # Build new filename: "artist - title.extension"

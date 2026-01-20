@@ -15,6 +15,7 @@ class UIBuilder:
         self.main_window = main_window
         self.plugin_menus: list[QMenu] = []
         self.plugin_widgets: list[QWidget] = []  # Track all widgets added by plugins
+        self.shared_menus: dict[str, QMenu] = {}  # Keep references to shared menus
 
     def add_menu(self, name: str) -> QMenu:
         """Add menu to menubar and track it."""
@@ -31,14 +32,27 @@ class UIBuilder:
         Returns:
             QMenu instance
         """
-        # Check if menu already exists
+        # Check if we already created this menu
+        if name in self.shared_menus:
+            return self.shared_menus[name]
+
+        # Check if menu already exists in menubar
         menubar = self.main_window.menuBar()
         for action in menubar.actions():
             if action.text() == name:
-                return action.menu()
+                menu = action.menu()
+                if menu is not None:
+                    # Store reference to prevent garbage collection
+                    self.shared_menus[name] = menu
+                    if menu not in self.plugin_menus:
+                        self.plugin_menus.append(menu)
+                    return menu
 
-        # Create new menu
-        return self.add_menu(name)
+        # Create new menu and track it
+        menu = cast(QMenu, menubar.addMenu(name))
+        self.shared_menus[name] = menu
+        self.plugin_menus.append(menu)
+        return menu
 
     def clear_plugin_menus(self) -> None:
         """Clear all menus added by plugins."""
@@ -58,6 +72,11 @@ class UIBuilder:
             action.setShortcut(shortcut)
         menu.addAction(action)
         return action
+
+    def add_menu_separator(self, menu: QMenu) -> None:
+        """Add separator to menu safely."""
+        if menu is not None:
+            menu.addSeparator()
 
     def add_toolbar_widget(self, widget: QWidget) -> None:
         """Add widget to toolbar and track it."""

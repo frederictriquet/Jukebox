@@ -8,14 +8,15 @@ from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 
-def analyze_audio_file(filepath: str) -> dict[str, float]:
+def analyze_audio_file(filepath: str, extract_ml_features: bool = False) -> dict[str, float]:
     """Analyze audio file and extract features.
 
     Args:
         filepath: Path to audio file
+        extract_ml_features: If True, extract comprehensive ML features (slower)
 
     Returns:
-        Dict with tempo, spectral_centroid, zero_crossing_rate, rms_energy
+        Dict with basic features (always) + ML features (if enabled)
 
     Raises:
         Exception: If analysis fails
@@ -33,8 +34,9 @@ def analyze_audio_file(filepath: str) -> dict[str, float]:
     if len(y) == 0:
         raise ValueError("Empty audio file")
 
+    # Basic features (always computed)
     # Tempo detection
-    tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+    tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
     tempo = float(tempo) if tempo else 0.0
 
     # RMS energy
@@ -49,12 +51,161 @@ def analyze_audio_file(filepath: str) -> dict[str, float]:
     zcr = librosa.feature.zero_crossing_rate(y)[0]
     zero_crossing_rate = float(np.mean(zcr))
 
-    return {
+    result = {
         "tempo": tempo,
         "spectral_centroid": spectral_centroid,
         "zero_crossing_rate": zero_crossing_rate,
         "rms_energy": rms_energy,
     }
+
+    # ML features (optional, comprehensive)
+    if extract_ml_features:
+        result.update(_extract_ml_features(y, sr, rms, centroid, zcr, beats))
+
+    return result
+
+
+def _extract_ml_features(
+    y: np.ndarray, sr: int, rms: np.ndarray, centroid: np.ndarray, zcr: np.ndarray, beats: np.ndarray
+) -> dict[str, float]:
+    """Extract comprehensive ML features for learning.
+
+    Args:
+        y: Audio time series
+        sr: Sample rate
+        rms: Pre-computed RMS energy
+        centroid: Pre-computed spectral centroid
+        zcr: Pre-computed zero crossing rate
+        beats: Pre-computed beat frames
+
+    Returns:
+        Dict with ~50 ML features
+    """
+    import librosa
+
+    features = {}
+
+    # 1. Energy & dynamics (8 features)
+    features["rms_mean"] = float(np.mean(rms))
+    features["rms_std"] = float(np.std(rms))
+    features["rms_p10"] = float(np.percentile(rms, 10))
+    features["rms_p90"] = float(np.percentile(rms, 90))
+    features["peak_amplitude"] = float(np.max(np.abs(y)))
+    features["crest_factor"] = float(features["peak_amplitude"] / (features["rms_mean"] + 1e-10))
+    features["loudness_variation"] = float(np.std(rms))
+
+    # 2. Frequency band energies (12 features)
+    # Compute STFT for band analysis
+    stft = np.abs(librosa.stft(y))
+    freqs = librosa.fft_frequencies(sr=sr)
+
+    def band_energy(stft_mat: np.ndarray, freqs: np.ndarray, f_min: float, f_max: float) -> tuple[float, float]:
+        """Compute mean energy and ratio for a frequency band."""
+        mask = (freqs >= f_min) & (freqs < f_max)
+        band = stft_mat[mask, :]
+        band_mean = float(np.mean(band))
+        total_energy = float(np.mean(stft_mat))
+        ratio = band_mean / (total_energy + 1e-10)
+        return band_mean, ratio
+
+    # Sub-bass (20-60 Hz)
+    features["sub_bass_mean"], features["sub_bass_ratio"] = band_energy(stft, freqs, 20, 60)
+    # Bass (60-150 Hz)
+    features["bass_mean"], features["bass_ratio"] = band_energy(stft, freqs, 60, 150)
+    # Low-mid (150-500 Hz)
+    features["low_mid_mean"], features["low_mid_ratio"] = band_energy(stft, freqs, 150, 500)
+    # Mid (500-2000 Hz)
+    features["mid_mean"], features["mid_ratio"] = band_energy(stft, freqs, 500, 2000)
+    # High-mid (2-6 kHz)
+    features["high_mid_mean"], features["high_mid_ratio"] = band_energy(stft, freqs, 2000, 6000)
+    # High/treble (6-20 kHz)
+    features["high_mean"], features["high_ratio"] = band_energy(stft, freqs, 6000, 20000)
+
+    # 3. Spectral features (6 features) - centroid already computed
+    features["spectral_centroid_std"] = float(np.std(centroid))
+    bandwidth = librosa.feature.spectral_bandwidth(y=y, sr=sr)[0]
+    features["spectral_bandwidth"] = float(np.mean(bandwidth))
+    rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr)[0]
+    features["spectral_rolloff"] = float(np.mean(rolloff))
+    flatness = librosa.feature.spectral_flatness(y=y)[0]
+    features["spectral_flatness"] = float(np.mean(flatness))
+    contrast = librosa.feature.spectral_contrast(y=y, sr=sr)
+    features["spectral_contrast"] = float(np.mean(contrast))
+    # Spectral entropy
+    spec_norm = stft / (np.sum(stft, axis=0, keepdims=True) + 1e-10)
+    spec_entropy = -np.sum(spec_norm * np.log(spec_norm + 1e-10), axis=0)
+    features["spectral_entropy"] = float(np.mean(spec_entropy))
+
+    # 4. MFCC (10 coefficients)
+    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=10)
+    for i in range(10):
+        features[f"mfcc_{i+1}"] = float(np.mean(mfcc[i, :]))
+
+    # 5. Percussive vs harmonic (5 features)
+    y_harmonic, y_percussive = librosa.effects.hpss(y)
+    features["harmonic_energy"] = float(np.mean(librosa.feature.rms(y=y_harmonic)[0]))
+    features["percussive_energy"] = float(np.mean(librosa.feature.rms(y=y_percussive)[0]))
+    features["perc_harm_ratio"] = features["percussive_energy"] / (features["harmonic_energy"] + 1e-10)
+
+    onset_env = librosa.onset.onset_strength(y=y_percussive, sr=sr)
+    features["onset_strength_mean"] = float(np.mean(onset_env))
+    onsets = librosa.onset.onset_detect(onset_envelope=onset_env, sr=sr)
+    duration = len(y) / sr
+    features["percussive_onset_rate"] = len(onsets) / duration if duration > 0 else 0.0
+
+    # 6. Rhythm & tempo (5 additional features) - tempo already computed
+    features["tempo_confidence"] = float(1.0)  # Placeholder (librosa doesn't return confidence easily)
+    if len(beats) > 1:
+        beat_times = librosa.frames_to_time(beats, sr=sr)
+        beat_intervals = np.diff(beat_times)
+        features["beat_interval_mean"] = float(np.mean(beat_intervals))
+        features["beat_interval_std"] = float(np.std(beat_intervals))
+    else:
+        features["beat_interval_mean"] = 0.0
+        features["beat_interval_std"] = 0.0
+
+    # Onset rate
+    all_onsets = librosa.onset.onset_detect(y=y, sr=sr)
+    features["onset_rate"] = len(all_onsets) / duration if duration > 0 else 0.0
+
+    # Tempogram dominant periodicity
+    tempogram = librosa.feature.tempogram(onset_envelope=onset_env, sr=sr)
+    features["tempogram_periodicity"] = float(np.mean(tempogram))
+
+    # 7. Harmony (4 features)
+    chroma = librosa.feature.chroma_stft(y=y, sr=sr)
+    chroma_norm = chroma / (np.sum(chroma, axis=0, keepdims=True) + 1e-10)
+    chroma_entropy = -np.sum(chroma_norm * np.log(chroma_norm + 1e-10), axis=0)
+    features["chroma_entropy"] = float(np.mean(chroma_entropy))
+    features["chroma_centroid"] = float(np.mean(np.argmax(chroma, axis=0)))
+    features["chroma_energy_std"] = float(np.std(np.sum(chroma, axis=0)))
+
+    tonnetz = librosa.feature.tonnetz(y=y_harmonic, sr=sr)
+    features["tonnetz_mean"] = float(np.mean(tonnetz))
+
+    # 8. Structure (4 features)
+    # Split track into intro (0-20%), core (20-80%), outro (80-100%)
+    n_samples = len(y)
+    intro_end = int(n_samples * 0.2)
+    core_start = intro_end
+    core_end = int(n_samples * 0.8)
+    outro_start = core_end
+
+    intro_energy = float(np.mean(np.abs(y[:intro_end])))
+    core_energy = float(np.mean(np.abs(y[core_start:core_end])))
+    outro_energy = float(np.mean(np.abs(y[outro_start:])))
+    total_energy = float(np.mean(np.abs(y)))
+
+    features["intro_energy_ratio"] = intro_energy / (total_energy + 1e-10)
+    features["core_energy_ratio"] = core_energy / (total_energy + 1e-10)
+    features["outro_energy_ratio"] = outro_energy / (total_energy + 1e-10)
+
+    # Energy slope (linear regression of RMS over time)
+    time_indices = np.arange(len(rms))
+    slope, _ = np.polyfit(time_indices, rms, 1)
+    features["energy_slope"] = float(slope)
+
+    return features
 
 
 class AudioAnalyzerPlugin:
@@ -84,6 +235,10 @@ class AudioAnalyzerPlugin:
         context.subscribe(Events.TRACK_LOADED, self._on_track_loaded)
         context.subscribe("audio_analysis_complete", self._on_analysis_complete)
         context.subscribe(Events.TRACKS_ADDED, self._on_tracks_added)
+        context.subscribe("plugin_settings_changed", self._on_settings_changed)
+
+        # Load settings from database at startup
+        self._on_settings_changed()
 
         # Auto-start batch analysis at startup (after waveforms)
         from PySide6.QtCore import QTimer
@@ -97,14 +252,31 @@ class AudioAnalyzerPlugin:
 
         QTimer.singleShot(1000, self._start_batch_analysis)
 
+    def _on_settings_changed(self) -> None:
+        """Reload config when settings change."""
+        logging.info("[Audio Analyzer] Settings changed, reloading config from database")
+
+        # Reload enable_ml_features setting from database
+        db = self.context.database
+        ml_setting = db.conn.execute(
+            "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
+            ("audio_analyzer", "enable_ml_features"),
+        ).fetchone()
+
+        if ml_setting:
+            ml_enabled = ml_setting["setting_value"].lower() in ("true", "1", "yes")
+            self.context.config.audio_analysis.enable_ml_features = ml_enabled
+            logging.info(f"[Audio Analyzer] ML features extraction: {ml_enabled}")
+
     def register_ui(self, ui_builder: Any) -> None:
         """Register analysis widget."""
         self.analysis_widget = AnalysisWidget()
         ui_builder.add_bottom_widget(self.analysis_widget)
 
         # Add menu for batch analysis
-        menu = ui_builder.add_menu("&Analysis")
-        ui_builder.add_menu_action(menu, "Analyze All Tracks (Batch)", self._start_batch_analysis)
+        menu = ui_builder.get_or_create_menu("&Tools")
+        ui_builder.add_menu_separator(menu)
+        ui_builder.add_menu_action(menu, "Analyze All Tracks...", self._start_batch_analysis)
 
     def _on_track_loaded(self, track_id: int) -> None:
         """Display track analysis when loaded, or add to priority queue if not cached."""
@@ -206,15 +378,20 @@ class AudioAnalyzerPlugin:
 
         import os
 
+        # Get ML features flag from config
+        extract_ml = self.context.config.audio_analysis.enable_ml_features
+        logging.info(f"[Batch Analysis] ML features extraction enabled: {extract_ml}")
+
         for track in tracks:
+            # Select basic fields + one ML field to check if ML features exist
             analysis = self.context.database.conn.execute(
-                "SELECT tempo, spectral_centroid, zero_crossing_rate, rms_energy FROM audio_analysis WHERE track_id = ?",
+                "SELECT tempo, spectral_centroid, zero_crossing_rate, rms_energy, rms_mean FROM audio_analysis WHERE track_id = ?",
                 (track["id"],),
             ).fetchone()
 
             filename = os.path.basename(track["filepath"])
 
-            # Analyze if no analysis record OR if any advanced field is NULL
+            # Analyze if no analysis record OR if any basic field is NULL
             needs_analysis = (
                 not analysis
                 or analysis["tempo"] is None
@@ -223,11 +400,18 @@ class AudioAnalyzerPlugin:
                 or analysis["rms_energy"] is None
             )
 
+            # If ML features are enabled, also check if ML features are missing
+            if not needs_analysis and extract_ml:
+                # Check if ML features are present (rms_mean is the first ML feature)
+                if analysis["rms_mean"] is None:
+                    needs_analysis = True
+                    logging.info(f"  Track {track['id']}: {filename} - NEEDS RE-ANALYSIS (ML features missing)")
+
             if needs_analysis:
                 tracks_to_analyze.append((track["id"], track["filepath"]))
-                if analysis:
+                if analysis and not extract_ml:
                     logging.info(f"  Track {track['id']}: {filename} - NEEDS ANALYSIS (incomplete)")
-                else:
+                elif not analysis:
                     logging.info(f"  Track {track['id']}: {filename} - NEEDS ANALYSIS (no record)")
             else:
                 already_analyzed += 1
@@ -248,7 +432,7 @@ class AudioAnalyzerPlugin:
         def worker_factory(item: tuple[int, str]) -> QThread:
             """Create analysis worker for a track."""
             track_id, filepath = item
-            return AnalysisWorker(track_id=track_id, filepath=filepath)
+            return AnalysisWorker(track_id=track_id, filepath=filepath, extract_ml_features=extract_ml)
 
         AudioAnalyzerPlugin._batch_processor = BatchProcessor(
             name="Audio Analysis",
@@ -276,38 +460,27 @@ class AudioAnalyzerPlugin:
                 "SELECT track_id FROM audio_analysis WHERE track_id = ?", (track_id,)
             ).fetchone()
 
+            # Build dynamic SQL based on result keys
+            columns = list(result.keys())
+            placeholders = ", ".join(["?" for _ in columns])
+            values = [result[col] for col in columns]
+
             if existing:
-                # Update existing row
+                # Update existing row with all available columns
+                set_clause = ", ".join([f"{col} = ?" for col in columns])
                 self.context.database.conn.execute(
-                    """
-                    UPDATE audio_analysis
-                    SET tempo = ?, spectral_centroid = ?, zero_crossing_rate = ?, rms_energy = ?
-                    WHERE track_id = ?
-                """,
-                    (
-                        result["tempo"],
-                        result["spectral_centroid"],
-                        result["zero_crossing_rate"],
-                        result["rms_energy"],
-                        track_id,
-                    ),
+                    f"UPDATE audio_analysis SET {set_clause} WHERE track_id = ?",
+                    values + [track_id],
                 )
             else:
-                # Create new row with only advanced analysis (no waveform data)
+                # Create new row with all analysis results
+                columns_str = ", ".join(columns)
                 self.context.database.conn.execute(
-                    """
-                    INSERT INTO audio_analysis (
-                        track_id, tempo, spectral_centroid, zero_crossing_rate, rms_energy
-                    )
-                    VALUES (?, ?, ?, ?, ?)
-                """,
-                    (
-                        track_id,
-                        result["tempo"],
-                        result["spectral_centroid"],
-                        result["zero_crossing_rate"],
-                        result["rms_energy"],
-                    ),
+                    f"""
+                    INSERT INTO audio_analysis (track_id, {columns_str})
+                    VALUES (?, {placeholders})
+                    """,
+                    [track_id] + values,
                 )
 
             self.context.database.conn.commit()
@@ -315,9 +488,10 @@ class AudioAnalyzerPlugin:
             # Emit event to update UI if this track is currently displayed
             self.context.emit("audio_analysis_complete", track_id=track_id)
 
-            # DEBUG level: show filename
+            # DEBUG level: show filename and feature count
             filename = os.path.basename(filepath)
-            logging.debug(f"[Batch Analysis] Saved: {filename}")
+            feature_count = len(result)
+            logging.debug(f"[Batch Analysis] Saved {feature_count} features for: {filename}")
 
         except Exception as e:
             logging.error(f"[Batch Analysis] Failed to save results for track {track_id}: {e}", exc_info=True)
@@ -358,6 +532,20 @@ class AudioAnalyzerPlugin:
             except (RuntimeError, TypeError):
                 pass
         # Don't set to None - keep it alive so orphan workers can finish
+
+    def get_settings_schema(self) -> dict[str, Any]:
+        """Return settings schema for configuration UI.
+
+        Returns:
+            Dict mapping setting keys to their configuration
+        """
+        return {
+            "enable_ml_features": {
+                "label": "Enable ML Features Extraction",
+                "type": "bool",
+                "default": self.context.config.audio_analysis.enable_ml_features,
+            }
+        }
 
 
 class AnalysisWidget(QWidget):
@@ -460,17 +648,19 @@ class AnalysisWorker(QThread):
     complete = Signal(dict)  # Result dict with analysis metrics
     error = Signal(str)  # Error message
 
-    def __init__(self, track_id: int, filepath: str, parent: Any = None):
+    def __init__(self, track_id: int, filepath: str, extract_ml_features: bool = False, parent: Any = None):
         """Initialize worker.
 
         Args:
             track_id: Track ID
             filepath: Path to audio file
+            extract_ml_features: If True, extract comprehensive ML features
             parent: Parent object
         """
         super().__init__(parent)
         self.track_id = track_id
         self.filepath = filepath
+        self.extract_ml_features = extract_ml_features
         # Set thread name for debugging
         import os
 
@@ -479,14 +669,20 @@ class AnalysisWorker(QThread):
     def run(self) -> None:
         """Perform analysis."""
         try:
-            analysis = analyze_audio_file(self.filepath)
+            analysis = analyze_audio_file(self.filepath, extract_ml_features=self.extract_ml_features)
             self.complete.emit(analysis)
+        except ValueError as e:
+            # Empty or invalid audio file - log as warning, not error
+            import os
+
+            filename = os.path.basename(self.filepath)
+            error_msg = f"Skipping {filename}: {e}"
+            logging.warning(f"[AudioAnalysisWorker] {error_msg}")
+            self.error.emit(error_msg)
         except Exception as e:
             import os
-            import traceback
 
             filename = os.path.basename(self.filepath)
             error_msg = f"Error analyzing {filename}: {e}"
             logging.error(f"[AudioAnalysisWorker] {error_msg}", exc_info=True)
-            logging.error(f"[AudioAnalysisWorker] Full traceback:\n{traceback.format_exc()}")
             self.error.emit(error_msg)

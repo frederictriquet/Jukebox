@@ -37,7 +37,7 @@ class ModeSwitcherPlugin:
 
     def register_ui(self, ui_builder: Any) -> None:
         """Register mode switcher in menu."""
-        menu = ui_builder.add_menu("&Mode")
+        menu = ui_builder.get_or_create_menu("&Settings")
 
         # Create checkable actions for modes
         self.jukebox_action = ui_builder.add_menu_action(
@@ -54,7 +54,7 @@ class ModeSwitcherPlugin:
         if self.mode_manager:
             self._update_menu_checks(self.mode_manager.get_mode())
 
-        menu.addSeparator()
+        ui_builder.add_menu_separator(menu)
         ui_builder.add_menu_action(menu, "Toggle Mode", self._toggle_mode, shortcut="Ctrl+M")
 
     def _set_mode(self, mode: AppMode) -> None:

@@ -70,6 +70,9 @@ class FileScanner:
                 if self.progress_callback:
                     self.progress_callback(idx + 1, total)
 
+            except ValueError as e:
+                # Empty or invalid audio file - skip it
+                logging.warning(f"Skipping invalid file {filepath}: {e}")
             except Exception as e:
                 logging.error(f"Error processing {filepath}: {e}")
 

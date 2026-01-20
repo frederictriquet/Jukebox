@@ -22,7 +22,7 @@ class DuplicateFinderPlugin:
 
     def register_ui(self, ui_builder: Any) -> None:
         """Register UI."""
-        menu = ui_builder.add_menu("&Tools")
+        menu = ui_builder.get_or_create_menu("&Tools")
         ui_builder.add_menu_action(menu, "Find Duplicates...", self._find_duplicates)
 
     def _find_duplicates(self) -> None:

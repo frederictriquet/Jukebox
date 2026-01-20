@@ -368,9 +368,13 @@ class MainWindow(QMainWindow):
             if path.is_file():
                 # Single file - check if it's a supported format
                 if path.suffix.lower().lstrip(".") in self.config.audio.supported_formats:
-                    # Extract metadata and add to database
-                    metadata = MetadataExtractor.extract(path)
-                    self.database.add_track(metadata)
+                    try:
+                        # Extract metadata and add to database
+                        metadata = MetadataExtractor.extract(path)
+                        self.database.add_track(metadata)
+                    except ValueError as e:
+                        # Empty or invalid audio file - skip it
+                        logging.warning(f"Skipping invalid file {path}: {e}")
             elif path.is_dir():
                 # Directory - scan recursively
                 scanner = FileScanner(self.database, self.config.audio.supported_formats)

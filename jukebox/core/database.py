@@ -158,6 +158,9 @@ class Database:
         """
         )
 
+        # Migrate schema to add ML features columns if they don't exist
+        self._migrate_ml_features()
+
         # Plugin settings (runtime configuration overrides)
         self.conn.execute(
             """
@@ -170,6 +173,94 @@ class Database:
             )
         """
         )
+
+        self.conn.commit()
+
+    def _migrate_ml_features(self) -> None:
+        """Add ML feature columns to audio_analysis table if they don't exist."""
+        if self.conn is None:
+            return
+
+        # Get existing columns
+        cursor = self.conn.execute("PRAGMA table_info(audio_analysis)")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+
+        # Define all ML feature columns to add
+        ml_columns = {
+            # Energy & dynamics (8)
+            "rms_mean": "REAL",
+            "rms_std": "REAL",
+            "rms_p10": "REAL",
+            "rms_p90": "REAL",
+            "peak_amplitude": "REAL",
+            "crest_factor": "REAL",
+            # dynamic_range already exists
+            "loudness_variation": "REAL",
+            # Frequency band energies (12) - sub_bass, bass, low_mid, mid, high_mid, high
+            "sub_bass_mean": "REAL",
+            "sub_bass_ratio": "REAL",
+            "bass_mean": "REAL",
+            "bass_ratio": "REAL",
+            "low_mid_mean": "REAL",
+            "low_mid_ratio": "REAL",
+            "mid_mean": "REAL",
+            "mid_ratio": "REAL",
+            "high_mid_mean": "REAL",
+            "high_mid_ratio": "REAL",
+            "high_mean": "REAL",
+            "high_ratio": "REAL",
+            # Spectral features (8) - centroid already exists
+            "spectral_centroid_std": "REAL",
+            "spectral_bandwidth": "REAL",
+            "spectral_rolloff": "REAL",
+            "spectral_flatness": "REAL",
+            "spectral_contrast": "REAL",
+            "spectral_entropy": "REAL",
+            # MFCC (10 coefficients mean)
+            "mfcc_1": "REAL",
+            "mfcc_2": "REAL",
+            "mfcc_3": "REAL",
+            "mfcc_4": "REAL",
+            "mfcc_5": "REAL",
+            "mfcc_6": "REAL",
+            "mfcc_7": "REAL",
+            "mfcc_8": "REAL",
+            "mfcc_9": "REAL",
+            "mfcc_10": "REAL",
+            # Percussive vs harmonic (5)
+            "percussive_energy": "REAL",
+            "harmonic_energy": "REAL",
+            "perc_harm_ratio": "REAL",
+            "percussive_onset_rate": "REAL",
+            "onset_strength_mean": "REAL",
+            # Rhythm & tempo (6) - tempo already exists
+            "tempo_confidence": "REAL",
+            "beat_interval_mean": "REAL",
+            "beat_interval_std": "REAL",
+            "onset_rate": "REAL",
+            "tempogram_periodicity": "REAL",
+            # Harmony (4)
+            "chroma_entropy": "REAL",
+            "chroma_centroid": "REAL",
+            "chroma_energy_std": "REAL",
+            "tonnetz_mean": "REAL",
+            # Structure (4)
+            "intro_energy_ratio": "REAL",
+            "core_energy_ratio": "REAL",
+            "outro_energy_ratio": "REAL",
+            "energy_slope": "REAL",
+        }
+
+        # Add missing columns
+        for column_name, column_type in ml_columns.items():
+            if column_name not in existing_columns:
+                try:
+                    self.conn.execute(
+                        f"ALTER TABLE audio_analysis ADD COLUMN {column_name} {column_type}"
+                    )
+                except sqlite3.OperationalError:
+                    # Column might already exist (concurrent migration)
+                    pass
 
         self.conn.commit()
 

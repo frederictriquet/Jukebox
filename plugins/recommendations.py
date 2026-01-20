@@ -21,8 +21,8 @@ class RecommendationsPlugin:
 
     def register_ui(self, ui_builder: Any) -> None:
         """Register UI."""
-        menu = ui_builder.add_menu("&Discover")
-        ui_builder.add_menu_action(menu, "Get Recommendations", self._show_recommendations)
+        menu = ui_builder.get_or_create_menu("&Library")
+        ui_builder.add_menu_action(menu, "Recommendations...", self._show_recommendations)
 
     def _show_recommendations(self) -> None:
         """Show recommended tracks."""
