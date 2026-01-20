@@ -7,6 +7,8 @@ from typing import Any
 
 from PySide6.QtCore import QObject, QThread, Signal
 
+from jukebox.core.event_bus import Events
+
 
 class BatchProcessor(QObject):
     """Generic batch processor that processes items one at a time with a queue.
@@ -99,7 +101,7 @@ class BatchProcessor(QObject):
 
         logging.info(f"[{self.name}] Starting: {self.total_items} items to process")
         self.context.emit(
-            "status_message",
+            Events.STATUS_MESSAGE,
             message=f"{self.name}: Starting ({self.total_items} items)",
             color="#00FF00",
         )
@@ -184,7 +186,7 @@ class BatchProcessor(QObject):
 
         # Update status bar
         self.context.emit(
-            "status_message",
+            Events.STATUS_MESSAGE,
             message=f"{self.name}: {current}/{self.total_items}",
             color="#00FF00",
         )
@@ -356,7 +358,7 @@ class BatchProcessor(QObject):
         # Update status bar
         status_msg = f"{self.name}: Complete ({self.completed_count}/{self.total_items})"
         self.context.emit(
-            "status_message",
+            Events.STATUS_MESSAGE,
             message=status_msg,
             color="#00FF00" if failed_count == 0 else "#FFA500",
         )

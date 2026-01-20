@@ -3,6 +3,7 @@
 import logging
 from typing import Any
 
+from jukebox.core.event_bus import Events
 from jukebox.core.mode_manager import AppMode, ModeManager
 
 
@@ -104,21 +105,22 @@ class ModeSwitcherPlugin:
         main_window.setUpdatesEnabled(False)
 
         try:
+            # Stop current playback and unload track
+            main_window.player.unload()
+            main_window.position_timer.stop()
+
+            # Reset window title
+            main_window.setWindowTitle(main_window.config.ui.window_title)
+
+            # Clear waveform
+            main_window.event_bus.emit(Events.WAVEFORM_CLEAR)
+
             # Switch mode (plugins stay loaded, just activate/deactivate)
             # Event subscriptions remain active
             main_window.plugin_manager.switch_mode(mode.value)
 
-            # Re-emit current track loaded event if a track is playing
-            # (so newly activated plugins can update their UI)
-            if hasattr(main_window.player, "current_file") and main_window.player.current_file:
-                track = main_window.database.conn.execute(
-                    "SELECT id FROM tracks WHERE filepath = ?",
-                    (str(main_window.player.current_file),),
-                ).fetchone()
-                if track:
-                    from jukebox.core.event_bus import Events
-
-                    main_window.event_bus.emit(Events.TRACK_LOADED, track_id=track["id"])
+            # Reload tracks for new mode
+            main_window._load_tracks_from_db()
 
             logging.info(f"Switched to {mode.value} mode")
 

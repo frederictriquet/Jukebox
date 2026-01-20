@@ -4,6 +4,8 @@ import logging
 import re
 from typing import Any
 
+from jukebox.core.event_bus import Events
+
 
 class GenreEditorPlugin:
     """Edit genre using keyboard shortcuts for code toggles."""
@@ -26,11 +28,9 @@ class GenreEditorPlugin:
         self.context = context
 
         # Subscribe to track loaded event
-        from jukebox.core.event_bus import Events
-
         context.subscribe(Events.TRACK_LOADED, self._on_track_loaded)
         # Subscribe to settings changes to reload shortcuts
-        context.subscribe("plugin_settings_changed", self._on_settings_changed)
+        context.subscribe(Events.PLUGIN_SETTINGS_CHANGED, self._on_settings_changed)
 
     def register_ui(self, ui_builder: Any) -> None:
         """Register UI (just keyboard shortcuts)."""
@@ -220,7 +220,7 @@ class GenreEditorPlugin:
 
         # Emit event to update track list display
         from pathlib import Path
-        self.context.emit("track_metadata_updated", filepath=Path(filepath))
+        self.context.emit(Events.TRACK_METADATA_UPDATED, filepath=Path(filepath))
 
         # Update file tags
         try:

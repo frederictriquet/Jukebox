@@ -99,3 +99,43 @@ class TestFileScanner:
         tracks = db.get_all_tracks()
         assert len(tracks) == 1
         assert tracks[0]["filename"] == "valid.mp3"
+
+    def test_scan_with_mode(self, tmp_path: Path) -> None:
+        """Test scanning directory with mode parameter."""
+        # Create test files
+        (tmp_path / "song1.mp3").touch()
+        (tmp_path / "song2.mp3").touch()
+
+        db = Database(tmp_path / "test.db")
+        db.connect()
+        db.initialize_schema()
+
+        # Mock MetadataExtractor to return valid metadata
+        def mock_extract(filepath: Path) -> dict:
+            return {
+                "filepath": str(filepath),
+                "filename": filepath.name,
+                "file_size": filepath.stat().st_size,
+                "date_modified": filepath.stat().st_mtime,
+                "duration_seconds": 180.0,
+            }
+
+        # Scan with curating mode
+        scanner = FileScanner(db, ["mp3"], mode="curating")
+        with patch("jukebox.utils.scanner.MetadataExtractor.extract", side_effect=mock_extract):
+            added = scanner.scan_directory(tmp_path, recursive=False)
+
+        assert added == 2
+
+        # Verify all tracks are in curating mode
+        all_tracks = db.get_all_tracks()
+        assert len(all_tracks) == 2
+        for track in all_tracks:
+            assert track["mode"] == "curating"
+
+        # Verify filtering by mode works
+        jukebox_tracks = db.get_all_tracks(mode="jukebox")
+        assert len(jukebox_tracks) == 0
+
+        curating_tracks = db.get_all_tracks(mode="curating")
+        assert len(curating_tracks) == 2

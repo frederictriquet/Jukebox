@@ -74,3 +74,13 @@ class Events:
 
     # Track list manipulation events
     LOAD_TRACK_LIST = "load_track_list"  # Load specific tracks into the list
+
+    # UI events
+    WAVEFORM_CLEAR = "waveform_clear"  # Clear waveform display
+    POSITION_UPDATE = "position_update"  # Playback position changed
+    STATUS_MESSAGE = "status_message"  # Display status message
+
+    # Plugin events
+    PLUGIN_SETTINGS_CHANGED = "plugin_settings_changed"  # Plugin settings updated
+    AUDIO_ANALYSIS_COMPLETE = "audio_analysis_complete"  # Track analysis finished
+    TRACK_METADATA_UPDATED = "track_metadata_updated"  # Track metadata changed

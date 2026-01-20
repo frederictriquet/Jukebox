@@ -118,6 +118,12 @@ class AudioPlayer(QObject):
         """
         return self._current_file
 
+    def unload(self) -> None:
+        """Unload current track and stop playback."""
+        self._player.stop()
+        self._player.set_media(None)
+        self._current_file = None
+
     def _on_end_reached(self, event: Any) -> None:
         """Handle VLC end reached event.
 

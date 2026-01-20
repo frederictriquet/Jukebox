@@ -14,9 +14,17 @@ class TabEventFilter(QObject):
         """Initialize event filter."""
         super().__init__()
         self.metadata_widget = metadata_widget
+        self._enabled = True
+
+    def setEnabled(self, enabled: bool) -> None:
+        """Enable or disable the event filter."""
+        self._enabled = enabled
 
     def eventFilter(self, obj: Any, event: Any) -> bool:  # noqa: N802
         """Filter events to handle TAB within metadata editor."""
+        if not self._enabled:
+            return False
+
         from PySide6.QtCore import QEvent, Qt
         from PySide6.QtWidgets import QApplication
 

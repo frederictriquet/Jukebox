@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from jukebox.core.event_bus import Events
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent, QKeySequence
 from PySide6.QtWidgets import (
@@ -527,7 +528,7 @@ class ConfigDialog(QDialog):
         db.conn.commit()
 
         # Emit event to notify plugins that settings changed
-        self.context.emit("plugin_settings_changed")
+        self.context.emit(Events.PLUGIN_SETTINGS_CHANGED)
 
         self.accept()
 

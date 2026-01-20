@@ -8,6 +8,8 @@ import pyqtgraph as pg
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
+from jukebox.core.event_bus import Events
+
 
 class WaveformVisualizerPlugin:
     """Visualize track waveforms."""
@@ -31,10 +33,9 @@ class WaveformVisualizerPlugin:
         self.context = context
 
         # Subscribe to events
-        from jukebox.core.event_bus import Events
-
         self.context.subscribe(Events.TRACK_LOADED, self._on_track_loaded)
         self.context.subscribe(Events.TRACKS_ADDED, self._on_tracks_added)
+        self.context.subscribe(Events.WAVEFORM_CLEAR, self._on_waveform_clear)
 
         # Auto-start batch waveform generation at startup
         # Use a timer to defer until after UI is fully loaded
@@ -46,13 +47,19 @@ class WaveformVisualizerPlugin:
         """Auto-generate missing waveforms when tracks are added."""
         self._start_batch_waveform()
 
+    def _on_waveform_clear(self) -> None:
+        """Clear waveform display when mode changes."""
+        if self.waveform_widget:
+            self.waveform_widget.clear_waveform()
+        self.current_track_id = None
+
     def register_ui(self, ui_builder: Any) -> None:
         """Add waveform widget."""
         waveform_config = self.context.config.waveform
         self.waveform_widget = WaveformWidget(waveform_config)
 
         # Connect position updates
-        self.context.subscribe("position_update", self._update_cursor)
+        self.context.subscribe(Events.POSITION_UPDATE, self._update_cursor)
         self.waveform_widget.position_clicked.connect(self._on_seek_requested)
 
         ui_builder.add_bottom_widget(self.waveform_widget)
@@ -160,7 +167,7 @@ class WaveformVisualizerPlugin:
 
         if not tracks_to_generate:
             logging.info("[Batch Waveform] All tracks already have waveforms")
-            self.context.emit("status_message", message="All waveforms generated", color="#00FF00")
+            self.context.emit(Events.STATUS_MESSAGE, message="All waveforms generated", color="#00FF00")
             return
 
         # Create batch processor
@@ -244,7 +251,7 @@ class WaveformVisualizerPlugin:
                 logging.debug(f"[Waveform] Displayed waveform for current track {track_id}")
 
             # Emit event to notify analysis complete
-            self.context.emit("audio_analysis_complete", track_id=track_id)
+            self.context.emit(Events.AUDIO_ANALYSIS_COMPLETE, track_id=track_id)
 
             # DEBUG level: show filename
             filename = os.path.basename(filepath)

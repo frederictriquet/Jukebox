@@ -5,6 +5,8 @@ from typing import Any
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
+from jukebox.core.event_bus import Events
+
 
 class TrackInfoPlugin:
     """Display current track information."""
@@ -23,10 +25,8 @@ class TrackInfoPlugin:
         self.context = context
 
         # Subscribe to track events
-        from jukebox.core.event_bus import Events
-
         context.subscribe(Events.TRACK_LOADED, self._on_track_loaded)
-        context.subscribe("position_update", self._on_position_update)
+        context.subscribe(Events.POSITION_UPDATE, self._on_position_update)
 
     def register_ui(self, ui_builder: Any) -> None:
         """Register track info widget."""

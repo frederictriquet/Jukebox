@@ -21,6 +21,7 @@ from jukebox.core.audio_player import AudioPlayer
 from jukebox.core.config import JukeboxConfig
 from jukebox.core.database import Database
 from jukebox.core.event_bus import EventBus, Events
+from jukebox.core.mode_manager import AppMode, ModeManager
 from jukebox.core.plugin_manager import PluginContext, PluginManager
 from jukebox.core.shortcut_manager import ShortcutManager
 from jukebox.ui.components.player_controls import PlayerControls
@@ -186,10 +187,11 @@ class MainWindow(QMainWindow):
         )
 
         if files:
+            mode = self._get_current_mode()
             for file in files:
                 filepath = Path(file)
                 metadata = MetadataExtractor.extract(filepath)
-                self.database.add_track(metadata)
+                self.database.add_track(metadata, mode=mode)
 
             self._load_tracks_from_db()
 
@@ -209,11 +211,14 @@ class MainWindow(QMainWindow):
             progress.setValue(int(current / total * 100))
             QApplication.processEvents()
 
-        scanner = FileScanner(self.database, self.config.audio.supported_formats, update_progress)
+        mode = self._get_current_mode()
+        scanner = FileScanner(
+            self.database, self.config.audio.supported_formats, update_progress, mode=mode
+        )
         added = scanner.scan_directory(Path(directory), recursive=True)
 
         progress.close()
-        QMessageBox.information(self, "Scan Complete", f"Added {added} tracks")
+        QMessageBox.information(self, "Scan Complete", f"Added {added} tracks to {mode} mode")
         self._load_tracks_from_db()
 
         # Emit event to notify plugins (start batch processing)
@@ -221,12 +226,16 @@ class MainWindow(QMainWindow):
             self.event_bus.emit(Events.TRACKS_ADDED)
 
     def _perform_search(self, query: str) -> None:
-        """Perform FTS5 search."""
+        """Perform FTS5 search within current mode."""
         # Save current playing track
         current_track = self.player.current_file if self.player.current_file else None
 
         self.track_list.clear_tracks()
-        tracks = self.database.get_all_tracks() if not query else self.database.search_tracks(query)
+        mode = self._get_current_mode()
+        if not query:
+            tracks = self.database.get_all_tracks(mode=mode)
+        else:
+            tracks = self.database.search_tracks(query, mode=mode)
         for track in tracks:
             self.track_list.add_track(
                 Path(track["filepath"]),
@@ -244,9 +253,11 @@ class MainWindow(QMainWindow):
                 self.track_list.selectRow(row)
 
     def _load_tracks_from_db(self) -> None:
-        """Load all tracks from database."""
+        """Load all tracks from database for current mode."""
         self.track_list.clear_tracks()
-        tracks = self.database.get_all_tracks()
+        mode = self._get_current_mode()
+        tracks = self.database.get_all_tracks(mode=mode)
+        logging.debug(f"[MainWindow] Loaded {len(tracks)} tracks for mode {mode}")
         for track in tracks:
             self.track_list.add_track(
                 Path(track["filepath"]),
@@ -363,6 +374,8 @@ class MainWindow(QMainWindow):
         from jukebox.utils.metadata import MetadataExtractor
         from jukebox.utils.scanner import FileScanner
 
+        mode = self._get_current_mode()
+
         # Scan all paths (files and directories)
         for path in paths:
             if path.is_file():
@@ -371,13 +384,15 @@ class MainWindow(QMainWindow):
                     try:
                         # Extract metadata and add to database
                         metadata = MetadataExtractor.extract(path)
-                        self.database.add_track(metadata)
+                        self.database.add_track(metadata, mode=mode)
                     except ValueError as e:
                         # Empty or invalid audio file - skip it
                         logging.warning(f"Skipping invalid file {path}: {e}")
             elif path.is_dir():
                 # Directory - scan recursively
-                scanner = FileScanner(self.database, self.config.audio.supported_formats)
+                scanner = FileScanner(
+                    self.database, self.config.audio.supported_formats, mode=mode
+                )
                 scanner.scan_directory(path, recursive=True)
 
         # Emit event to notify plugins
@@ -434,14 +449,14 @@ class MainWindow(QMainWindow):
         self.player.stop()
         self.position_timer.stop()
         # Emit for plugins (waveform cursor)
-        self.event_bus.emit("position_update", position=0.0)
+        self.event_bus.emit(Events.POSITION_UPDATE, position=0.0)
 
     def _update_position(self) -> None:
         """Update position based on player position."""
         if self.player.is_playing():
             position = self.player.get_position()
             # Emit for plugins (waveform cursor)
-            self.event_bus.emit("position_update", position=position)
+            self.event_bus.emit(Events.POSITION_UPDATE, position=position)
             # Update fallback slider if exists
             if self.fallback_position_slider and self.fallback_position_slider.isVisible():
                 self.fallback_position_slider.blockSignals(True)
@@ -486,6 +501,12 @@ class MainWindow(QMainWindow):
             if layout:
                 layout.addWidget(self.fallback_position_slider)
 
+        # Subscribe to mode changes to reload tracks (after plugins are loaded)
+        # mode_manager may be set by mode_switcher plugin
+        if not hasattr(self, "mode_manager") or self.mode_manager is None:
+            self.mode_manager = ModeManager(AppMode(self.config.ui.mode))
+        self.mode_manager.mode_changed.connect(self._on_mode_changed)
+
     def _on_select_next_track(self) -> None:
         """Handle SELECT_NEXT_TRACK event."""
         self.track_list.select_next_track()
@@ -529,3 +550,26 @@ class MainWindow(QMainWindow):
                     track["genre"] if "genre" in track.keys() else None,
                     track["duration_seconds"] if "duration_seconds" in track.keys() else None,
                 )
+
+    def _get_current_mode(self) -> str:
+        """Get current application mode.
+
+        Returns:
+            Mode string ("jukebox" or "curating")
+        """
+        if hasattr(self, "mode_manager") and self.mode_manager is not None:
+            return self.mode_manager.get_mode().value
+        return self.config.ui.mode
+
+    def _on_mode_changed(self, mode: AppMode) -> None:
+        """Handle mode change - reload track list for new mode.
+
+        Note: Most mode change logic is handled by mode_switcher plugin.
+        This handler is for cases where mode_manager is used without the plugin.
+
+        Args:
+            mode: New application mode
+        """
+        # Only reload if mode_switcher plugin hasn't already done it
+        # (mode_switcher calls _load_tracks_from_db directly)
+        pass

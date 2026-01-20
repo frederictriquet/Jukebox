@@ -7,6 +7,7 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import QMenu, QTableView
 
+from jukebox.core.event_bus import Events
 from jukebox.ui.components.track_cell_renderer import CellRenderer
 
 # Column configuration
@@ -44,12 +45,10 @@ class TrackListModel(QAbstractTableModel):
         # Subscribe to metadata updates (when genre/rating changes)
         if event_bus:
             # Listen for track metadata changes (emitted by genre_editor, metadata_editor)
-            event_bus.subscribe("track_metadata_updated", self._on_track_metadata_updated)
+            event_bus.subscribe(Events.TRACK_METADATA_UPDATED, self._on_track_metadata_updated)
             # Listen for waveform completion (emitted by waveform_visualizer)
-            event_bus.subscribe("audio_analysis_complete", self._on_waveform_complete)
+            event_bus.subscribe(Events.AUDIO_ANALYSIS_COMPLETE, self._on_waveform_complete)
             # Listen for track deletion (emitted by file_manager)
-            from jukebox.core.event_bus import Events
-
             event_bus.subscribe(Events.TRACK_DELETED, self._on_track_deleted)
 
     def _on_track_metadata_updated(self, filepath: Path) -> None:

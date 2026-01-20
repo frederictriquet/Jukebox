@@ -16,6 +16,7 @@ class FileScanner:
         database: Database,
         supported_formats: list[str],
         progress_callback: Callable[[int, int], None] | None = None,
+        mode: str = "jukebox",
     ):
         """Initialize scanner.
 
@@ -23,10 +24,12 @@ class FileScanner:
             database: Database instance
             supported_formats: List of supported file extensions
             progress_callback: Optional callback(current, total)
+            mode: Application mode for new tracks ("jukebox" or "curating")
         """
         self.database = database
         self.supported_formats = [f".{fmt}" for fmt in supported_formats]
         self.progress_callback = progress_callback
+        self.mode = mode
 
     def scan_directory(self, directory: Path, recursive: bool = True) -> int:
         """Scan directory for audio files.
@@ -61,9 +64,9 @@ class FileScanner:
                 if existing:
                     continue
 
-                # Extract and add
+                # Extract and add with mode
                 metadata = MetadataExtractor.extract(filepath)
-                self.database.add_track(metadata)
+                self.database.add_track(metadata, mode=self.mode)
                 added += 1
 
                 # Progress

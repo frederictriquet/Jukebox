@@ -233,9 +233,9 @@ class AudioAnalyzerPlugin:
         from jukebox.core.event_bus import Events
 
         context.subscribe(Events.TRACK_LOADED, self._on_track_loaded)
-        context.subscribe("audio_analysis_complete", self._on_analysis_complete)
+        context.subscribe(Events.AUDIO_ANALYSIS_COMPLETE, self._on_analysis_complete)
         context.subscribe(Events.TRACKS_ADDED, self._on_tracks_added)
-        context.subscribe("plugin_settings_changed", self._on_settings_changed)
+        context.subscribe(Events.PLUGIN_SETTINGS_CHANGED, self._on_settings_changed)
 
         # Load settings from database at startup
         self._on_settings_changed()
@@ -423,7 +423,7 @@ class AudioAnalyzerPlugin:
 
         if not tracks_to_analyze:
             logging.info("[Batch Analysis] All tracks already have complete analysis")
-            self.context.emit("status_message", message="All tracks analyzed", color="#00FF00")
+            self.context.emit(Events.STATUS_MESSAGE, message="All tracks analyzed", color="#00FF00")
             return
 
         # Create batch processor
@@ -486,7 +486,7 @@ class AudioAnalyzerPlugin:
             self.context.database.conn.commit()
 
             # Emit event to update UI if this track is currently displayed
-            self.context.emit("audio_analysis_complete", track_id=track_id)
+            self.context.emit(Events.AUDIO_ANALYSIS_COMPLETE, track_id=track_id)
 
             # DEBUG level: show filename and feature count
             filename = os.path.basename(filepath)

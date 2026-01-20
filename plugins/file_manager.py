@@ -5,6 +5,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from jukebox.core.event_bus import Events
+
 
 class FileManagerPlugin:
     """Manage files: move, rename, and delete tracks."""
@@ -27,11 +29,9 @@ class FileManagerPlugin:
         self.context = context
 
         # Subscribe to track loaded event
-        from jukebox.core.event_bus import Events
-
         context.subscribe(Events.TRACK_LOADED, self._on_track_loaded)
         # Subscribe to settings changes to reload shortcuts
-        context.subscribe("plugin_settings_changed", self._on_settings_changed)
+        context.subscribe(Events.PLUGIN_SETTINGS_CHANGED, self._on_settings_changed)
 
     def register_ui(self, ui_builder: Any) -> None:
         """Register UI (just keyboard shortcuts)."""
@@ -146,7 +146,7 @@ class FileManagerPlugin:
 
         if not self.current_filepath.exists():
             logging.error(f"Source file does not exist: {self.current_filepath}")
-            self.context.emit("status_message", message=f"Error: File not found")
+            self.context.emit(Events.STATUS_MESSAGE, message="Error: File not found")
             return
 
         # Get track metadata for renaming
@@ -170,7 +170,7 @@ class FileManagerPlugin:
                 missing.append("title")
             error_msg = f"Cannot copy: missing {' and '.join(missing)}"
             logging.warning(f"[File Manager] {error_msg} for track {self.current_track_id}")
-            self.context.emit("status_message", message=error_msg)
+            self.context.emit(Events.STATUS_MESSAGE, message=error_msg)
             return
 
         extension = self.current_filepath.suffix
@@ -189,25 +189,36 @@ class FileManagerPlugin:
         if dest_path.exists():
             logging.error(f"Destination file already exists: {dest_path}")
             self.context.emit(
-                "status_message", message=f"Error: File already exists in {dest_config.name}"
+                Events.STATUS_MESSAGE, message=f"Error: File already exists in {dest_config.name}"
             )
             return
 
         try:
-            # Save filepath before moving
+            # Save filepath before copying
             old_filepath = self.current_filepath
 
-            # Move file
-            shutil.move(str(self.current_filepath), str(dest_path))
-            logging.info(f"Moved {old_filepath} -> {dest_path}")
+            # Copy file (keep original in curating mode)
+            shutil.copy2(str(self.current_filepath), str(dest_path))
+            logging.info(f"Copied {old_filepath} -> {dest_path}")
 
-            # Delete from database (track moved out of library)
+            # Add the copied file to the database in jukebox mode
+            from jukebox.utils.metadata import MetadataExtractor
+
+            metadata = MetadataExtractor.extract(dest_path)
+            self.context.database.add_track(metadata, mode="jukebox")
+            logging.info(f"Added {dest_path} to database in jukebox mode")
+
+            # Delete original from database (track moved out of curating library)
             self.context.database.conn.execute(
                 "DELETE FROM tracks WHERE id = ?",
                 (self.current_track_id,),
             )
             self.context.database.conn.commit()
             logging.info(f"Deleted track {self.current_track_id} from database")
+
+            # Delete original file from disk
+            old_filepath.unlink()
+            logging.info(f"Deleted original file: {old_filepath}")
 
             # Reset current track BEFORE emitting event
             # (because event handlers might load a new track)
@@ -221,13 +232,13 @@ class FileManagerPlugin:
 
             # Show status message
             self.context.emit(
-                "status_message",
-                message=f"Moved to {dest_config.name}: {new_filename}",
+                Events.STATUS_MESSAGE,
+                message=f"Copied to {dest_config.name}: {new_filename}",
             )
 
         except Exception as e:
             logging.error(f"Failed to move file: {e}")
-            self.context.emit("status_message", message=f"Error moving file: {e}")
+            self.context.emit(Events.STATUS_MESSAGE, message=f"Error moving file: {e}")
 
     def _move_to_trash(self) -> None:
         """Move current track to trash, remove from database and tracklist, play next."""
@@ -237,7 +248,7 @@ class FileManagerPlugin:
 
         if not self.current_filepath.exists():
             logging.error(f"Source file does not exist: {self.current_filepath}")
-            self.context.emit("status_message", message=f"Error: File not found")
+            self.context.emit(Events.STATUS_MESSAGE, message="Error: File not found")
             return
 
         # Get trash directory from config
@@ -250,7 +261,7 @@ class FileManagerPlugin:
         # Check if destination already exists
         if dest_path.exists():
             logging.error(f"File already exists in trash: {dest_path}")
-            self.context.emit("status_message", message=f"Error: File already exists in trash")
+            self.context.emit(Events.STATUS_MESSAGE, message="Error: File already exists in trash")
             return
 
         try:
@@ -281,13 +292,13 @@ class FileManagerPlugin:
 
             # Show status message
             self.context.emit(
-                "status_message",
+                Events.STATUS_MESSAGE,
                 message=f"Deleted: {old_filepath.name}",
             )
 
         except Exception as e:
             logging.error(f"Failed to move file to trash: {e}")
-            self.context.emit("status_message", message=f"Error moving to trash: {e}")
+            self.context.emit(Events.STATUS_MESSAGE, message=f"Error moving to trash: {e}")
 
     def _sanitize_filename(self, filename: str) -> str:
         """Sanitize filename by removing invalid characters."""

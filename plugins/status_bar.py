@@ -4,6 +4,8 @@ from typing import Any
 
 from PySide6.QtWidgets import QLabel, QStatusBar
 
+from jukebox.core.event_bus import Events
+
 
 class StatusBarPlugin:
     """Centralized status bar for plugin messages."""
@@ -26,7 +28,7 @@ class StatusBarPlugin:
         self.context = context
 
         # Subscribe to status events
-        context.subscribe("status_message", self._on_status_message)
+        context.subscribe(Events.STATUS_MESSAGE, self._on_status_message)
 
     def register_ui(self, ui_builder: Any) -> None:
         """Register status bar."""

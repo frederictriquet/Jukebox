@@ -161,6 +161,9 @@ class Database:
         # Migrate schema to add ML features columns if they don't exist
         self._migrate_ml_features()
 
+        # Migrate schema to add mode column if it doesn't exist
+        self._migrate_track_mode()
+
         # Plugin settings (runtime configuration overrides)
         self.conn.execute(
             """
@@ -264,11 +267,32 @@ class Database:
 
         self.conn.commit()
 
-    def add_track(self, track_data: dict[str, Any]) -> int:
+    def _migrate_track_mode(self) -> None:
+        """Add mode column to tracks table if it doesn't exist."""
+        if self.conn is None:
+            return
+
+        # Get existing columns
+        cursor = self.conn.execute("PRAGMA table_info(tracks)")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+
+        if "mode" not in existing_columns:
+            # Add mode column with default "curating" for existing tracks
+            self.conn.execute(
+                "ALTER TABLE tracks ADD COLUMN mode TEXT NOT NULL DEFAULT 'curating'"
+            )
+            # Create index for efficient mode filtering
+            self.conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tracks_mode ON tracks(mode)"
+            )
+            self.conn.commit()
+
+    def add_track(self, track_data: dict[str, Any], mode: str = "jukebox") -> int:
         """Add a track to the database.
 
         Args:
             track_data: Track metadata dictionary
+            mode: Application mode ("jukebox" or "curating")
 
         Returns:
             Track ID
@@ -281,8 +305,8 @@ class Database:
             INSERT OR REPLACE INTO tracks (
                 filepath, filename, title, artist, album, album_artist,
                 genre, year, track_number, duration_seconds, bitrate,
-                sample_rate, file_size, date_modified
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                sample_rate, file_size, date_modified, mode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 str(track_data["filepath"]),
@@ -299,17 +323,21 @@ class Database:
                 track_data.get("sample_rate"),
                 track_data.get("file_size"),
                 track_data.get("date_modified"),
+                mode,
             ),
         )
         self.conn.commit()
         return int(cursor.lastrowid) if cursor.lastrowid is not None else 0
 
-    def search_tracks(self, query: str, limit: int = 100) -> list[sqlite3.Row]:
+    def search_tracks(
+        self, query: str, limit: int = 100, mode: str | None = None
+    ) -> list[sqlite3.Row]:
         """Search tracks using FTS5.
 
         Args:
             query: Search query
             limit: Maximum results
+            mode: Optional mode filter ("jukebox" or "curating")
 
         Returns:
             List of matching tracks
@@ -317,24 +345,40 @@ class Database:
         if self.conn is None:
             raise RuntimeError("Database not connected")
 
-        cursor = self.conn.execute(
-            """
-            SELECT t.*
-            FROM tracks t
-            JOIN tracks_fts fts ON t.id = fts.rowid
-            WHERE tracks_fts MATCH ?
-            ORDER BY rank
-            LIMIT ?
-        """,
-            (query, limit),
-        )
+        if mode:
+            cursor = self.conn.execute(
+                """
+                SELECT t.*
+                FROM tracks t
+                JOIN tracks_fts fts ON t.id = fts.rowid
+                WHERE tracks_fts MATCH ? AND t.mode = ?
+                ORDER BY rank
+                LIMIT ?
+            """,
+                (query, mode, limit),
+            )
+        else:
+            cursor = self.conn.execute(
+                """
+                SELECT t.*
+                FROM tracks t
+                JOIN tracks_fts fts ON t.id = fts.rowid
+                WHERE tracks_fts MATCH ?
+                ORDER BY rank
+                LIMIT ?
+            """,
+                (query, limit),
+            )
         return cursor.fetchall()
 
-    def get_all_tracks(self, limit: int | None = None) -> list[sqlite3.Row]:
-        """Get all tracks.
+    def get_all_tracks(
+        self, limit: int | None = None, mode: str | None = None
+    ) -> list[sqlite3.Row]:
+        """Get all tracks, optionally filtered by mode.
 
         Args:
             limit: Optional limit
+            mode: Optional mode filter ("jukebox" or "curating")
 
         Returns:
             List of tracks
@@ -342,10 +386,37 @@ class Database:
         if self.conn is None:
             raise RuntimeError("Database not connected")
 
-        query = "SELECT * FROM tracks ORDER BY date_added DESC"
-        if limit:
-            query += f" LIMIT {limit}"
-        return self.conn.execute(query).fetchall()
+        if mode:
+            query = "SELECT * FROM tracks WHERE mode = ? ORDER BY date_added DESC"
+            params: tuple[str, ...] = (mode,)
+            if limit:
+                query += f" LIMIT {limit}"
+            return self.conn.execute(query, params).fetchall()
+        else:
+            query = "SELECT * FROM tracks ORDER BY date_added DESC"
+            if limit:
+                query += f" LIMIT {limit}"
+            return self.conn.execute(query).fetchall()
+
+    def update_track_mode(self, track_id: int, mode: str) -> bool:
+        """Update the mode of a track.
+
+        Args:
+            track_id: Track ID
+            mode: New mode ("jukebox" or "curating")
+
+        Returns:
+            True if updated, False if track not found
+        """
+        if self.conn is None:
+            raise RuntimeError("Database not connected")
+
+        cursor = self.conn.execute(
+            "UPDATE tracks SET mode = ? WHERE id = ?",
+            (mode, track_id),
+        )
+        self.conn.commit()
+        return cursor.rowcount > 0
 
     def get_track_by_id(self, track_id: int) -> sqlite3.Row | None:
         """Get track by ID.

@@ -6,6 +6,8 @@ from typing import Any
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QPushButton
 
+from jukebox.core.event_bus import Events
+
 
 class LoopPlayerPlugin:
     """Enable looping a section of the current track."""
@@ -31,12 +33,10 @@ class LoopPlayerPlugin:
         self.context = context
 
         # Subscribe to track loaded event to reset loop
-        from jukebox.core.event_bus import Events
-
         self.context.subscribe(Events.TRACK_LOADED, self._on_track_loaded)
 
         # Subscribe to settings changes
-        self.context.subscribe("plugin_settings_changed", self._on_settings_changed)
+        self.context.subscribe(Events.PLUGIN_SETTINGS_CHANGED, self._on_settings_changed)
 
         # Load settings from database at startup
         self._on_settings_changed()
