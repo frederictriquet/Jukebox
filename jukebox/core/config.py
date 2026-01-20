@@ -60,6 +60,12 @@ class PlaybackNavigationConfig(BaseModel):
     max_seek_multiplier: int = Field(ge=1, default=5)
 
 
+class LoopPlayerConfig(BaseModel):
+    """Loop player configuration."""
+
+    duration: float = Field(gt=0, default=30.0)
+
+
 class WaveformConfig(BaseModel):
     """Waveform visualization configuration."""
 
@@ -155,6 +161,7 @@ class JukeboxConfig(BaseModel):
     ui: UIConfig
     shortcuts: ShortcutsConfig = Field(default_factory=ShortcutsConfig)
     playback_navigation: PlaybackNavigationConfig = Field(default_factory=PlaybackNavigationConfig)
+    loop_player: LoopPlayerConfig = Field(default_factory=LoopPlayerConfig)
     waveform: WaveformConfig = Field(default_factory=WaveformConfig)
     audio_analysis: AudioAnalysisConfig = Field(default_factory=AudioAnalysisConfig)
     metadata_editor: MetadataEditorConfig = Field(default_factory=MetadataEditorConfig)

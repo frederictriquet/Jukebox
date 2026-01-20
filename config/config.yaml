@@ -38,6 +38,9 @@ playback_navigation:
   rapid_press_threshold: 0.5 # Time threshold for rapid press detection (seconds)
   max_seek_multiplier: 5 # Maximum acceleration multiplier
 
+loop_player:
+  duration: 30.0 # Default loop duration in seconds
+
 waveform:
   bass_color: "#0066FF" # Blue
   mid_color: "#00FF00" # Green
@@ -127,6 +130,7 @@ plugins:
     - mode_switcher
     - theme_switcher
     - playback_navigation
+    - loop_player
     - track_info
     - stats_plugin
     - playlists_plugin

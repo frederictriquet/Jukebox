@@ -10,6 +10,7 @@ from PySide6.QtGui import QKeyEvent, QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -405,12 +406,16 @@ class ConfigDialog(QDialog):
                 if "suffix" in setting_config:
                     input_widget.setSuffix(setting_config["suffix"])
             elif setting_type == "float":
-                # Use QSpinBox with decimals for simplicity
-                input_widget = QSpinBox()
+                # Use QDoubleSpinBox for float values
+                from PySide6.QtWidgets import QDoubleSpinBox
+
+                input_widget = QDoubleSpinBox()
                 input_widget.setRange(
-                    int(setting_config.get("min", 0) * 100),
-                    int(setting_config.get("max", 100) * 100),
+                    setting_config.get("min", 0.0),
+                    setting_config.get("max", 100.0),
                 )
+                input_widget.setSingleStep(0.1)  # Step by 0.1
+                input_widget.setDecimals(1)  # Show 1 decimal place
                 input_widget.setSuffix(setting_config.get("suffix", ""))
             else:  # string
                 input_widget = QLineEdit()
@@ -472,6 +477,8 @@ class ConfigDialog(QDialog):
                     input_widget.setChecked(bool_value)
                 elif isinstance(input_widget, (DirectoryInput, ShortcutInput)):
                     input_widget.setText(value)
+                elif isinstance(input_widget, QDoubleSpinBox):
+                    input_widget.setValue(float(value) if value else 0.0)
                 elif isinstance(input_widget, QSpinBox):
                     input_widget.setValue(int(float(value)) if value else 0)
                 elif isinstance(input_widget, QLineEdit):
@@ -507,6 +514,8 @@ class ConfigDialog(QDialog):
                     value = "true" if input_widget.isChecked() else "false"
                 elif isinstance(input_widget, (DirectoryInput, ShortcutInput, QLineEdit)):
                     value = input_widget.text()
+                elif isinstance(input_widget, QDoubleSpinBox):
+                    value = str(input_widget.value())
                 elif isinstance(input_widget, QSpinBox):
                     value = str(input_widget.value())
                 else:
