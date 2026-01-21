@@ -71,11 +71,7 @@ class FileCuratorPlugin:
             shutil.move(str(orig_path), str(new_path))
 
             # Update database
-            self.context.database.conn.execute(
-                "UPDATE tracks SET filepath = ?, filename = ? WHERE id = ?",
-                (str(new_path), new_path.name, track_id),
-            )
-            self.context.database.conn.commit()
+            self.context.database.update_track_filepath(track_id, new_path)
 
             return new_path
 

@@ -61,9 +61,7 @@ class GenreEditorPlugin(ShortcutMixin):
         self.current_track_id = track_id
 
         # Get genre from database
-        track = self.context.database.conn.execute(
-            "SELECT genre FROM tracks WHERE id = ?", (track_id,)
-        ).fetchone()
+        track = self.context.database.get_track_by_id(track_id)
 
         # Validate genre format - if invalid, reset to empty
         if track and track["genre"]:
@@ -85,15 +83,12 @@ class GenreEditorPlugin(ShortcutMixin):
         db = self.context.database
 
         # Load genre codes
-        codes_json = db.conn.execute(
-            "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
-            ("genre_editor", "genre_codes"),
-        ).fetchone()
+        codes_json = db.get_plugin_setting("genre_editor", "genre_codes")
 
         if codes_json:
             import json
             try:
-                codes_data = json.loads(codes_json["setting_value"])
+                codes_data = json.loads(codes_json)
                 # Update config with new codes
                 from jukebox.core.config import GenreCodeConfig
                 self.context.config.genre_editor.codes = [
@@ -103,12 +98,9 @@ class GenreEditorPlugin(ShortcutMixin):
                 logging.error(f"Failed to parse genre codes config: {e}")
 
         # Load rating key
-        rating_key = db.conn.execute(
-            "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
-            ("genre_editor", "rating_key"),
-        ).fetchone()
+        rating_key = db.get_plugin_setting("genre_editor", "rating_key")
         if rating_key:
-            self.context.config.genre_editor.rating_key = rating_key["setting_value"]
+            self.context.config.genre_editor.rating_key = rating_key
 
     def _toggle_code(self, code: str) -> None:
         """Toggle a genre code in the current genre."""
@@ -177,9 +169,7 @@ class GenreEditorPlugin(ShortcutMixin):
         self.current_genre = new_genre
 
         # Get filepath
-        track = self.context.database.conn.execute(
-            "SELECT filepath FROM tracks WHERE id = ?", (self.current_track_id,)
-        ).fetchone()
+        track = self.context.database.get_track_by_id(self.current_track_id)
 
         if not track:
             return
@@ -187,10 +177,7 @@ class GenreEditorPlugin(ShortcutMixin):
         filepath = track["filepath"]
 
         # Update database
-        self.context.database.conn.execute(
-            "UPDATE tracks SET genre = ? WHERE id = ?", (new_genre, self.current_track_id)
-        )
-        self.context.database.conn.commit()
+        self.context.database.update_track_metadata(self.current_track_id, {"genre": new_genre})
 
         # Emit event to update track list display
         self.context.emit(Events.TRACK_METADATA_UPDATED, filepath=Path(filepath))

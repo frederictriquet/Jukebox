@@ -95,28 +95,21 @@ class FileManagerPlugin(ShortcutMixin):
         self.current_track_id = track_id
 
         # Get filepath from database
-        track = self.context.database.conn.execute(
-            "SELECT filepath FROM tracks WHERE id = ?", (track_id,)
-        ).fetchone()
-
+        track = self.context.database.get_track_by_id(track_id)
         self.current_filepath = Path(track["filepath"]) if track else None
         logging.debug(f"[File Manager] Track loaded: id={track_id}, filepath={self.current_filepath}")
 
     def _reload_plugin_config(self) -> None:
         """Reload file_manager config from database."""
-        # Get settings from database
         db = self.context.database
 
         # Load destinations
-        destinations_json = db.conn.execute(
-            "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
-            ("file_manager", "destinations"),
-        ).fetchone()
+        destinations_json = db.get_plugin_setting("file_manager", "destinations")
 
         if destinations_json:
             import json
             try:
-                destinations_data = json.loads(destinations_json["setting_value"])
+                destinations_data = json.loads(destinations_json)
                 # Update config with new destinations
                 from jukebox.core.config import FileManagerDestinationConfig
                 self.context.config.file_manager.destinations = [
@@ -126,20 +119,14 @@ class FileManagerPlugin(ShortcutMixin):
                 logging.error(f"Failed to parse destinations config: {e}")
 
         # Load trash directory
-        trash_dir = db.conn.execute(
-            "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
-            ("file_manager", "trash_directory"),
-        ).fetchone()
+        trash_dir = db.get_plugin_setting("file_manager", "trash_directory")
         if trash_dir:
-            self.context.config.file_manager.trash_directory = trash_dir["setting_value"]
+            self.context.config.file_manager.trash_directory = trash_dir
 
         # Load trash key
-        trash_key = db.conn.execute(
-            "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
-            ("file_manager", "trash_key"),
-        ).fetchone()
+        trash_key = db.get_plugin_setting("file_manager", "trash_key")
         if trash_key:
-            self.context.config.file_manager.trash_key = trash_key["setting_value"]
+            self.context.config.file_manager.trash_key = trash_key
 
     def _move_to_destination(self, dest_config: Any) -> None:
         """Move current track to destination and rename it 'artist - title.extension'."""
@@ -153,9 +140,7 @@ class FileManagerPlugin(ShortcutMixin):
             return
 
         # Get track metadata for renaming
-        track = self.context.database.conn.execute(
-            "SELECT artist, title FROM tracks WHERE id = ?", (self.current_track_id,)
-        ).fetchone()
+        track = self.context.database.get_track_by_id(self.current_track_id)
 
         if not track:
             logging.error(f"Track {self.current_track_id} not found in database")
@@ -206,15 +191,8 @@ class FileManagerPlugin(ShortcutMixin):
             logging.info(f"Copied {old_filepath} -> {dest_path}")
 
             # Retrieve waveform and audio_analysis data BEFORE deleting the old track
-            waveform_data = self.context.database.conn.execute(
-                "SELECT waveform_data FROM waveform_cache WHERE track_id = ?",
-                (old_track_id,),
-            ).fetchone()
-
-            audio_analysis = self.context.database.conn.execute(
-                "SELECT * FROM audio_analysis WHERE track_id = ?",
-                (old_track_id,),
-            ).fetchone()
+            waveform_data = self.context.database.get_waveform_cache(old_track_id)
+            audio_analysis = self.context.database.get_audio_analysis(old_track_id)
 
             # Add the copied file to the database in jukebox mode
             from jukebox.utils.metadata import MetadataExtractor
@@ -226,13 +204,7 @@ class FileManagerPlugin(ShortcutMixin):
             # Copy waveform data to the new track if it exists
             needs_waveform_generation = False
             if waveform_data:
-                self.context.database.conn.execute(
-                    """
-                    INSERT OR REPLACE INTO waveform_cache (track_id, waveform_data)
-                    VALUES (?, ?)
-                    """,
-                    (new_track_id, waveform_data["waveform_data"]),
-                )
+                self.context.database.save_waveform_cache(new_track_id, waveform_data)
                 logging.info(f"Copied waveform data from track {old_track_id} to {new_track_id}")
             else:
                 needs_waveform_generation = True
@@ -241,26 +213,16 @@ class FileManagerPlugin(ShortcutMixin):
             # Copy audio_analysis data to the new track if it exists
             if audio_analysis:
                 # Get all column names except track_id (use .keys() for sqlite3.Row)
-                columns = [key for key in audio_analysis.keys() if key != "track_id"]
-                placeholders = ", ".join(["?"] * len(columns))
-                column_names = ", ".join(columns)
-                values = [audio_analysis[col] for col in columns]
-
-                self.context.database.conn.execute(
-                    f"""
-                    INSERT OR REPLACE INTO audio_analysis (track_id, {column_names})
-                    VALUES (?, {placeholders})
-                    """,
-                    (new_track_id, *values),
-                )
+                analysis_data = {
+                    key: audio_analysis[key]
+                    for key in audio_analysis.keys()
+                    if key != "track_id"
+                }
+                self.context.database.save_audio_analysis(new_track_id, analysis_data)
                 logging.info(f"Copied audio_analysis from track {old_track_id} to {new_track_id}")
 
             # Delete original from database (track moved out of curating library)
-            self.context.database.conn.execute(
-                "DELETE FROM tracks WHERE id = ?",
-                (old_track_id,),
-            )
-            self.context.database.conn.commit()
+            self.context.database.delete_track(old_track_id)
             logging.info(f"Deleted track {old_track_id} from database")
 
             # Delete original file from disk
@@ -323,12 +285,9 @@ class FileManagerPlugin(ShortcutMixin):
             logging.info(f"Moved to trash: {old_filepath} -> {dest_path}")
 
             # Delete from database (and waveform_cache via CASCADE)
-            self.context.database.conn.execute(
-                "DELETE FROM tracks WHERE id = ?",
-                (self.current_track_id,),
-            )
-            self.context.database.conn.commit()
-            logging.info(f"Deleted track {self.current_track_id} from database")
+            track_id = self.current_track_id
+            self.context.database.delete_track(track_id)
+            logging.info(f"Deleted track {track_id} from database")
 
             # Reset current track BEFORE emitting event
             # (because event handlers might load a new track)
@@ -369,14 +328,11 @@ class FileManagerPlugin(ShortcutMixin):
             # Save filepath before removing
             old_filepath = self.current_filepath
             filename = old_filepath.name
+            track_id = self.current_track_id
 
             # Delete from database (and waveform_cache via CASCADE)
-            self.context.database.conn.execute(
-                "DELETE FROM tracks WHERE id = ?",
-                (self.current_track_id,),
-            )
-            self.context.database.conn.commit()
-            logging.info(f"Removed track {self.current_track_id} from database (file kept: {old_filepath})")
+            self.context.database.delete_track(track_id)
+            logging.info(f"Removed track {track_id} from database (file kept: {old_filepath})")
 
             # Reset current track BEFORE emitting event
             self.current_track_id = None

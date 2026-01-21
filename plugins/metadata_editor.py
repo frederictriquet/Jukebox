@@ -121,13 +121,10 @@ class MetadataEditorPlugin:
             "date": "year",  # DB uses 'year' column
         }
 
-        # Build dynamic SQL query based on configured fields
+        # Get track metadata from database
         field_configs = self.context.config.metadata_editor.fields
         db_columns = [tag_to_db_column.get(f.tag, f.tag) for f in field_configs]
-        query = f"SELECT {', '.join(db_columns)} FROM tracks WHERE id = ?"
-
-        # Get track metadata from database
-        track = self.context.database.conn.execute(query, (track_id,)).fetchone()
+        track = self.context.database.get_track_by_id(track_id)
 
         if track:
             # Extract values and map back to tag names
@@ -147,9 +144,7 @@ class MetadataEditorPlugin:
             return
 
         # Get filepath from database
-        track = self.context.database.conn.execute(
-            "SELECT filepath FROM tracks WHERE id = ?", (self.current_track_id,)
-        ).fetchone()
+        track = self.context.database.get_track_by_id(self.current_track_id)
 
         if not track:
             return
@@ -187,12 +182,7 @@ class MetadataEditorPlugin:
             else:
                 db_updates[db_column] = value
 
-        set_clause = ", ".join(f"{col} = ?" for col in db_updates)
-        query = f"UPDATE tracks SET {set_clause} WHERE id = ?"
-        values = list(db_updates.values()) + [self.current_track_id]
-
-        self.context.database.conn.execute(query, values)
-        self.context.database.conn.commit()
+        self.context.database.update_track_metadata(self.current_track_id, db_updates)
 
         # Update file tags
         from jukebox.utils.tag_writer import save_audio_tags

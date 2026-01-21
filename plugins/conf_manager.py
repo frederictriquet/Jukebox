@@ -1,11 +1,9 @@
 """Configuration manager plugin - UI for managing plugin settings."""
 
-import json
 import logging
 from pathlib import Path
 from typing import Any
 
-from jukebox.core.event_bus import Events
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent, QKeySequence
 from PySide6.QtWidgets import (
@@ -14,19 +12,17 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
-    QGroupBox,
-    QHBoxLayout,
     QHeaderView,
     QLineEdit,
     QPushButton,
-    QScrollArea,
     QSpinBox,
     QTableWidget,
-    QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
+
+from jukebox.core.event_bus import Events
 
 
 class ConfManagerPlugin:
@@ -488,19 +484,12 @@ class ConfigDialog(QDialog):
 
     def _get_setting(self, plugin_name: str, setting_key: str) -> str | None:
         """Get setting from database."""
-        result = self.context.database.conn.execute(
-            "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
-            (plugin_name, setting_key),
-        ).fetchone()
-
-        return result["setting_value"] if result else None
+        return self.context.database.get_plugin_setting(plugin_name, setting_key)
 
     def _save_settings(self) -> None:
         """Save settings to database for all plugins."""
         if not hasattr(self, "_plugin_inputs"):
             return
-
-        db = self.context.database
 
         # Save settings for each plugin
         for plugin_name, inputs in self._plugin_inputs.items():
@@ -516,17 +505,13 @@ class ConfigDialog(QDialog):
                     value = "true" if input_widget.isChecked() else "false"
                 elif isinstance(input_widget, (DirectoryInput, ShortcutInput, QLineEdit)):
                     value = input_widget.text()
-                elif isinstance(input_widget, QDoubleSpinBox):
-                    value = str(input_widget.value())
-                elif isinstance(input_widget, QSpinBox):
+                elif isinstance(input_widget, QDoubleSpinBox) or isinstance(input_widget, QSpinBox):
                     value = str(input_widget.value())
                 else:
                     continue
 
                 # Save to database
                 self._set_setting(plugin_name, setting_key, value)
-
-        db.conn.commit()
 
         # Emit event to notify plugins that settings changed
         self.context.emit(Events.PLUGIN_SETTINGS_CHANGED)
@@ -535,10 +520,4 @@ class ConfigDialog(QDialog):
 
     def _set_setting(self, plugin_name: str, setting_key: str, setting_value: str) -> None:
         """Set setting in database."""
-        self.context.database.conn.execute(
-            """
-            INSERT OR REPLACE INTO plugin_settings (plugin_name, setting_key, setting_value, updated_at)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-        """,
-            (plugin_name, setting_key, setting_value),
-        )
+        self.context.database.save_plugin_setting(plugin_name, setting_key, setting_value)

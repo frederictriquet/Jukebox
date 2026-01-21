@@ -166,10 +166,7 @@ class PlaybackNavigationPlugin:
         if not current_file:
             return None
 
-        track = self.context.database.conn.execute(
-            "SELECT duration_seconds FROM tracks WHERE filepath = ?", (str(current_file),)
-        ).fetchone()
-
+        track = self.context.database.get_track_by_filepath(current_file)
         return track["duration_seconds"] if track else None
 
     def _next_track(self) -> None:

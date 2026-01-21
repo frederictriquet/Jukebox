@@ -102,10 +102,7 @@ class LoopPlayerPlugin:
                 return
 
             # Get track duration from database
-            track = self.context.database.conn.execute(
-                "SELECT duration_seconds FROM tracks WHERE filepath = ?",
-                (str(player.current_file),),
-            ).fetchone()
+            track = self.context.database.get_track_by_filepath(player.current_file)
 
             if not track or not track["duration_seconds"]:
                 logging.warning("[Loop Player] Cannot get track duration")
@@ -159,10 +156,7 @@ class LoopPlayerPlugin:
             return
 
         # Get track duration from database
-        track = self.context.database.conn.execute(
-            "SELECT duration_seconds FROM tracks WHERE filepath = ?",
-            (str(player.current_file),),
-        ).fetchone()
+        track = self.context.database.get_track_by_filepath(player.current_file)
 
         if not track or not track["duration_seconds"]:
             return
@@ -185,10 +179,7 @@ class LoopPlayerPlugin:
 
             # Convert seconds to waveform x coordinates
             player = self.context.player
-            track = self.context.database.conn.execute(
-                "SELECT duration_seconds FROM tracks WHERE filepath = ?",
-                (str(player.current_file),),
-            ).fetchone()
+            track = self.context.database.get_track_by_filepath(player.current_file)
 
             if not track or not track["duration_seconds"]:
                 return

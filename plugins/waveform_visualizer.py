@@ -93,16 +93,14 @@ class WaveformVisualizerPlugin:
         self.current_track_id = track_id
 
         # Check cache
-        cached = self.context.database.conn.execute(
-            "SELECT waveform_data FROM waveform_cache WHERE track_id = ?", (track_id,)
-        ).fetchone()
+        cached_data = self.context.database.get_waveform_cache(track_id)
 
-        if cached:
+        if cached_data:
             # Load from cache
             import pickle
 
             try:
-                waveform = pickle.loads(cached[0])
+                waveform = pickle.loads(cached_data)
                 self.waveform_widget.display_waveform(waveform)
             except Exception:
                 # Corrupted cache, clear
@@ -116,9 +114,7 @@ class WaveformVisualizerPlugin:
                 and WaveformVisualizerPlugin._batch_processor.is_running
             ):
                 # Get filepath
-                track = self.context.database.conn.execute(
-                    "SELECT filepath FROM tracks WHERE id = ?", (track_id,)
-                ).fetchone()
+                track = self.context.database.get_track_by_id(track_id)
 
                 if track:
                     item = (track_id, track["filepath"])
@@ -131,9 +127,7 @@ class WaveformVisualizerPlugin:
         from jukebox.utils.batch_helper import start_batch_processing
 
         # Get all tracks
-        tracks = self.context.database.conn.execute(
-            "SELECT id, filepath FROM tracks ORDER BY id"
-        ).fetchall()
+        tracks = self.context.database.get_all_tracks()
 
         if not tracks:
             logging.info("[Batch Waveform] No tracks to generate waveforms for")
@@ -144,10 +138,7 @@ class WaveformVisualizerPlugin:
 
         def needs_waveform(track_id: int, filepath: str) -> bool:
             """Check if track needs waveform generation."""
-            cached = self.context.database.conn.execute(
-                "SELECT track_id FROM waveform_cache WHERE track_id = ?", (track_id,)
-            ).fetchone()
-            return not cached
+            return self.context.database.get_waveform_cache(track_id) is None
 
         def worker_factory(item: tuple[int, str]) -> QThread:
             """Create a complete waveform worker for a track."""
@@ -190,33 +181,19 @@ class WaveformVisualizerPlugin:
 
             # Cache waveform
             waveform_bytes = pickle.dumps(result["waveform_data"])
-            self.context.database.conn.execute(
-                """
-                INSERT OR REPLACE INTO waveform_cache (track_id, waveform_data)
-                VALUES (?, ?)
-            """,
-                (track_id, waveform_bytes),
-            )
+            self.context.database.save_waveform_cache(track_id, waveform_bytes)
 
             # Save audio analysis
-            self.context.database.conn.execute(
-                """
-                INSERT OR REPLACE INTO audio_analysis (
-                    track_id, energy, bass_energy, mid_energy, treble_energy, dynamic_range
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-            """,
-                (
-                    track_id,
-                    result["energy"],
-                    result["bass_energy"],
-                    result["mid_energy"],
-                    result["treble_energy"],
-                    result["dynamic_range"],
-                ),
+            self.context.database.save_audio_analysis(
+                track_id,
+                {
+                    "energy": result["energy"],
+                    "bass_energy": result["bass_energy"],
+                    "mid_energy": result["mid_energy"],
+                    "treble_energy": result["treble_energy"],
+                    "dynamic_range": result["dynamic_range"],
+                },
             )
-
-            self.context.database.conn.commit()
 
             # If this is the currently displayed track, show the waveform
             if track_id == self.current_track_id and self.waveform_widget:
