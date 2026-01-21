@@ -27,7 +27,7 @@ class DuplicateFinderPlugin:
 
     def _find_duplicates(self) -> None:
         """Find duplicate tracks."""
-        tracks = self.context.database.get_all_tracks()
+        tracks = self.context.database.tracks.get_all()
 
         # Group by title+artist
         groups: dict[tuple[str, str], list[Any]] = {}

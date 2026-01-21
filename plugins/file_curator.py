@@ -48,7 +48,7 @@ class FileCuratorPlugin:
         Returns:
             New path or None if failed
         """
-        track = self.context.database.get_track_by_id(track_id)
+        track = self.context.database.tracks.get_by_id(track_id)
         if not track:
             return None
 
@@ -71,7 +71,7 @@ class FileCuratorPlugin:
             shutil.move(str(orig_path), str(new_path))
 
             # Update database
-            self.context.database.update_track_filepath(track_id, new_path)
+            self.context.database.tracks.update_filepath(track_id, new_path)
 
             return new_path
 

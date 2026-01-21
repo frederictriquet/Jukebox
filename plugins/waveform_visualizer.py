@@ -93,7 +93,7 @@ class WaveformVisualizerPlugin:
         self.current_track_id = track_id
 
         # Check cache
-        cached_data = self.context.database.get_waveform_cache(track_id)
+        cached_data = self.context.database.waveforms.get(track_id)
 
         if cached_data:
             # Load from cache
@@ -114,7 +114,7 @@ class WaveformVisualizerPlugin:
                 and WaveformVisualizerPlugin._batch_processor.is_running
             ):
                 # Get filepath
-                track = self.context.database.get_track_by_id(track_id)
+                track = self.context.database.tracks.get_by_id(track_id)
 
                 if track:
                     item = (track_id, track["filepath"])
@@ -127,7 +127,7 @@ class WaveformVisualizerPlugin:
         from jukebox.utils.batch_helper import start_batch_processing
 
         # Get all tracks
-        tracks = self.context.database.get_all_tracks()
+        tracks = self.context.database.tracks.get_all()
 
         if not tracks:
             logging.info("[Batch Waveform] No tracks to generate waveforms for")
@@ -138,7 +138,7 @@ class WaveformVisualizerPlugin:
 
         def needs_waveform(track_id: int, filepath: str) -> bool:
             """Check if track needs waveform generation."""
-            return self.context.database.get_waveform_cache(track_id) is None
+            return self.context.database.waveforms.get(track_id) is None
 
         def worker_factory(item: tuple[int, str]) -> QThread:
             """Create a complete waveform worker for a track."""
@@ -181,10 +181,10 @@ class WaveformVisualizerPlugin:
 
             # Cache waveform
             waveform_bytes = pickle.dumps(result["waveform_data"])
-            self.context.database.save_waveform_cache(track_id, waveform_bytes)
+            self.context.database.waveforms.save(track_id, waveform_bytes)
 
             # Save audio analysis
-            self.context.database.save_audio_analysis(
+            self.context.database.analysis.save(
                 track_id,
                 {
                     "energy": result["energy"],

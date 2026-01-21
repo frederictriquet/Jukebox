@@ -1,12 +1,32 @@
 """SQLite database manager with FTS5 support."""
 
+from __future__ import annotations
+
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from jukebox.core.repositories import (
+        AnalysisRepository,
+        PluginSettingsRepository,
+        TrackRepository,
+        WaveformRepository,
+    )
 
 
 class Database:
-    """SQLite database manager with FTS5 support."""
+    """SQLite database manager with FTS5 support.
+
+    Provides access to specialized repositories for database operations:
+        - tracks: TrackRepository for track operations
+        - waveforms: WaveformRepository for waveform cache
+        - analysis: AnalysisRepository for audio analysis
+        - settings: PluginSettingsRepository for plugin settings
+
+    Legacy methods are preserved for backward compatibility but delegate
+    to the repositories internally.
+    """
 
     def __init__(self, db_path: Path):
         """Initialize database.
@@ -16,6 +36,11 @@ class Database:
         """
         self.db_path = db_path
         self.conn: sqlite3.Connection | None = None
+        # Repositories (lazy initialized after connect)
+        self._tracks: TrackRepository | None = None
+        self._waveforms: WaveformRepository | None = None
+        self._analysis: AnalysisRepository | None = None
+        self._settings: PluginSettingsRepository | None = None
 
     def connect(self) -> None:
         """Connect to database and enable foreign keys."""
@@ -23,6 +48,42 @@ class Database:
         self.conn = sqlite3.connect(str(self.db_path))
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
+
+    # ========== Repository Properties ==========
+
+    @property
+    def tracks(self) -> TrackRepository:
+        """Get the track repository."""
+        if self._tracks is None:
+            from jukebox.core.repositories import TrackRepository
+            self._tracks = TrackRepository(self)
+        return self._tracks
+
+    @property
+    def waveforms(self) -> WaveformRepository:
+        """Get the waveform repository."""
+        if self._waveforms is None:
+            from jukebox.core.repositories import WaveformRepository
+            self._waveforms = WaveformRepository(self)
+        return self._waveforms
+
+    @property
+    def analysis(self) -> AnalysisRepository:
+        """Get the analysis repository."""
+        if self._analysis is None:
+            from jukebox.core.repositories import AnalysisRepository
+            self._analysis = AnalysisRepository(self)
+        return self._analysis
+
+    @property
+    def settings(self) -> PluginSettingsRepository:
+        """Get the plugin settings repository."""
+        if self._settings is None:
+            from jukebox.core.repositories import PluginSettingsRepository
+            self._settings = PluginSettingsRepository(self)
+        return self._settings
+
+    # ========== Schema Management ==========
 
     def initialize_schema(self) -> None:
         """Create database schema."""
@@ -283,6 +344,8 @@ class Database:
             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_mode ON tracks(mode)")
             self.conn.commit()
 
+    # ========== Legacy Methods (delegate to repositories) ==========
+
     def add_track(self, track_data: dict[str, Any], mode: str = "jukebox") -> int:
         """Add a track to the database.
 
@@ -292,514 +355,175 @@ class Database:
 
         Returns:
             Track ID
-        """
-        if self.conn is None:
-            raise RuntimeError("Database not connected")
 
-        cursor = self.conn.execute(
-            """
-            INSERT OR REPLACE INTO tracks (
-                filepath, filename, title, artist, album, album_artist,
-                genre, year, track_number, duration_seconds, bitrate,
-                sample_rate, file_size, date_modified, mode
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                str(track_data["filepath"]),
-                track_data["filename"],
-                track_data.get("title"),
-                track_data.get("artist"),
-                track_data.get("album"),
-                track_data.get("album_artist"),
-                track_data.get("genre"),
-                track_data.get("year"),
-                track_data.get("track_number"),
-                track_data.get("duration_seconds"),
-                track_data.get("bitrate"),
-                track_data.get("sample_rate"),
-                track_data.get("file_size"),
-                track_data.get("date_modified"),
-                mode,
-            ),
-        )
-        self.conn.commit()
-        return int(cursor.lastrowid) if cursor.lastrowid is not None else 0
+        Note:
+            Prefer using database.tracks.add() for new code.
+        """
+        return self.tracks.add(track_data, mode)
 
     def search_tracks(
         self, query: str, limit: int = 100, mode: str | None = None
     ) -> list[sqlite3.Row]:
         """Search tracks using FTS5.
 
-        Args:
-            query: Search query
-            limit: Maximum results
-            mode: Optional mode filter ("jukebox" or "curating")
-
-        Returns:
-            List of matching tracks
+        Note:
+            Prefer using database.tracks.search() for new code.
         """
-        if self.conn is None:
-            raise RuntimeError("Database not connected")
-
-        if mode:
-            cursor = self.conn.execute(
-                """
-                SELECT t.*
-                FROM tracks t
-                JOIN tracks_fts fts ON t.id = fts.rowid
-                WHERE tracks_fts MATCH ? AND t.mode = ?
-                ORDER BY rank
-                LIMIT ?
-            """,
-                (query, mode, limit),
-            )
-        else:
-            cursor = self.conn.execute(
-                """
-                SELECT t.*
-                FROM tracks t
-                JOIN tracks_fts fts ON t.id = fts.rowid
-                WHERE tracks_fts MATCH ?
-                ORDER BY rank
-                LIMIT ?
-            """,
-                (query, limit),
-            )
-        return cursor.fetchall()
+        return self.tracks.search(query, limit, mode)
 
     def get_all_tracks(
         self, limit: int | None = None, mode: str | None = None
     ) -> list[sqlite3.Row]:
         """Get all tracks, optionally filtered by mode.
 
-        Args:
-            limit: Optional limit
-            mode: Optional mode filter ("jukebox" or "curating")
-
-        Returns:
-            List of tracks
+        Note:
+            Prefer using database.tracks.get_all() for new code.
         """
-        if self.conn is None:
-            raise RuntimeError("Database not connected")
-
-        if mode:
-            query = "SELECT * FROM tracks WHERE mode = ? ORDER BY date_added DESC"
-            params: tuple[str, ...] = (mode,)
-            if limit:
-                query += f" LIMIT {limit}"
-            return self.conn.execute(query, params).fetchall()
-        else:
-            query = "SELECT * FROM tracks ORDER BY date_added DESC"
-            if limit:
-                query += f" LIMIT {limit}"
-            return self.conn.execute(query).fetchall()
+        return self.tracks.get_all(limit, mode)
 
     def update_track_mode(self, track_id: int, mode: str) -> bool:
         """Update the mode of a track.
 
-        Args:
-            track_id: Track ID
-            mode: New mode ("jukebox" or "curating")
-
-        Returns:
-            True if updated, False if track not found
+        Note:
+            Prefer using database.tracks.update_mode() for new code.
         """
-        if self.conn is None:
-            raise RuntimeError("Database not connected")
-
-        cursor = self.conn.execute(
-            "UPDATE tracks SET mode = ? WHERE id = ?",
-            (mode, track_id),
-        )
-        self.conn.commit()
-        return cursor.rowcount > 0
+        return self.tracks.update_mode(track_id, mode)
 
     def get_track_by_id(self, track_id: int) -> sqlite3.Row | None:
         """Get track by ID.
 
-        Args:
-            track_id: Track ID
-
-        Returns:
-            Track row or None
+        Note:
+            Prefer using database.tracks.get_by_id() for new code.
         """
-        if self.conn is None:
-            raise RuntimeError("Database not connected")
-
-        cursor = self.conn.execute("SELECT * FROM tracks WHERE id = ?", (track_id,))
-        result = cursor.fetchone()
-        return result if result is not None else None
+        return self.tracks.get_by_id(track_id)
 
     def record_play(self, track_id: int, duration: float, completed: bool) -> None:
         """Record a play in history.
 
-        Args:
-            track_id: Track ID
-            duration: Play duration in seconds
-            completed: Whether track was completed
+        Note:
+            Prefer using database.tracks.record_play() for new code.
         """
-        if self.conn is None:
-            raise RuntimeError("Database not connected")
-
-        self.conn.execute(
-            """
-            INSERT INTO play_history (track_id, play_duration_seconds, completed)
-            VALUES (?, ?, ?)
-        """,
-            (track_id, duration, completed),
-        )
-
-        self.conn.execute(
-            """
-            UPDATE tracks
-            SET play_count = play_count + 1, last_played = CURRENT_TIMESTAMP
-            WHERE id = ?
-        """,
-            (track_id,),
-        )
-
-        self.conn.commit()
+        self.tracks.record_play(track_id, duration, completed)
 
     def close(self) -> None:
         """Close database connection."""
         if self.conn:
             self.conn.close()
 
-    # ========== Track lookup methods ==========
+    # ========== Legacy Track Methods ==========
 
     def get_track_by_filepath(self, filepath: str | Path) -> sqlite3.Row | None:
         """Get track by filepath.
 
-        Args:
-            filepath: Track filepath (string or Path)
-
-        Returns:
-            Track row or None
+        Note:
+            Prefer using database.tracks.get_by_filepath() for new code.
         """
-        if self.conn is None:
-            raise RuntimeError("Database not connected")
-
-        cursor = self.conn.execute(
-            "SELECT * FROM tracks WHERE filepath = ?", (str(filepath),)
-        )
-        result = cursor.fetchone()
-        return result if result is not None else None
+        return self.tracks.get_by_filepath(filepath)
 
     def delete_track(self, track_id: int) -> bool:
         """Delete a track from the database.
 
-        Args:
-            track_id: Track ID
-
-        Returns:
-            True if deleted, False if track not found
+        Note:
+            Prefer using database.tracks.delete() for new code.
         """
-        if self.conn is None:
-            raise RuntimeError("Database not connected")
-
-        cursor = self.conn.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
-        self.conn.commit()
-        return cursor.rowcount > 0
+        return self.tracks.delete(track_id)
 
     def delete_track_by_filepath(self, filepath: str | Path) -> bool:
         """Delete a track by filepath.
 
-        Args:
-            filepath: Track filepath (string or Path)
-
-        Returns:
-            True if deleted, False if track not found
+        Note:
+            Prefer using database.tracks.delete_by_filepath() for new code.
         """
-        if self.conn is None:
-            raise RuntimeError("Database not connected")
-
-        cursor = self.conn.execute(
-            "DELETE FROM tracks WHERE filepath = ?", (str(filepath),)
-        )
-        self.conn.commit()
-        return cursor.rowcount > 0
+        return self.tracks.delete_by_filepath(filepath)
 
     def update_track_metadata(self, track_id: int, metadata: dict[str, Any]) -> bool:
         """Update track metadata fields.
 
-        Args:
-            track_id: Track ID
-            metadata: Dict of field names to values (only allowed fields are updated)
-
-        Returns:
-            True if updated, False if track not found
+        Note:
+            Prefer using database.tracks.update_metadata() for new code.
         """
-        if self.conn is None:
-            raise RuntimeError("Database not connected")
-
-        # Allowed fields for update
-        allowed_fields = {
-            "title", "artist", "album", "album_artist", "genre",
-            "year", "track_number", "duration_seconds", "bitrate",
-            "sample_rate", "file_size", "date_modified",
-        }
-
-        # Filter to allowed fields only
-        updates = {k: v for k, v in metadata.items() if k in allowed_fields}
-        if not updates:
-            return False
-
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
-        values = list(updates.values()) + [track_id]
-
-        cursor = self.conn.execute(
-            f"UPDATE tracks SET {set_clause} WHERE id = ?", values
-        )
-        self.conn.commit()
-        return cursor.rowcount > 0
+        return self.tracks.update_metadata(track_id, metadata)
 
     def update_track_filepath(
         self, track_id: int, new_filepath: str | Path, new_filename: str | None = None
     ) -> bool:
         """Update track filepath (after file move/rename).
 
-        Args:
-            track_id: Track ID
-            new_filepath: New filepath
-            new_filename: New filename (derived from filepath if not provided)
-
-        Returns:
-            True if updated, False if track not found
+        Note:
+            Prefer using database.tracks.update_filepath() for new code.
         """
-        if self.conn is None:
-            raise RuntimeError("Database not connected")
+        return self.tracks.update_filepath(track_id, new_filepath, new_filename)
 
-        new_filepath_str = str(new_filepath)
-        if new_filename is None:
-            new_filename = Path(new_filepath).name
-
-        cursor = self.conn.execute(
-            "UPDATE tracks SET filepath = ?, filename = ? WHERE id = ?",
-            (new_filepath_str, new_filename, track_id),
-        )
-        self.conn.commit()
-        return cursor.rowcount > 0
-
-    # ========== Waveform cache methods ==========
+    # ========== Legacy Waveform Methods ==========
 
     def get_waveform_cache(self, track_id: int) -> bytes | None:
         """Get cached waveform data for a track.
 
-        Args:
-            track_id: Track ID
-
-        Returns:
-            Waveform data as bytes, or None if not cached
+        Note:
+            Prefer using database.waveforms.get() for new code.
         """
-        if self.conn is None:
-            raise RuntimeError("Database not connected")
-
-        cursor = self.conn.execute(
-            "SELECT waveform_data FROM waveform_cache WHERE track_id = ?",
-            (track_id,),
-        )
-        row = cursor.fetchone()
-        return row["waveform_data"] if row else None
-
-    def save_waveform_cache(self, track_id: int, waveform_data: bytes) -> None:
-        """Save waveform data to cache.
-
-        Args:
-            track_id: Track ID
-            waveform_data: Waveform data as bytes
-        """
-        if self.conn is None:
-            raise RuntimeError("Database not connected")
-
-        self.conn.execute(
-            """
-            INSERT OR REPLACE INTO waveform_cache (track_id, waveform_data)
-            VALUES (?, ?)
-            """,
-            (track_id, waveform_data),
-        )
-        self.conn.commit()
+        return self.waveforms.get(track_id)
 
     def get_tracks_without_waveform(
         self, mode: str | None = None, limit: int | None = None
     ) -> list[sqlite3.Row]:
         """Get tracks that don't have cached waveform data.
 
-        Args:
-            mode: Optional mode filter ("jukebox" or "curating")
-            limit: Optional limit on results
-
-        Returns:
-            List of track rows without waveform cache
+        Note:
+            Prefer using database.waveforms.get_tracks_without_waveform() for new code.
         """
-        if self.conn is None:
-            raise RuntimeError("Database not connected")
+        return self.waveforms.get_tracks_without_waveform(mode, limit)
 
-        query = """
-            SELECT t.* FROM tracks t
-            LEFT JOIN waveform_cache w ON t.id = w.track_id
-            WHERE w.track_id IS NULL
-        """
-        params: list[Any] = []
-
-        if mode:
-            query += " AND t.mode = ?"
-            params.append(mode)
-
-        query += " ORDER BY t.date_added DESC"
-
-        if limit:
-            query += f" LIMIT {limit}"
-
-        return self.conn.execute(query, params).fetchall()
-
-    # ========== Audio analysis methods ==========
+    # ========== Legacy Analysis Methods ==========
 
     def get_audio_analysis(self, track_id: int) -> sqlite3.Row | None:
         """Get audio analysis for a track.
 
-        Args:
-            track_id: Track ID
-
-        Returns:
-            Analysis row or None if not analyzed
+        Note:
+            Prefer using database.analysis.get() for new code.
         """
-        if self.conn is None:
-            raise RuntimeError("Database not connected")
-
-        cursor = self.conn.execute(
-            "SELECT * FROM audio_analysis WHERE track_id = ?", (track_id,)
-        )
-        result = cursor.fetchone()
-        return result if result is not None else None
+        return self.analysis.get(track_id)
 
     def save_audio_analysis(self, track_id: int, analysis: dict[str, Any]) -> None:
         """Save audio analysis data.
 
-        Args:
-            track_id: Track ID
-            analysis: Dict of analysis field names to values
+        Note:
+            Prefer using database.analysis.save() for new code.
         """
-        if self.conn is None:
-            raise RuntimeError("Database not connected")
-
-        # Check if analysis exists
-        existing = self.conn.execute(
-            "SELECT 1 FROM audio_analysis WHERE track_id = ?", (track_id,)
-        ).fetchone()
-
-        if existing:
-            # Update existing
-            if analysis:
-                set_clause = ", ".join(f"{k} = ?" for k in analysis)
-                values = list(analysis.values()) + [track_id]
-                self.conn.execute(
-                    f"UPDATE audio_analysis SET {set_clause} WHERE track_id = ?",
-                    values,
-                )
-        else:
-            # Insert new
-            columns = ["track_id"] + list(analysis.keys())
-            placeholders = ", ".join(["?"] * len(columns))
-            values = [track_id] + list(analysis.values())
-            self.conn.execute(
-                f"INSERT INTO audio_analysis ({', '.join(columns)}) VALUES ({placeholders})",
-                values,
-            )
-
-        self.conn.commit()
+        self.analysis.save(track_id, analysis)
 
     def get_tracks_without_analysis(
         self, mode: str | None = None, limit: int | None = None
     ) -> list[sqlite3.Row]:
         """Get tracks that don't have audio analysis.
 
-        Args:
-            mode: Optional mode filter ("jukebox" or "curating")
-            limit: Optional limit on results
-
-        Returns:
-            List of track rows without audio analysis
+        Note:
+            Prefer using database.analysis.get_tracks_without_analysis() for new code.
         """
-        if self.conn is None:
-            raise RuntimeError("Database not connected")
-
-        query = """
-            SELECT t.* FROM tracks t
-            LEFT JOIN audio_analysis a ON t.id = a.track_id
-            WHERE a.track_id IS NULL
-        """
-        params: list[Any] = []
-
-        if mode:
-            query += " AND t.mode = ?"
-            params.append(mode)
-
-        query += " ORDER BY t.date_added DESC"
-
-        if limit:
-            query += f" LIMIT {limit}"
-
-        return self.conn.execute(query, params).fetchall()
+        return self.analysis.get_tracks_without_analysis(mode, limit)
 
     def has_audio_analysis(self, track_id: int) -> bool:
         """Check if a track has audio analysis.
 
-        Args:
-            track_id: Track ID
-
-        Returns:
-            True if analysis exists
+        Note:
+            Prefer using database.analysis.exists() for new code.
         """
-        if self.conn is None:
-            raise RuntimeError("Database not connected")
+        return self.analysis.exists(track_id)
 
-        cursor = self.conn.execute(
-            "SELECT 1 FROM audio_analysis WHERE track_id = ?", (track_id,)
-        )
-        return cursor.fetchone() is not None
-
-    # ========== Plugin settings methods ==========
+    # ========== Legacy Plugin Settings Methods ==========
 
     def get_plugin_setting(self, plugin_name: str, key: str) -> str | None:
         """Get a plugin setting value.
 
-        Args:
-            plugin_name: Plugin name
-            key: Setting key
-
-        Returns:
-            Setting value or None if not set
+        Note:
+            Prefer using database.settings.get() for new code.
         """
-        if self.conn is None:
-            raise RuntimeError("Database not connected")
-
-        cursor = self.conn.execute(
-            """
-            SELECT setting_value FROM plugin_settings
-            WHERE plugin_name = ? AND setting_key = ?
-            """,
-            (plugin_name, key),
-        )
-        row = cursor.fetchone()
-        return row["setting_value"] if row else None
+        return self.settings.get(plugin_name, key)
 
     def save_plugin_setting(self, plugin_name: str, key: str, value: str) -> None:
         """Save a plugin setting.
 
-        Args:
-            plugin_name: Plugin name
-            key: Setting key
-            value: Setting value
+        Note:
+            Prefer using database.settings.save() for new code.
         """
-        if self.conn is None:
-            raise RuntimeError("Database not connected")
-
-        self.conn.execute(
-            """
-            INSERT OR REPLACE INTO plugin_settings (plugin_name, setting_key, setting_value)
-            VALUES (?, ?, ?)
-            """,
-            (plugin_name, key, value),
-        )
-        self.conn.commit()
+        self.settings.save(plugin_name, key, value)

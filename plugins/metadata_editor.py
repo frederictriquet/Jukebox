@@ -124,7 +124,7 @@ class MetadataEditorPlugin:
         # Get track metadata from database
         field_configs = self.context.config.metadata_editor.fields
         db_columns = [tag_to_db_column.get(f.tag, f.tag) for f in field_configs]
-        track = self.context.database.get_track_by_id(track_id)
+        track = self.context.database.tracks.get_by_id(track_id)
 
         if track:
             # Extract values and map back to tag names
@@ -144,7 +144,7 @@ class MetadataEditorPlugin:
             return
 
         # Get filepath from database
-        track = self.context.database.get_track_by_id(self.current_track_id)
+        track = self.context.database.tracks.get_by_id(self.current_track_id)
 
         if not track:
             return
@@ -182,7 +182,7 @@ class MetadataEditorPlugin:
             else:
                 db_updates[db_column] = value
 
-        self.context.database.update_track_metadata(self.current_track_id, db_updates)
+        self.context.database.tracks.update_metadata(self.current_track_id, db_updates)
 
         # Update file tags
         from jukebox.utils.tag_writer import save_audio_tags

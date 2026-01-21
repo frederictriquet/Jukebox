@@ -47,7 +47,7 @@ class TrackInfoPlugin:
             return
 
         # Get track info from database
-        track = self.context.database.get_track_by_id(track_id)
+        track = self.context.database.tracks.get_by_id(track_id)
 
         if track:
             duration_str = self._format_duration(track["duration_seconds"] or 0)
@@ -66,7 +66,7 @@ class TrackInfoPlugin:
         # Get current track duration
         current_file = self.context.player.current_file
         if current_file:
-            track = self.context.database.get_track_by_filepath(current_file)
+            track = self.context.database.tracks.get_by_filepath(current_file)
 
             if track and track["duration_seconds"]:
                 current_time = position * track["duration_seconds"]

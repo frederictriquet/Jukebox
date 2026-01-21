@@ -484,7 +484,7 @@ class ConfigDialog(QDialog):
 
     def _get_setting(self, plugin_name: str, setting_key: str) -> str | None:
         """Get setting from database."""
-        return self.context.database.get_plugin_setting(plugin_name, setting_key)
+        return self.context.database.settings.get(plugin_name, setting_key)
 
     def _save_settings(self) -> None:
         """Save settings to database for all plugins."""
@@ -520,4 +520,4 @@ class ConfigDialog(QDialog):
 
     def _set_setting(self, plugin_name: str, setting_key: str, setting_value: str) -> None:
         """Set setting in database."""
-        self.context.database.save_plugin_setting(plugin_name, setting_key, setting_value)
+        self.context.database.settings.save(plugin_name, setting_key, setting_value)

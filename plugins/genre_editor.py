@@ -61,7 +61,7 @@ class GenreEditorPlugin(ShortcutMixin):
         self.current_track_id = track_id
 
         # Get genre from database
-        track = self.context.database.get_track_by_id(track_id)
+        track = self.context.database.tracks.get_by_id(track_id)
 
         # Validate genre format - if invalid, reset to empty
         if track and track["genre"]:
@@ -169,7 +169,7 @@ class GenreEditorPlugin(ShortcutMixin):
         self.current_genre = new_genre
 
         # Get filepath
-        track = self.context.database.get_track_by_id(self.current_track_id)
+        track = self.context.database.tracks.get_by_id(self.current_track_id)
 
         if not track:
             return
@@ -177,7 +177,7 @@ class GenreEditorPlugin(ShortcutMixin):
         filepath = track["filepath"]
 
         # Update database
-        self.context.database.update_track_metadata(self.current_track_id, {"genre": new_genre})
+        self.context.database.tracks.update_metadata(self.current_track_id, {"genre": new_genre})
 
         # Emit event to update track list display
         self.context.emit(Events.TRACK_METADATA_UPDATED, filepath=Path(filepath))

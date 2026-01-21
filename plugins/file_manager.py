@@ -95,7 +95,7 @@ class FileManagerPlugin(ShortcutMixin):
         self.current_track_id = track_id
 
         # Get filepath from database
-        track = self.context.database.get_track_by_id(track_id)
+        track = self.context.database.tracks.get_by_id(track_id)
         self.current_filepath = Path(track["filepath"]) if track else None
         logging.debug(f"[File Manager] Track loaded: id={track_id}, filepath={self.current_filepath}")
 
@@ -140,7 +140,7 @@ class FileManagerPlugin(ShortcutMixin):
             return
 
         # Get track metadata for renaming
-        track = self.context.database.get_track_by_id(self.current_track_id)
+        track = self.context.database.tracks.get_by_id(self.current_track_id)
 
         if not track:
             logging.error(f"Track {self.current_track_id} not found in database")
@@ -191,20 +191,20 @@ class FileManagerPlugin(ShortcutMixin):
             logging.info(f"Copied {old_filepath} -> {dest_path}")
 
             # Retrieve waveform and audio_analysis data BEFORE deleting the old track
-            waveform_data = self.context.database.get_waveform_cache(old_track_id)
-            audio_analysis = self.context.database.get_audio_analysis(old_track_id)
+            waveform_data = self.context.database.waveforms.get(old_track_id)
+            audio_analysis = self.context.database.analysis.get(old_track_id)
 
             # Add the copied file to the database in jukebox mode
             from jukebox.utils.metadata import MetadataExtractor
 
             metadata = MetadataExtractor.extract(dest_path)
-            new_track_id = self.context.database.add_track(metadata, mode="jukebox")
+            new_track_id = self.context.database.tracks.add(metadata, mode="jukebox")
             logging.info(f"Added {dest_path} to database in jukebox mode (id={new_track_id})")
 
             # Copy waveform data to the new track if it exists
             needs_waveform_generation = False
             if waveform_data:
-                self.context.database.save_waveform_cache(new_track_id, waveform_data)
+                self.context.database.waveforms.save(new_track_id, waveform_data)
                 logging.info(f"Copied waveform data from track {old_track_id} to {new_track_id}")
             else:
                 needs_waveform_generation = True
@@ -218,11 +218,11 @@ class FileManagerPlugin(ShortcutMixin):
                     for key in audio_analysis.keys()
                     if key != "track_id"
                 }
-                self.context.database.save_audio_analysis(new_track_id, analysis_data)
+                self.context.database.analysis.save(new_track_id, analysis_data)
                 logging.info(f"Copied audio_analysis from track {old_track_id} to {new_track_id}")
 
             # Delete original from database (track moved out of curating library)
-            self.context.database.delete_track(old_track_id)
+            self.context.database.tracks.delete(old_track_id)
             logging.info(f"Deleted track {old_track_id} from database")
 
             # Delete original file from disk
@@ -286,7 +286,7 @@ class FileManagerPlugin(ShortcutMixin):
 
             # Delete from database (and waveform_cache via CASCADE)
             track_id = self.current_track_id
-            self.context.database.delete_track(track_id)
+            self.context.database.tracks.delete(track_id)
             logging.info(f"Deleted track {track_id} from database")
 
             # Reset current track BEFORE emitting event
@@ -331,7 +331,7 @@ class FileManagerPlugin(ShortcutMixin):
             track_id = self.current_track_id
 
             # Delete from database (and waveform_cache via CASCADE)
-            self.context.database.delete_track(track_id)
+            self.context.database.tracks.delete(track_id)
             logging.info(f"Removed track {track_id} from database (file kept: {old_filepath})")
 
             # Reset current track BEFORE emitting event
