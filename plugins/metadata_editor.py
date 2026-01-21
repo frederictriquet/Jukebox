@@ -225,8 +225,8 @@ class MetadataEditorPlugin:
         logging.debug(f"[Metadata Editor] Deactivated for {mode} mode")
 
     def shutdown(self) -> None:
-        """Cleanup on application exit."""
-        pass
+        """Cleanup on application exit. No cleanup needed for this plugin."""
+        ...
 
 
 class MetadataEditorWidget(QWidget):

@@ -153,5 +153,5 @@ class ModeSwitcherPlugin:
         pass
 
     def shutdown(self) -> None:
-        """Cleanup on application exit."""
-        pass
+        """Cleanup on application exit. No cleanup needed for this plugin."""
+        ...

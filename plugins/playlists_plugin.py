@@ -43,8 +43,8 @@ class PlaylistsPlugin:
         dialog.exec()
 
     def shutdown(self) -> None:
-        """Cleanup."""
-        pass
+        """Cleanup on application exit. No cleanup needed for this plugin."""
+        ...
 
 
 class PlaylistDialog(QDialog):

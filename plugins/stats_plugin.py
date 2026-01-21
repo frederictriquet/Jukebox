@@ -39,5 +39,5 @@ class StatsPlugin:
         QMessageBox.information(None, "Library Statistics", msg)
 
     def shutdown(self) -> None:
-        """Cleanup."""
-        pass
+        """Cleanup on application exit. No cleanup needed for this plugin."""
+        ...

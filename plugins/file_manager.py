@@ -423,8 +423,8 @@ class FileManagerPlugin(ShortcutMixin):
         logging.debug(f"[File Manager] Deactivated for {mode} mode")
 
     def shutdown(self) -> None:
-        """Cleanup on application exit."""
-        pass
+        """Cleanup on application exit. No cleanup needed for this plugin."""
+        ...
 
     def get_settings_schema(self) -> dict[str, Any]:
         """Return settings schema for configuration UI.

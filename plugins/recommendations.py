@@ -108,5 +108,5 @@ class RecommendationsPlugin:
         return recommendations[:limit]
 
     def shutdown(self) -> None:
-        """Cleanup."""
-        pass
+        """Cleanup on application exit. No cleanup needed for this plugin."""
+        ...

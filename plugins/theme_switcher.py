@@ -50,5 +50,5 @@ class ThemeSwitcherPlugin:
         self._switch_theme(new_theme)
 
     def shutdown(self) -> None:
-        """Cleanup."""
-        pass
+        """Cleanup on application exit. No cleanup needed for this plugin."""
+        ...

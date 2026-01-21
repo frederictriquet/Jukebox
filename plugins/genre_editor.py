@@ -2,6 +2,7 @@
 
 import logging
 import re
+from pathlib import Path
 from typing import Any
 
 from jukebox.core.event_bus import Events
@@ -192,7 +193,6 @@ class GenreEditorPlugin(ShortcutMixin):
         self.context.database.conn.commit()
 
         # Emit event to update track list display
-        from pathlib import Path
         self.context.emit(Events.TRACK_METADATA_UPDATED, filepath=Path(filepath))
 
         # Update file tags
@@ -218,8 +218,8 @@ class GenreEditorPlugin(ShortcutMixin):
         logging.debug(f"[Genre Editor] Deactivated for {mode} mode")
 
     def shutdown(self) -> None:
-        """Cleanup on application exit."""
-        pass
+        """Cleanup on application exit. No cleanup needed for this plugin."""
+        ...
 
     def get_settings_schema(self) -> dict[str, Any]:
         """Return settings schema for configuration UI.

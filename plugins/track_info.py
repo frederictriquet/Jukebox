@@ -99,8 +99,8 @@ class TrackInfoPlugin:
         pass
 
     def shutdown(self) -> None:
-        """Cleanup."""
-        pass
+        """Cleanup on application exit. No cleanup needed for this plugin."""
+        ...
 
 
 class TrackInfoWidget(QWidget):

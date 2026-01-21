@@ -58,30 +58,79 @@ class EventBus:
 
 
 class Events:
-    """Standard event names."""
+    """Standard event names.
 
-    TRACK_LOADED = "track_loaded"
-    TRACK_PLAYING = "track_playing"
-    TRACK_STOPPED = "track_stopped"
-    TRACKS_ADDED = "tracks_added"
-    TRACK_DELETED = "track_deleted"
-    SEARCH_PERFORMED = "search_performed"
+    Each event is documented with its expected kwargs.
+
+    Track Events:
+        TRACK_LOADED: Track loaded in player
+            kwargs: track_id (int) - Database ID of the loaded track
+        TRACK_PLAYING: Playback started
+            kwargs: None
+        TRACK_STOPPED: Playback stopped
+            kwargs: None
+        TRACKS_ADDED: Tracks added to library (triggers list refresh)
+            kwargs: None
+        TRACK_DELETED: Track removed from library
+            kwargs: filepath (Path) - Path of the deleted track
+        TRACK_METADATA_UPDATED: Track metadata changed (genre, rating, etc.)
+            kwargs: filepath (Path) - Path of the updated track
+
+    Navigation Events:
+        SELECT_NEXT_TRACK: Request to select next track in list
+            kwargs: None
+        SELECT_PREVIOUS_TRACK: Request to select previous track in list
+            kwargs: None
+        SELECT_RANDOM_TRACK: Request to select random track from list
+            kwargs: None
+
+    Track List Events:
+        LOAD_TRACK_LIST: Load specific tracks into the list
+            kwargs: filepaths (list[Path]) - List of track filepaths to load
+        SEARCH_PERFORMED: Search executed with results
+            kwargs: results (list) - Search results
+
+    UI Events:
+        WAVEFORM_CLEAR: Clear waveform display
+            kwargs: None
+        POSITION_UPDATE: Playback position changed
+            kwargs: position (float) - Position as ratio 0.0-1.0
+        STATUS_MESSAGE: Display status message in status bar
+            kwargs: message (str) - Message text
+                    color (str, optional) - Hex color code (e.g., "#00FF00")
+
+    Plugin Events:
+        PLUGIN_SETTINGS_CHANGED: Plugin settings updated via conf_manager
+            kwargs: None
+        WAVEFORM_COMPLETE: Waveform generation finished for a track
+            kwargs: track_id (int) - Database ID of the track
+        AUDIO_ANALYSIS_COMPLETE: Audio analysis finished for a track
+            kwargs: track_id (int) - Database ID of the track
+    """
+
+    # Track events
+    TRACK_LOADED = "track_loaded"  # kwargs: track_id (int)
+    TRACK_PLAYING = "track_playing"  # kwargs: None
+    TRACK_STOPPED = "track_stopped"  # kwargs: None
+    TRACKS_ADDED = "tracks_added"  # kwargs: None
+    TRACK_DELETED = "track_deleted"  # kwargs: filepath (Path)
+    TRACK_METADATA_UPDATED = "track_metadata_updated"  # kwargs: filepath (Path)
 
     # Navigation events
-    SELECT_NEXT_TRACK = "select_next_track"
-    SELECT_PREVIOUS_TRACK = "select_previous_track"
-    SELECT_RANDOM_TRACK = "select_random_track"
+    SELECT_NEXT_TRACK = "select_next_track"  # kwargs: None
+    SELECT_PREVIOUS_TRACK = "select_previous_track"  # kwargs: None
+    SELECT_RANDOM_TRACK = "select_random_track"  # kwargs: None
 
-    # Track list manipulation events
-    LOAD_TRACK_LIST = "load_track_list"  # Load specific tracks into the list
+    # Track list events
+    LOAD_TRACK_LIST = "load_track_list"  # kwargs: filepaths (list[Path])
+    SEARCH_PERFORMED = "search_performed"  # kwargs: results (list)
 
     # UI events
-    WAVEFORM_CLEAR = "waveform_clear"  # Clear waveform display
-    POSITION_UPDATE = "position_update"  # Playback position changed
-    STATUS_MESSAGE = "status_message"  # Display status message
+    WAVEFORM_CLEAR = "waveform_clear"  # kwargs: None
+    POSITION_UPDATE = "position_update"  # kwargs: position (float)
+    STATUS_MESSAGE = "status_message"  # kwargs: message (str), color (str, optional)
 
     # Plugin events
-    PLUGIN_SETTINGS_CHANGED = "plugin_settings_changed"  # Plugin settings updated
-    WAVEFORM_COMPLETE = "waveform_complete"  # Waveform generation finished
-    AUDIO_ANALYSIS_COMPLETE = "audio_analysis_complete"  # Full audio stats analysis finished
-    TRACK_METADATA_UPDATED = "track_metadata_updated"  # Track metadata changed
+    PLUGIN_SETTINGS_CHANGED = "plugin_settings_changed"  # kwargs: None
+    WAVEFORM_COMPLETE = "waveform_complete"  # kwargs: track_id (int)
+    AUDIO_ANALYSIS_COMPLETE = "audio_analysis_complete"  # kwargs: track_id (int)

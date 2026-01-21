@@ -1,6 +1,7 @@
 """Audio analysis plugin - extracts musical features."""
 
 import logging
+import os
 from typing import Any
 
 import numpy as np
@@ -400,8 +401,6 @@ class AudioAnalyzerPlugin:
 
         # Save to database (safe in main thread)
         try:
-            import os
-
             # Filter columns against whitelist to prevent SQL injection
             safe_columns = [col for col in result.keys() if col in AUDIO_ANALYSIS_COLUMNS]
             if not safe_columns:
@@ -456,8 +455,6 @@ class AudioAnalyzerPlugin:
     def _on_batch_analysis_error(self, item: tuple[int, str], error: str) -> None:
         """Handle batch analysis error."""
         track_id, filepath = item
-        import os
-
         filename = os.path.basename(filepath)
         # DEBUG level: show which file failed (BatchProcessor already logged the error)
         logging.debug(f"[Batch Analysis] Failed file: {filename}")
@@ -611,8 +608,6 @@ class AnalysisWorker(QThread):
         self.track_id = track_id
         self.filepath = filepath
         # Set thread name for debugging
-        import os
-
         self.setObjectName(f"AnalysisWorker-{track_id}-{os.path.basename(filepath)[:20]}")
 
     def run(self) -> None:
@@ -622,15 +617,11 @@ class AnalysisWorker(QThread):
             self.complete.emit(analysis)
         except ValueError as e:
             # Empty or invalid audio file - log as warning, not error
-            import os
-
             filename = os.path.basename(self.filepath)
             error_msg = f"Skipping {filename}: {e}"
             logging.warning(f"[AudioAnalysisWorker] {error_msg}")
             self.error.emit(error_msg)
         except Exception as e:
-            import os
-
             filename = os.path.basename(self.filepath)
             error_msg = f"Error analyzing {filename}: {e}"
             logging.error(f"[AudioAnalysisWorker] {error_msg}", exc_info=True)

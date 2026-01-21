@@ -86,8 +86,8 @@ class FileCuratorPlugin:
             return None
 
     def shutdown(self) -> None:
-        """Cleanup."""
-        pass
+        """Cleanup on application exit. No cleanup needed for this plugin."""
+        ...
 
 
 class OrganizerDialog(QDialog):

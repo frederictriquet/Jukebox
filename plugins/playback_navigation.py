@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from jukebox.core.event_bus import Events
+
 
 class PlaybackNavigationPlugin:
     """Navigate playback with keyboard shortcuts."""
@@ -172,14 +174,10 @@ class PlaybackNavigationPlugin:
 
     def _next_track(self) -> None:
         """Play next track in list."""
-        from jukebox.core.event_bus import Events
-
         self.context.emit(Events.SELECT_NEXT_TRACK)
 
     def _previous_track(self) -> None:
         """Play previous track in list."""
-        from jukebox.core.event_bus import Events
-
         self.context.emit(Events.SELECT_PREVIOUS_TRACK)
 
     def _jump_to_percent(self, percent: float) -> None:
@@ -202,8 +200,6 @@ class PlaybackNavigationPlugin:
 
     def _play_random_track(self) -> None:
         """Play a random track from the list."""
-        from jukebox.core.event_bus import Events
-
         self.context.emit(Events.SELECT_RANDOM_TRACK)
 
     def _toggle_auto_play_from_menu(self) -> None:
@@ -253,8 +249,8 @@ class PlaybackNavigationPlugin:
                 self.random_button.setStyleSheet("")
 
     def shutdown(self) -> None:
-        """Cleanup."""
-        pass
+        """Cleanup on application exit. No cleanup needed for this plugin."""
+        ...
 
     def get_settings_schema(self) -> dict[str, Any]:
         """Return settings schema for configuration UI.

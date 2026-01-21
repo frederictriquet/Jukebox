@@ -13,6 +13,19 @@ from jukebox.ui.components.track_cell_renderer import CellRenderer
 # Column configuration
 COLUMNS = ["waveform", "filename", "genre", "rating", "duration", "stats"]
 
+# Column widths (in pixels)
+COLUMN_WIDTHS = {
+    "waveform": 210,  # Waveform mini preview (200px waveform + padding)
+    "filename": 350,
+    "genre": 80,
+    "rating": 80,
+    "duration": 80,
+    "stats": 30,  # Small icon column
+}
+
+# Row height
+ROW_HEIGHT = 20
+
 
 class TrackListModel(QAbstractTableModel):
     """Model for track data."""
@@ -366,19 +379,15 @@ class TrackList(QTableView):
 
         # Vertical header shows row numbers (n/total)
         self.verticalHeader().setVisible(True)
-        self.verticalHeader().setDefaultSectionSize(20)  # Compact rows
+        self.verticalHeader().setDefaultSectionSize(ROW_HEIGHT)
 
         # Horizontal header configuration
         h_header = self.horizontalHeader()
         h_header.setStretchLastSection(False)  # Manual column sizing
 
-        # Column widths (columns: waveform, filename, genre, rating, duration, stats)
-        self.setColumnWidth(0, 210)  # Waveform mini preview (200px waveform + padding)
-        self.setColumnWidth(1, 350)  # Filename
-        self.setColumnWidth(2, 80)  # Genre
-        self.setColumnWidth(3, 80)  # Rating
-        self.setColumnWidth(4, 80)  # Duration
-        self.setColumnWidth(5, 30)  # Stats (small icon column)
+        # Set column widths from configuration
+        for col_idx, col_name in enumerate(COLUMNS):
+            self.setColumnWidth(col_idx, COLUMN_WIDTHS[col_name])
 
         # Never take keyboard focus - global shortcuts always active
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
