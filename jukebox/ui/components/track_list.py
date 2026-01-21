@@ -88,7 +88,6 @@ class TrackListModel(QAbstractTableModel):
             self.tracks[row]["genre"] = track_db["genre"] or ""
             self.tracks[row]["rating"] = track_db["genre"] or ""
             self.tracks[row]["duration_seconds"] = track_db["duration_seconds"]
-            self.tracks[row]["duration"] = track_db["duration_seconds"]
 
             # Emit dataChanged to update the view
             left_index = self.index(row, 0)
@@ -128,10 +127,9 @@ class TrackListModel(QAbstractTableModel):
             import pickle
 
             try:
-                waveform_preview = pickle.loads(waveform_cache["waveform_data"])
+                waveform = pickle.loads(waveform_cache["waveform_data"])
                 # Update track data
-                self.tracks[row]["waveform"] = waveform_preview
-                self.tracks[row]["waveform_preview"] = waveform_preview
+                self.tracks[row]["waveform_data"] = waveform
 
                 # Clear cache for this track so it re-renders
                 from jukebox.ui.components.track_cell_renderer import WaveformStyler
@@ -272,8 +270,8 @@ class TrackListModel(QAbstractTableModel):
         duration_seconds: float | None = None,
     ) -> None:
         """Add a track to the model."""
-        # Load waveform preview and stats info from cache if available
-        waveform_preview = None
+        # Load waveform and stats info from cache if available
+        waveform = None
         has_stats = False
         if self.database:
             # Get track_id from filepath
@@ -295,7 +293,7 @@ class TrackListModel(QAbstractTableModel):
                     import pickle
 
                     try:
-                        waveform_preview = pickle.loads(waveform_cache["waveform_data"])
+                        waveform = pickle.loads(waveform_cache["waveform_data"])
                     except Exception as e:
                         logging.error(
                             f"[TrackListModel] Failed to load waveform for {filepath}: {e}",
@@ -319,10 +317,8 @@ class TrackListModel(QAbstractTableModel):
                 "artist": artist,
                 "genre": genre or "",
                 "rating": genre or "",  # RatingStyler extracts from genre
-                "duration": duration_seconds,
                 "duration_seconds": duration_seconds,
-                "waveform": waveform_preview,  # For WaveformStyler
-                "waveform_preview": waveform_preview,
+                "waveform_data": waveform,
                 "has_stats": has_stats,  # For StatsStyler
             }
         )

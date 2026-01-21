@@ -236,7 +236,7 @@ class WaveformStyler(Styler):
 
     def display(self, data: Any, track: dict[str, Any]) -> str:
         """Display simple indicator if no waveform."""
-        waveform_data = track.get("waveform_preview")
+        waveform_data = track.get("waveform_data")
         if not waveform_data:
             return "--"  # No waveform yet
         return ""  # Waveform will be shown as pixmap
@@ -248,7 +248,7 @@ class WaveformStyler(Styler):
     def decoration(self, data: Any, track: dict[str, Any]) -> QPixmap | None:
         """Generate mini waveform as pixmap (not icon)."""
         # Check if waveform data exists
-        waveform_data = track.get("waveform_preview")
+        waveform_data = track.get("waveform_data")
         if not waveform_data:
             return None
 
