@@ -82,5 +82,6 @@ class Events:
 
     # Plugin events
     PLUGIN_SETTINGS_CHANGED = "plugin_settings_changed"  # Plugin settings updated
-    AUDIO_ANALYSIS_COMPLETE = "audio_analysis_complete"  # Track analysis finished
+    WAVEFORM_COMPLETE = "waveform_complete"  # Waveform generation finished
+    AUDIO_ANALYSIS_COMPLETE = "audio_analysis_complete"  # Full audio stats analysis finished
     TRACK_METADATA_UPDATED = "track_metadata_updated"  # Track metadata changed

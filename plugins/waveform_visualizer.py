@@ -250,8 +250,8 @@ class WaveformVisualizerPlugin:
                 self.waveform_widget.display_waveform(result["waveform_data"])
                 logging.debug(f"[Waveform] Displayed waveform for current track {track_id}")
 
-            # Emit event to notify analysis complete
-            self.context.emit(Events.AUDIO_ANALYSIS_COMPLETE, track_id=track_id)
+            # Emit event to notify waveform complete
+            self.context.emit(Events.WAVEFORM_COMPLETE, track_id=track_id)
 
             # DEBUG level: show filename
             filename = os.path.basename(filepath)

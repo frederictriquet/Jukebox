@@ -311,6 +311,7 @@ class ConfigDialog(QDialog):
 
         # Tab widget for different plugins
         self.tabs = QTabWidget()
+        self.tabs.setUsesScrollButtons(True)  # Show arrows when tabs overflow
         layout.addWidget(self.tabs)
 
         # Buttons
@@ -433,8 +434,8 @@ class ConfigDialog(QDialog):
         layout.addStretch()
 
         widget.setLayout(layout)
-        # Use plugin's description or name as tab title
-        tab_title = getattr(plugin, "description", plugin_name).title()
+        # Use plugin's name as tab title (shorter than description)
+        tab_title = plugin_name.replace("_", " ").title()
         self.tabs.addTab(widget, tab_title)
 
     def load_settings(self) -> None:

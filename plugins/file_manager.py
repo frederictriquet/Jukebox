@@ -267,8 +267,8 @@ class FileManagerPlugin:
 
             # Copy audio_analysis data to the new track if it exists
             if audio_analysis:
-                # Get all column names except track_id
-                columns = [key for key in audio_analysis if key != "track_id"]
+                # Get all column names except track_id (use .keys() for sqlite3.Row)
+                columns = [key for key in audio_analysis.keys() if key != "track_id"]
                 placeholders = ", ".join(["?"] * len(columns))
                 column_names = ", ".join(columns)
                 values = [audio_analysis[col] for col in columns]
@@ -300,8 +300,6 @@ class FileManagerPlugin:
             self.current_filepath = None
 
             # Remove from track list and play next (via event)
-            from jukebox.core.event_bus import Events
-
             self.context.emit(Events.TRACK_DELETED, filepath=old_filepath)
 
             # Trigger waveform generation if the track had no waveform
@@ -316,7 +314,7 @@ class FileManagerPlugin:
             )
 
         except Exception as e:
-            logging.error(f"Failed to move file: {e}")
+            logging.error(f"Failed to move file: {e}", exc_info=True)
             self.context.emit(Events.STATUS_MESSAGE, message=f"Error moving file: {e}")
 
     def _move_to_trash(self) -> None:
@@ -365,8 +363,6 @@ class FileManagerPlugin:
             self.current_filepath = None
 
             # Remove from track list and play next (via event)
-            from jukebox.core.event_bus import Events
-
             self.context.emit(Events.TRACK_DELETED, filepath=old_filepath)
 
             # Show status message

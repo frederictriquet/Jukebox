@@ -19,6 +19,7 @@ class CellRenderer:
         self.columns = columns
         self.stylers = {
             "waveform": WaveformStyler(),
+            "stats": StatsStyler(),
             "filename": FilenameStyler(),
             "genre": GenreStyler(genre_names or {}),
             "rating": RatingStyler(),
@@ -304,3 +305,30 @@ class WaveformStyler(Styler):
         WaveformStyler._cache[cache_key] = pixmap
 
         return pixmap
+
+
+class StatsStyler(Styler):
+    """Styler for stats column (shows if audio analysis exists)."""
+
+    def display(self, data: Any, track: dict[str, Any]) -> str:
+        """Display checkmark if stats exist, dash otherwise."""
+        has_stats = track.get("has_stats", False)
+        return "✓" if has_stats else "-"
+
+    def tooltip(self, data: Any, track: dict[str, Any]) -> str | None:
+        """Show tooltip explaining the stats status."""
+        has_stats = track.get("has_stats", False)
+        if has_stats:
+            return "Audio analysis complete"
+        return "No audio analysis"
+
+    def foreground(self, data: Any, track: dict[str, Any]) -> QColor | None:
+        """Green if stats exist, gray otherwise."""
+        has_stats = track.get("has_stats", False)
+        if has_stats:
+            return QColor("#00FF00")  # Green
+        return QColor("#666666")  # Gray
+
+    def alignment(self, data: Any, track: dict[str, Any]) -> Qt.AlignmentFlag:
+        """Center-align the icon."""
+        return Qt.AlignmentFlag.AlignCenter

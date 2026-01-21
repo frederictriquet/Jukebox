@@ -7,20 +7,26 @@ import numpy as np
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
+from jukebox.core.event_bus import Events
+
 
 def analyze_audio_file(filepath: str, extract_ml_features: bool = False) -> dict[str, float]:
     """Analyze audio file and extract features.
 
     Args:
         filepath: Path to audio file
-        extract_ml_features: If True, extract comprehensive ML features (slower)
+        extract_ml_features: If True, extract full stats including tempo, brightness,
+                            percussive, RMS, and comprehensive ML features (slower)
 
     Returns:
-        Dict with basic features (always) + ML features (if enabled)
+        Dict with ML features (only when extract_ml_features=True), empty dict otherwise
 
     Raises:
         Exception: If analysis fails
     """
+    if not extract_ml_features:
+        return {}
+
     import warnings
 
     import librosa
@@ -34,56 +40,35 @@ def analyze_audio_file(filepath: str, extract_ml_features: bool = False) -> dict
     if len(y) == 0:
         raise ValueError("Empty audio file")
 
-    # Basic features (always computed)
-    # Tempo detection
-    tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
-    tempo = float(tempo) if tempo else 0.0
-
-    # RMS energy
-    rms = librosa.feature.rms(y=y)[0]
-    rms_energy = float(np.mean(rms))
-
-    # Spectral centroid (brightness)
-    centroid = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
-    spectral_centroid = float(np.mean(centroid))
-
-    # Zero crossing rate (percussiveness)
-    zcr = librosa.feature.zero_crossing_rate(y)[0]
-    zero_crossing_rate = float(np.mean(zcr))
-
-    result = {
-        "tempo": tempo,
-        "spectral_centroid": spectral_centroid,
-        "zero_crossing_rate": zero_crossing_rate,
-        "rms_energy": rms_energy,
-    }
-
-    # ML features (optional, comprehensive)
-    if extract_ml_features:
-        result.update(_extract_ml_features(y, sr, rms, centroid, zcr, beats))
-
-    return result
+    return _extract_ml_features(y, int(sr))
 
 
-def _extract_ml_features(
-    y: np.ndarray, sr: int, rms: np.ndarray, centroid: np.ndarray, zcr: np.ndarray, beats: np.ndarray
-) -> dict[str, float]:
+def _extract_ml_features(y: np.ndarray, sr: int) -> dict[str, float]:
     """Extract comprehensive ML features for learning.
 
     Args:
         y: Audio time series
         sr: Sample rate
-        rms: Pre-computed RMS energy
-        centroid: Pre-computed spectral centroid
-        zcr: Pre-computed zero crossing rate
-        beats: Pre-computed beat frames
 
     Returns:
-        Dict with ~50 ML features
+        Dict with ~50 ML features including tempo, brightness, percussive, RMS
     """
     import librosa
 
-    features = {}
+    features: dict[str, float] = {}
+
+    # Core stats: tempo, brightness (spectral_centroid), percussive (zcr), RMS
+    tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
+    features["tempo"] = float(tempo) if tempo else 0.0
+
+    rms = librosa.feature.rms(y=y)[0]
+    features["rms_energy"] = float(np.mean(rms))
+
+    centroid = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
+    features["spectral_centroid"] = float(np.mean(centroid))
+
+    zcr = librosa.feature.zero_crossing_rate(y)[0]
+    features["zero_crossing_rate"] = float(np.mean(zcr))
 
     # 1. Energy & dynamics (8 features)
     features["rms_mean"] = float(np.mean(rms))
@@ -234,39 +219,7 @@ class AudioAnalyzerPlugin:
 
         context.subscribe(Events.TRACK_LOADED, self._on_track_loaded)
         context.subscribe(Events.AUDIO_ANALYSIS_COMPLETE, self._on_analysis_complete)
-        context.subscribe(Events.TRACKS_ADDED, self._on_tracks_added)
-        context.subscribe(Events.PLUGIN_SETTINGS_CHANGED, self._on_settings_changed)
 
-        # Load settings from database at startup
-        self._on_settings_changed()
-
-        # Auto-start batch analysis at startup (after waveforms)
-        from PySide6.QtCore import QTimer
-
-        QTimer.singleShot(2000, self._start_batch_analysis)  # 2s delay to let waveforms start first
-
-    def _on_tracks_added(self) -> None:
-        """Auto-analyze tracks when they are added."""
-        # Use a delay to let waveforms generate first
-        from PySide6.QtCore import QTimer
-
-        QTimer.singleShot(1000, self._start_batch_analysis)
-
-    def _on_settings_changed(self) -> None:
-        """Reload config when settings change."""
-        logging.info("[Audio Analyzer] Settings changed, reloading config from database")
-
-        # Reload enable_ml_features setting from database
-        db = self.context.database
-        ml_setting = db.conn.execute(
-            "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
-            ("audio_analyzer", "enable_ml_features"),
-        ).fetchone()
-
-        if ml_setting:
-            ml_enabled = ml_setting["setting_value"].lower() in ("true", "1", "yes")
-            self.context.config.audio_analysis.enable_ml_features = ml_enabled
-            logging.info(f"[Audio Analyzer] ML features extraction: {ml_enabled}")
 
     def register_ui(self, ui_builder: Any) -> None:
         """Register analysis widget."""
@@ -355,22 +308,27 @@ class AudioAnalyzerPlugin:
             )
 
     def _start_batch_analysis(self) -> None:
-        """Start batch analysis of all tracks."""
+        """Start batch analysis of all tracks in the current mode."""
         # Stop any running batch
         if AudioAnalyzerPlugin._batch_processor and AudioAnalyzerPlugin._batch_processor.is_running:
             logging.info("[Batch Analysis] Already running, stopping it first")
             AudioAnalyzerPlugin._batch_processor.stop()
 
-        # Get all tracks from database
+        # Get current mode
+        current_mode = self.context.config.ui.mode
+
+        # Get tracks for current mode from database
         tracks = self.context.database.conn.execute(
-            "SELECT id, filepath FROM tracks ORDER BY id"
+            "SELECT id, filepath FROM tracks WHERE mode = ? ORDER BY id",
+            (current_mode,),
         ).fetchall()
 
         if not tracks:
-            logging.info("[Batch Analysis] No tracks to analyze")
+            logging.info(f"[Batch Analysis] No tracks to analyze in {current_mode} mode")
             return
 
         total_tracks = len(tracks)
+        logging.info(f"[Batch Analysis] Analyzing {current_mode} mode tracks")
 
         # Filter tracks that don't have complete analysis
         tracks_to_analyze = []
@@ -378,12 +336,8 @@ class AudioAnalyzerPlugin:
 
         import os
 
-        # Get ML features flag from config
-        extract_ml = self.context.config.audio_analysis.enable_ml_features
-        logging.info(f"[Batch Analysis] ML features extraction enabled: {extract_ml}")
-
         for track in tracks:
-            # Select basic fields + one ML field to check if ML features exist
+            # Check if full stats exist (tempo, spectral_centroid, zero_crossing_rate, rms_energy, rms_mean)
             analysis = self.context.database.conn.execute(
                 "SELECT tempo, spectral_centroid, zero_crossing_rate, rms_energy, rms_mean FROM audio_analysis WHERE track_id = ?",
                 (track["id"],),
@@ -391,28 +345,22 @@ class AudioAnalyzerPlugin:
 
             filename = os.path.basename(track["filepath"])
 
-            # Analyze if no analysis record OR if any basic field is NULL
+            # Analyze if no analysis record OR if any field is NULL
             needs_analysis = (
                 not analysis
                 or analysis["tempo"] is None
                 or analysis["spectral_centroid"] is None
                 or analysis["zero_crossing_rate"] is None
                 or analysis["rms_energy"] is None
+                or analysis["rms_mean"] is None
             )
-
-            # If ML features are enabled, also check if ML features are missing
-            if not needs_analysis and extract_ml:
-                # Check if ML features are present (rms_mean is the first ML feature)
-                if analysis["rms_mean"] is None:
-                    needs_analysis = True
-                    logging.info(f"  Track {track['id']}: {filename} - NEEDS RE-ANALYSIS (ML features missing)")
 
             if needs_analysis:
                 tracks_to_analyze.append((track["id"], track["filepath"]))
-                if analysis and not extract_ml:
-                    logging.info(f"  Track {track['id']}: {filename} - NEEDS ANALYSIS (incomplete)")
-                elif not analysis:
+                if not analysis:
                     logging.info(f"  Track {track['id']}: {filename} - NEEDS ANALYSIS (no record)")
+                else:
+                    logging.info(f"  Track {track['id']}: {filename} - NEEDS ANALYSIS (incomplete)")
             else:
                 already_analyzed += 1
                 logging.info(f"  Track {track['id']}: {filename} - already analyzed")
@@ -432,7 +380,7 @@ class AudioAnalyzerPlugin:
         def worker_factory(item: tuple[int, str]) -> QThread:
             """Create analysis worker for a track."""
             track_id, filepath = item
-            return AnalysisWorker(track_id=track_id, filepath=filepath, extract_ml_features=extract_ml)
+            return AnalysisWorker(track_id=track_id, filepath=filepath)
 
         AudioAnalyzerPlugin._batch_processor = BatchProcessor(
             name="Audio Analysis",
@@ -539,13 +487,7 @@ class AudioAnalyzerPlugin:
         Returns:
             Dict mapping setting keys to their configuration
         """
-        return {
-            "enable_ml_features": {
-                "label": "Enable ML Features Extraction",
-                "type": "bool",
-                "default": self.context.config.audio_analysis.enable_ml_features,
-            }
-        }
+        return {}
 
 
 class AnalysisWidget(QWidget):
@@ -648,28 +590,26 @@ class AnalysisWorker(QThread):
     complete = Signal(dict)  # Result dict with analysis metrics
     error = Signal(str)  # Error message
 
-    def __init__(self, track_id: int, filepath: str, extract_ml_features: bool = False, parent: Any = None):
+    def __init__(self, track_id: int, filepath: str, parent: Any = None):
         """Initialize worker.
 
         Args:
             track_id: Track ID
             filepath: Path to audio file
-            extract_ml_features: If True, extract comprehensive ML features
             parent: Parent object
         """
         super().__init__(parent)
         self.track_id = track_id
         self.filepath = filepath
-        self.extract_ml_features = extract_ml_features
         # Set thread name for debugging
         import os
 
         self.setObjectName(f"AnalysisWorker-{track_id}-{os.path.basename(filepath)[:20]}")
 
     def run(self) -> None:
-        """Perform analysis."""
+        """Perform analysis (always extracts full stats)."""
         try:
-            analysis = analyze_audio_file(self.filepath, extract_ml_features=self.extract_ml_features)
+            analysis = analyze_audio_file(self.filepath, extract_ml_features=True)
             self.complete.emit(analysis)
         except ValueError as e:
             # Empty or invalid audio file - log as warning, not error
