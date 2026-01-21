@@ -9,6 +9,37 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from jukebox.core.event_bus import Events
 
+# Whitelist of valid audio_analysis columns (prevents SQL injection)
+AUDIO_ANALYSIS_COLUMNS: frozenset[str] = frozenset([
+    # Core stats
+    "tempo", "rms_energy", "spectral_centroid", "zero_crossing_rate",
+    # Energy & dynamics
+    "rms_mean", "rms_std", "rms_p10", "rms_p90", "peak_amplitude",
+    "crest_factor", "loudness_variation",
+    # Frequency band energies
+    "sub_bass_mean", "sub_bass_ratio", "bass_mean", "bass_ratio",
+    "low_mid_mean", "low_mid_ratio", "mid_mean", "mid_ratio",
+    "high_mid_mean", "high_mid_ratio", "high_mean", "high_ratio",
+    # Spectral features
+    "spectral_centroid_std", "spectral_bandwidth", "spectral_rolloff",
+    "spectral_flatness", "spectral_contrast", "spectral_entropy",
+    # MFCC
+    "mfcc_1", "mfcc_2", "mfcc_3", "mfcc_4", "mfcc_5",
+    "mfcc_6", "mfcc_7", "mfcc_8", "mfcc_9", "mfcc_10",
+    # Percussive vs harmonic
+    "harmonic_energy", "percussive_energy", "perc_harm_ratio",
+    "onset_strength_mean", "percussive_onset_rate",
+    # Rhythm & tempo
+    "tempo_confidence", "beat_interval_mean", "beat_interval_std",
+    "onset_rate", "tempogram_periodicity",
+    # Harmony
+    "chroma_entropy", "chroma_centroid", "chroma_energy_std", "tonnetz_mean",
+    # Structure
+    "intro_energy_ratio", "core_energy_ratio", "outro_energy_ratio", "energy_slope",
+    # Legacy (from waveform analysis)
+    "dynamic_range",
+])
+
 
 def analyze_audio_file(filepath: str, extract_ml_features: bool = False) -> dict[str, float]:
     """Analyze audio file and extract features.
@@ -403,26 +434,36 @@ class AudioAnalyzerPlugin:
         try:
             import os
 
+            # Filter columns against whitelist to prevent SQL injection
+            safe_columns = [col for col in result.keys() if col in AUDIO_ANALYSIS_COLUMNS]
+            if not safe_columns:
+                logging.warning(f"[Batch Analysis] No valid columns in result for track {track_id}")
+                return
+
+            # Log any rejected columns (should not happen in normal operation)
+            rejected = set(result.keys()) - set(safe_columns)
+            if rejected:
+                logging.warning(f"[Batch Analysis] Rejected invalid columns: {rejected}")
+
             # Check if row exists (created by waveform)
             existing = self.context.database.conn.execute(
                 "SELECT track_id FROM audio_analysis WHERE track_id = ?", (track_id,)
             ).fetchone()
 
-            # Build dynamic SQL based on result keys
-            columns = list(result.keys())
-            placeholders = ", ".join(["?" for _ in columns])
-            values = [result[col] for col in columns]
+            # Build dynamic SQL using only whitelisted columns
+            placeholders = ", ".join(["?" for _ in safe_columns])
+            values = [result[col] for col in safe_columns]
 
             if existing:
                 # Update existing row with all available columns
-                set_clause = ", ".join([f"{col} = ?" for col in columns])
+                set_clause = ", ".join([f"{col} = ?" for col in safe_columns])
                 self.context.database.conn.execute(
                     f"UPDATE audio_analysis SET {set_clause} WHERE track_id = ?",
                     values + [track_id],
                 )
             else:
                 # Create new row with all analysis results
-                columns_str = ", ".join(columns)
+                columns_str = ", ".join(safe_columns)
                 self.context.database.conn.execute(
                     f"""
                     INSERT INTO audio_analysis (track_id, {columns_str})
@@ -438,7 +479,7 @@ class AudioAnalyzerPlugin:
 
             # DEBUG level: show filename and feature count
             filename = os.path.basename(filepath)
-            feature_count = len(result)
+            feature_count = len(safe_columns)
             logging.debug(f"[Batch Analysis] Saved {feature_count} features for: {filename}")
 
         except Exception as e:

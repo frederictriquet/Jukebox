@@ -10,6 +10,14 @@ class MockVLCMedia:
         self.path = path
 
 
+class MockEventManager:
+    """Mock VLC EventManager object."""
+
+    def event_attach(self, event_type: Any, callback: Any) -> None:
+        """Attach event handler (no-op in mock)."""
+        pass
+
+
 class MockVLCPlayer:
     """Mock VLC MediaPlayer object."""
 
@@ -18,6 +26,7 @@ class MockVLCPlayer:
         self._playing = False
         self._volume = 70
         self._position = 0.0
+        self._event_manager = MockEventManager()
 
     def set_media(self, media: MockVLCMedia) -> None:
         """Set media."""
@@ -29,8 +38,8 @@ class MockVLCPlayer:
         return 0
 
     def pause(self) -> None:
-        """Pause playback."""
-        self._playing = False
+        """Toggle pause playback (VLC behavior: pause toggles play/pause)."""
+        self._playing = not self._playing
 
     def stop(self) -> None:
         """Stop playback."""
@@ -58,6 +67,10 @@ class MockVLCPlayer:
         """Get position."""
         return self._position
 
+    def event_manager(self) -> MockEventManager:
+        """Get event manager."""
+        return self._event_manager
+
 
 class MockVLCInstance:
     """Mock VLC Instance object."""
@@ -71,11 +84,20 @@ class MockVLCInstance:
         return MockVLCPlayer()
 
 
+class MockEventType:
+    """Mock VLC EventType enum."""
+
+    MediaPlayerEndReached = "MediaPlayerEndReached"
+
+
 def mock_vlc_module() -> Any:
     """Create mock vlc module."""
 
     class VLCModule:
         """Mock vlc module."""
+
+        # Event types
+        EventType = MockEventType
 
         @staticmethod
         def Instance() -> MockVLCInstance:  # noqa: N802

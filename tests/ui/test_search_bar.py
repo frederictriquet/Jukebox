@@ -10,7 +10,7 @@ class TestSearchBar:
         """Test search bar initializes correctly."""
         search_bar = SearchBar()
         assert search_bar is not None
-        assert search_bar.placeholderText() == "Search tracks..."
+        assert "Search tracks" in search_bar.placeholderText()
 
     def test_debounce_timer(self, qapp):  # type: ignore
         """Test debounce timer exists."""

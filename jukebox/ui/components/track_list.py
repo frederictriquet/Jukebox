@@ -416,6 +416,58 @@ class TrackList(QTableView):
         if isinstance(model, TrackListModel):
             model.clear()
 
+    def count(self) -> int:
+        """Get number of tracks in the list.
+
+        Returns:
+            Number of tracks
+        """
+        model = self.model()
+        if isinstance(model, TrackListModel):
+            return model.rowCount()
+        return 0
+
+    def item(self, row: int) -> Any:
+        """Get item at row (for compatibility with tests).
+
+        Args:
+            row: Row index
+
+        Returns:
+            Object with text() method returning the display text
+        """
+        model = self.model()
+        if isinstance(model, TrackListModel) and 0 <= row < model.rowCount():
+            # Return a simple object with text() method
+            track = model.tracks[row]
+
+            class _Item:
+                def __init__(self, track_data: dict[str, Any]) -> None:
+                    self._track = track_data
+
+                def text(self) -> str:
+                    artist = self._track.get("artist")
+                    title = self._track.get("title")
+                    if artist and title:
+                        return f"{artist} - {title}"
+                    elif title:
+                        return title
+                    else:
+                        return self._track["filepath"].name
+
+            return _Item(track)
+        return None
+
+    def setCurrentRow(self, row: int) -> None:
+        """Select row by index (for compatibility with tests).
+
+        Args:
+            row: Row index to select
+        """
+        model = self.model()
+        if isinstance(model, TrackListModel) and 0 <= row < model.rowCount():
+            self.selectRow(row)
+
     def get_selected_track(self) -> Path | None:
         """Get currently selected track.
 

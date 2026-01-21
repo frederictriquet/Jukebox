@@ -5,10 +5,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from jukebox.core.audio_player import AudioPlayer
-from jukebox.core.config import AudioConfig, JukeboxConfig, LoggingConfig, UIConfig
-
-# Register pytest plugin for VLC mocking
+# Register pytest plugin for VLC mocking - MUST be before any jukebox imports
 pytest_plugins = ["tests.pytest_vlc_mock"]
 
 
@@ -24,6 +21,8 @@ def qapp():
 @pytest.fixture
 def test_config():
     """Provide test configuration."""
+    from jukebox.core.config import AudioConfig, JukeboxConfig, LoggingConfig, UIConfig
+
     return JukeboxConfig(
         audio=AudioConfig(
             default_volume=50,
@@ -38,6 +37,8 @@ def test_config():
 @pytest.fixture
 def audio_player(qapp):  # type: ignore
     """Provide AudioPlayer instance."""
+    from jukebox.core.audio_player import AudioPlayer
+
     return AudioPlayer()
 
 
