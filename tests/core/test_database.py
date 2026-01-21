@@ -127,12 +127,8 @@ class TestDatabase:
         db.initialize_schema()
 
         # Add tracks to both modes
-        db.add_track(
-            {"filepath": "/tmp/jukebox1.mp3", "filename": "jukebox1.mp3"}, mode="jukebox"
-        )
-        db.add_track(
-            {"filepath": "/tmp/jukebox2.mp3", "filename": "jukebox2.mp3"}, mode="jukebox"
-        )
+        db.add_track({"filepath": "/tmp/jukebox1.mp3", "filename": "jukebox1.mp3"}, mode="jukebox")
+        db.add_track({"filepath": "/tmp/jukebox2.mp3", "filename": "jukebox2.mp3"}, mode="jukebox")
         db.add_track(
             {"filepath": "/tmp/curating1.mp3", "filename": "curating1.mp3"}, mode="curating"
         )

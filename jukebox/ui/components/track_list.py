@@ -122,6 +122,7 @@ class TrackListModel(QAbstractTableModel):
 
                 # Clear cache for this track so it re-renders
                 from jukebox.ui.components.track_cell_renderer import WaveformStyler
+
                 cache_key = hash(str(filepath))
                 WaveformStyler._cache.pop(cache_key, None)
 
@@ -129,7 +130,9 @@ class TrackListModel(QAbstractTableModel):
                 waveform_index = self.index(row, 0)  # Waveform is column 0
                 self.dataChanged.emit(waveform_index, waveform_index, [])
             except Exception as e:
-                logging.error(f"[TrackListModel] Failed to update waveform for {filepath}: {e}", exc_info=True)
+                logging.error(
+                    f"[TrackListModel] Failed to update waveform for {filepath}: {e}", exc_info=True
+                )
 
     def _on_stats_complete(self, track_id: int) -> None:
         """Handle full audio analysis completion event.
@@ -185,8 +188,12 @@ class TrackListModel(QAbstractTableModel):
                 row = self.find_row_by_filepath(filepath)
 
             if row < 0:
-                logging.warning(f"[TrackListModel] Could not find row for deleted track: {filepath}")
-                logging.debug(f"[TrackListModel] Known paths: {list(self.filepath_to_row.keys())[:5]}...")
+                logging.warning(
+                    f"[TrackListModel] Could not find row for deleted track: {filepath}"
+                )
+                logging.debug(
+                    f"[TrackListModel] Known paths: {list(self.filepath_to_row.keys())[:5]}..."
+                )
                 return
 
         logging.info(f"[TrackListModel] Deleting row {row} (total rows: {len(self.tracks)})")
@@ -277,7 +284,10 @@ class TrackListModel(QAbstractTableModel):
                     try:
                         waveform_preview = pickle.loads(waveform_cache["waveform_data"])
                     except Exception as e:
-                        logging.error(f"[TrackListModel] Failed to load waveform for {filepath}: {e}", exc_info=True)
+                        logging.error(
+                            f"[TrackListModel] Failed to load waveform for {filepath}: {e}",
+                            exc_info=True,
+                        )
 
                 # Check if audio analysis exists (with key stats)
                 analysis = self.database.conn.execute(
@@ -288,19 +298,21 @@ class TrackListModel(QAbstractTableModel):
 
         row = len(self.tracks)
         self.beginInsertRows(QModelIndex(), row, row)
-        self.tracks.append({
-            "filepath": filepath,
-            "filename": filepath.name,  # For FilenameStyler
-            "title": title,
-            "artist": artist,
-            "genre": genre or "",
-            "rating": genre or "",  # RatingStyler extracts from genre
-            "duration": duration_seconds,
-            "duration_seconds": duration_seconds,
-            "waveform": waveform_preview,  # For WaveformStyler
-            "waveform_preview": waveform_preview,
-            "has_stats": has_stats,  # For StatsStyler
-        })
+        self.tracks.append(
+            {
+                "filepath": filepath,
+                "filename": filepath.name,  # For FilenameStyler
+                "title": title,
+                "artist": artist,
+                "genre": genre or "",
+                "rating": genre or "",  # RatingStyler extracts from genre
+                "duration": duration_seconds,
+                "duration_seconds": duration_seconds,
+                "waveform": waveform_preview,  # For WaveformStyler
+                "waveform_preview": waveform_preview,
+                "has_stats": has_stats,  # For StatsStyler
+            }
+        )
         self.filepath_to_row[filepath] = row
         self.endInsertRows()
 
@@ -330,7 +342,9 @@ class TrackList(QTableView):
     add_to_playlist_requested = Signal(Path, int)  # filepath, playlist_id
     files_dropped = Signal(list)  # List of Path objects (files and directories)
 
-    def __init__(self, parent: Any = None, database: Any = None, event_bus: Any = None, config: Any = None):
+    def __init__(
+        self, parent: Any = None, database: Any = None, event_bus: Any = None, config: Any = None
+    ):
         """Initialize track list.
 
         Args:
@@ -361,10 +375,10 @@ class TrackList(QTableView):
         # Column widths (columns: waveform, filename, genre, rating, duration, stats)
         self.setColumnWidth(0, 210)  # Waveform mini preview (200px waveform + padding)
         self.setColumnWidth(1, 350)  # Filename
-        self.setColumnWidth(2, 80)   # Genre
-        self.setColumnWidth(3, 80)   # Rating
-        self.setColumnWidth(4, 80)   # Duration
-        self.setColumnWidth(5, 30)   # Stats (small icon column)
+        self.setColumnWidth(2, 80)  # Genre
+        self.setColumnWidth(3, 80)  # Rating
+        self.setColumnWidth(4, 80)  # Duration
+        self.setColumnWidth(5, 30)  # Stats (small icon column)
 
         # Never take keyboard focus - global shortcuts always active
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)

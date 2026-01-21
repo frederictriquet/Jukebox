@@ -107,7 +107,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.search_bar)
 
         # Track list (with stretch to take all available space)
-        self.track_list = TrackList(database=self.database, event_bus=self.event_bus, config=self.config)
+        self.track_list = TrackList(
+            database=self.database, event_bus=self.event_bus, config=self.config
+        )
         layout.addWidget(self.track_list, stretch=1)
 
         # Connect to model's row_deleted signal (emitted after deletion is complete)
@@ -293,9 +295,7 @@ class MainWindow(QMainWindow):
             filepath: Path of deleted track
         """
         # Check if the deleted file was currently playing
-        was_deleted_file_playing = (
-            self.player.current_file and self.player.current_file == filepath
-        )
+        was_deleted_file_playing = self.player.current_file and self.player.current_file == filepath
 
         # Find the row that will be deleted
         model = self.track_list.model()
@@ -327,17 +327,23 @@ class MainWindow(QMainWindow):
                     # Get the filepath of the NEXT track (row+1) before deletion
                     next_index = model.index(deleted_row + 1, 0)
                     next_filepath = model.data(next_index, Qt.ItemDataRole.UserRole)
-                    logging.debug(f"[MainWindow] Next track at row {deleted_row + 1}: {next_filepath}")
+                    logging.debug(
+                        f"[MainWindow] Next track at row {deleted_row + 1}: {next_filepath}"
+                    )
                 else:
                     # Was last track, get the previous track
                     prev_index = model.index(deleted_row - 1, 0)
                     next_filepath = model.data(prev_index, Qt.ItemDataRole.UserRole)
-                    logging.debug(f"[MainWindow] Was last, previous track at row {deleted_row - 1}: {next_filepath}")
+                    logging.debug(
+                        f"[MainWindow] Was last, previous track at row {deleted_row - 1}: {next_filepath}"
+                    )
             else:
                 # Couldn't find row - get first track
                 first_index = model.index(0, 0)
                 next_filepath = model.data(first_index, Qt.ItemDataRole.UserRole)
-                logging.debug(f"[MainWindow] Couldn't find row, playing first track: {next_filepath}")
+                logging.debug(
+                    f"[MainWindow] Couldn't find row, playing first track: {next_filepath}"
+                )
 
             # Save filepath to play after model update (no Timer needed!)
             if next_filepath:
@@ -390,9 +396,7 @@ class MainWindow(QMainWindow):
                         logging.warning(f"Skipping invalid file {path}: {e}")
             elif path.is_dir():
                 # Directory - scan recursively
-                scanner = FileScanner(
-                    self.database, self.config.audio.supported_formats, mode=mode
-                )
+                scanner = FileScanner(self.database, self.config.audio.supported_formats, mode=mode)
                 scanner.scan_directory(path, recursive=True)
 
         # Emit event to notify plugins

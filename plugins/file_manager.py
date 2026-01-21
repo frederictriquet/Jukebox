@@ -8,9 +8,10 @@ from typing import Any
 from PySide6.QtWidgets import QPushButton
 
 from jukebox.core.event_bus import Events
+from jukebox.core.shortcut_mixin import ShortcutMixin
 
 
-class FileManagerPlugin:
+class FileManagerPlugin(ShortcutMixin):
     """Manage files: move, rename, and delete tracks."""
 
     name = "file_manager"
@@ -23,9 +24,8 @@ class FileManagerPlugin:
         self.context: Any = None
         self.current_track_id: int | None = None
         self.current_filepath: Path | None = None
-        self.shortcuts: list[Any] = []
-        self.shortcut_manager: Any = None
         self.remove_button: QPushButton | None = None
+        self._init_shortcut_mixin()
 
     def initialize(self, context: Any) -> None:
         """Initialize plugin."""
@@ -67,17 +67,8 @@ class FileManagerPlugin:
             else:
                 layout.addWidget(self.remove_button)
 
-    def register_shortcuts(self, shortcut_manager: Any) -> None:
+    def _register_plugin_shortcuts(self) -> None:
         """Register file management shortcuts."""
-        # Store reference to shortcut manager for later reloading
-        self.shortcut_manager = shortcut_manager
-        self._register_all_shortcuts()
-
-    def _register_all_shortcuts(self) -> None:
-        """Register all shortcuts from config."""
-        if not self.shortcut_manager:
-            return
-
         # Get file manager config
         file_config = self.context.config.file_manager
 
@@ -111,25 +102,7 @@ class FileManagerPlugin:
         self.current_filepath = Path(track["filepath"]) if track else None
         logging.debug(f"[File Manager] Track loaded: id={track_id}, filepath={self.current_filepath}")
 
-    def _on_settings_changed(self) -> None:
-        """Reload shortcuts when settings change."""
-        logging.info("[File Manager] Reloading shortcuts after settings change")
-
-        # Unregister all current shortcuts
-        for shortcut in self.shortcuts:
-            if hasattr(shortcut, "key") and hasattr(shortcut, "key"):
-                key_seq = shortcut.key().toString()
-                if self.shortcut_manager:
-                    self.shortcut_manager.unregister(key_seq)
-        self.shortcuts.clear()
-
-        # Reload config from database
-        self._reload_config_from_db()
-
-        # Re-register shortcuts with new config
-        self._register_all_shortcuts()
-
-    def _reload_config_from_db(self) -> None:
+    def _reload_plugin_config(self) -> None:
         """Reload file_manager config from database."""
         # Get settings from database
         db = self.context.database
@@ -426,15 +399,13 @@ class FileManagerPlugin:
         """Activate plugin for this mode."""
         if mode == "curating":
             # Enable shortcuts for curating mode
-            for shortcut in self.shortcuts:
-                shortcut.setEnabled(True)
+            self._activate_shortcuts()
             # Hide remove button in curating mode
             if self.remove_button:
                 self.remove_button.setVisible(False)
         elif mode == "jukebox":
             # Disable curating shortcuts in jukebox mode
-            for shortcut in self.shortcuts:
-                shortcut.setEnabled(False)
+            self._deactivate_shortcuts()
             # Show remove button in jukebox mode
             if self.remove_button:
                 self.remove_button.setVisible(True)
@@ -444,8 +415,7 @@ class FileManagerPlugin:
         """Deactivate plugin for this mode."""
         if mode == "curating":
             # Disable shortcuts when leaving curating mode
-            for shortcut in self.shortcuts:
-                shortcut.setEnabled(False)
+            self._deactivate_shortcuts()
         elif mode == "jukebox":
             # Hide remove button when leaving jukebox mode
             if self.remove_button:

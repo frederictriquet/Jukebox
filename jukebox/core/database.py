@@ -278,13 +278,9 @@ class Database:
 
         if "mode" not in existing_columns:
             # Add mode column with default "curating" for existing tracks
-            self.conn.execute(
-                "ALTER TABLE tracks ADD COLUMN mode TEXT NOT NULL DEFAULT 'curating'"
-            )
+            self.conn.execute("ALTER TABLE tracks ADD COLUMN mode TEXT NOT NULL DEFAULT 'curating'")
             # Create index for efficient mode filtering
-            self.conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_tracks_mode ON tracks(mode)"
-            )
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_mode ON tracks(mode)")
             self.conn.commit()
 
     def add_track(self, track_data: dict[str, Any], mode: str = "jukebox") -> int:

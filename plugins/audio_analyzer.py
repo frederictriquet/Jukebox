@@ -340,10 +340,7 @@ class AudioAnalyzerPlugin:
 
     def _start_batch_analysis(self) -> None:
         """Start batch analysis of all tracks in the current mode."""
-        # Stop any running batch
-        if AudioAnalyzerPlugin._batch_processor and AudioAnalyzerPlugin._batch_processor.is_running:
-            logging.info("[Batch Analysis] Already running, stopping it first")
-            AudioAnalyzerPlugin._batch_processor.stop()
+        from jukebox.utils.batch_helper import start_batch_processing
 
         # Get current mode
         current_mode = self.context.config.ui.mode
@@ -358,26 +355,20 @@ class AudioAnalyzerPlugin:
             logging.info(f"[Batch Analysis] No tracks to analyze in {current_mode} mode")
             return
 
-        total_tracks = len(tracks)
         logging.info(f"[Batch Analysis] Analyzing {current_mode} mode tracks")
 
-        # Filter tracks that don't have complete analysis
-        tracks_to_analyze = []
-        already_analyzed = 0
+        # Convert to list of tuples
+        items = [(track["id"], track["filepath"]) for track in tracks]
 
-        import os
-
-        for track in tracks:
-            # Check if full stats exist (tempo, spectral_centroid, zero_crossing_rate, rms_energy, rms_mean)
+        def needs_analysis(track_id: int, filepath: str) -> bool:
+            """Check if track needs analysis."""
             analysis = self.context.database.conn.execute(
-                "SELECT tempo, spectral_centroid, zero_crossing_rate, rms_energy, rms_mean FROM audio_analysis WHERE track_id = ?",
-                (track["id"],),
+                "SELECT tempo, spectral_centroid, zero_crossing_rate, rms_energy, rms_mean "
+                "FROM audio_analysis WHERE track_id = ?",
+                (track_id,),
             ).fetchone()
-
-            filename = os.path.basename(track["filepath"])
-
-            # Analyze if no analysis record OR if any field is NULL
-            needs_analysis = (
+            # Analyze if no record OR if any field is NULL
+            return (
                 not analysis
                 or analysis["tempo"] is None
                 or analysis["spectral_centroid"] is None
@@ -386,45 +377,22 @@ class AudioAnalyzerPlugin:
                 or analysis["rms_mean"] is None
             )
 
-            if needs_analysis:
-                tracks_to_analyze.append((track["id"], track["filepath"]))
-                if not analysis:
-                    logging.info(f"  Track {track['id']}: {filename} - NEEDS ANALYSIS (no record)")
-                else:
-                    logging.info(f"  Track {track['id']}: {filename} - NEEDS ANALYSIS (incomplete)")
-            else:
-                already_analyzed += 1
-                logging.info(f"  Track {track['id']}: {filename} - already analyzed")
-
-        logging.info(
-            f"[Batch Analysis] Status: {already_analyzed} already done, {len(tracks_to_analyze)} to analyze (total: {total_tracks})"
-        )
-
-        if not tracks_to_analyze:
-            logging.info("[Batch Analysis] All tracks already have complete analysis")
-            self.context.emit(Events.STATUS_MESSAGE, message="All tracks analyzed", color="#00FF00")
-            return
-
-        # Create batch processor
-        from jukebox.core.batch_processor import BatchProcessor
-
         def worker_factory(item: tuple[int, str]) -> QThread:
             """Create analysis worker for a track."""
             track_id, filepath = item
             return AnalysisWorker(track_id=track_id, filepath=filepath)
 
-        AudioAnalyzerPlugin._batch_processor = BatchProcessor(
+        start_batch_processing(
             name="Audio Analysis",
-            worker_factory=worker_factory,
+            batch_processor_holder=AudioAnalyzerPlugin,
             context=self.context,
+            items=items,
+            needs_processing_fn=needs_analysis,
+            worker_factory=worker_factory,
+            on_complete=self._on_batch_analysis_complete,
+            on_error=self._on_batch_analysis_error,
+            no_work_message="All tracks analyzed",
         )
-
-        # Connect signals
-        AudioAnalyzerPlugin._batch_processor.item_complete.connect(self._on_batch_analysis_complete)
-        AudioAnalyzerPlugin._batch_processor.item_error.connect(self._on_batch_analysis_error)
-
-        # Start batch processing
-        AudioAnalyzerPlugin._batch_processor.start(tracks_to_analyze)
 
     def _on_batch_analysis_complete(self, item: tuple[int, str], result: dict[str, float]) -> None:
         """Handle single analysis completion in batch."""

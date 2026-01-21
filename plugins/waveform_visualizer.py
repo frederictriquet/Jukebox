@@ -124,13 +124,7 @@ class WaveformVisualizerPlugin:
 
     def _start_batch_waveform(self) -> None:
         """Start batch waveform generation for all tracks."""
-        # Stop any running batch
-        if (
-            WaveformVisualizerPlugin._batch_processor
-            and WaveformVisualizerPlugin._batch_processor.is_running
-        ):
-            logging.info("Batch processor already running, stopping it first")
-            WaveformVisualizerPlugin._batch_processor.stop()
+        from jukebox.utils.batch_helper import start_batch_processing
 
         # Get all tracks
         tracks = self.context.database.conn.execute(
@@ -141,37 +135,15 @@ class WaveformVisualizerPlugin:
             logging.info("[Batch Waveform] No tracks to generate waveforms for")
             return
 
-        # Filter tracks without waveforms
-        tracks_to_generate = []
-        already_generated = 0
+        # Convert to list of tuples
+        items = [(track["id"], track["filepath"]) for track in tracks]
 
-        import os
-
-        for track in tracks:
+        def needs_waveform(track_id: int, filepath: str) -> bool:
+            """Check if track needs waveform generation."""
             cached = self.context.database.conn.execute(
-                "SELECT track_id FROM waveform_cache WHERE track_id = ?", (track["id"],)
+                "SELECT track_id FROM waveform_cache WHERE track_id = ?", (track_id,)
             ).fetchone()
-
-            filename = os.path.basename(track["filepath"])
-
-            if not cached:
-                tracks_to_generate.append((track["id"], track["filepath"]))
-                logging.info(f"  Track {track['id']}: {filename} - NEEDS WAVEFORM")
-            else:
-                already_generated += 1
-                logging.info(f"  Track {track['id']}: {filename} - already has waveform")
-
-        logging.info(
-            f"[Batch Waveform] Status: {already_generated} already done, {len(tracks_to_generate)} to generate (total: {len(tracks)})"
-        )
-
-        if not tracks_to_generate:
-            logging.info("[Batch Waveform] All tracks already have waveforms")
-            self.context.emit(Events.STATUS_MESSAGE, message="All waveforms generated", color="#00FF00")
-            return
-
-        # Create batch processor
-        from jukebox.core.batch_processor import BatchProcessor
+            return not cached
 
         def worker_factory(item: tuple[int, str]) -> QThread:
             """Create a complete waveform worker for a track."""
@@ -185,20 +157,17 @@ class WaveformVisualizerPlugin:
             worker.progress_update.connect(self._on_waveform_progress)
             return worker
 
-        WaveformVisualizerPlugin._batch_processor = BatchProcessor(
+        start_batch_processing(
             name="Waveform Generation",
-            worker_factory=worker_factory,
+            batch_processor_holder=WaveformVisualizerPlugin,
             context=self.context,
+            items=items,
+            needs_processing_fn=needs_waveform,
+            worker_factory=worker_factory,
+            on_complete=self._on_batch_waveform_complete,
+            on_error=self._on_batch_waveform_error,
+            no_work_message="All waveforms generated",
         )
-
-        # Connect signals
-        WaveformVisualizerPlugin._batch_processor.item_complete.connect(
-            self._on_batch_waveform_complete
-        )
-        WaveformVisualizerPlugin._batch_processor.item_error.connect(self._on_batch_waveform_error)
-
-        # Start batch processing
-        WaveformVisualizerPlugin._batch_processor.start(tracks_to_generate)
 
     def _on_waveform_progress(self, track_id: int, partial_waveform: dict[str, Any]) -> None:
         """Handle progressive waveform updates during generation."""

@@ -136,6 +136,7 @@ class GenreStyler(Styler):
     def _is_valid_genre(self, genre: str) -> bool:
         """Check if genre matches the expected pattern."""
         import re
+
         return bool(re.match(self.GENRE_PATTERN, genre))
 
     def display(self, data: Any, track: dict[str, Any]) -> str:

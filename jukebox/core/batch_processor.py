@@ -306,7 +306,9 @@ class BatchProcessor(QObject):
                         try:
                             signal_obj.disconnect()
                         except (RuntimeWarning, RuntimeError, TypeError) as e:
-                            logging.debug(f"[{self.name}] Could not disconnect {signal_name_str}: {e}")
+                            logging.debug(
+                                f"[{self.name}] Could not disconnect {signal_name_str}: {e}"
+                            )
         except Exception as e:
             logging.warning(f"[{self.name}] Error during signal cleanup: {e}", exc_info=True)
             # Fallback: try known custom signals

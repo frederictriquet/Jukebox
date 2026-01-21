@@ -5,9 +5,10 @@ import re
 from typing import Any
 
 from jukebox.core.event_bus import Events
+from jukebox.core.shortcut_mixin import ShortcutMixin
 
 
-class GenreEditorPlugin:
+class GenreEditorPlugin(ShortcutMixin):
     """Edit genre using keyboard shortcuts for code toggles."""
 
     name = "genre_editor"
@@ -20,8 +21,7 @@ class GenreEditorPlugin:
         self.context: Any = None
         self.current_track_id: int | None = None
         self.current_genre: str = ""
-        self.shortcuts: list[Any] = []  # Keep references to shortcuts
-        self.shortcut_manager: Any = None
+        self._init_shortcut_mixin()
 
     def initialize(self, context: Any) -> None:
         """Initialize plugin."""
@@ -36,17 +36,8 @@ class GenreEditorPlugin:
         """Register UI (just keyboard shortcuts)."""
         pass
 
-    def register_shortcuts(self, shortcut_manager: Any) -> None:
+    def _register_plugin_shortcuts(self) -> None:
         """Register genre code shortcuts."""
-        # Store reference to shortcut manager for later reloading
-        self.shortcut_manager = shortcut_manager
-        self._register_all_shortcuts()
-
-    def _register_all_shortcuts(self) -> None:
-        """Register all shortcuts from config."""
-        if not self.shortcut_manager:
-            return
-
         # Get genre codes from config
         genre_config = self.context.config.genre_editor
 
@@ -88,25 +79,7 @@ class GenreEditorPlugin:
         else:
             self.current_genre = ""
 
-    def _on_settings_changed(self) -> None:
-        """Reload shortcuts when settings change."""
-        logging.info("[Genre Editor] Reloading shortcuts after settings change")
-
-        # Unregister all current shortcuts
-        for shortcut in self.shortcuts:
-            if hasattr(shortcut, "key"):
-                key_seq = shortcut.key().toString()
-                if self.shortcut_manager:
-                    self.shortcut_manager.unregister(key_seq)
-        self.shortcuts.clear()
-
-        # Reload config from database
-        self._reload_config_from_db()
-
-        # Re-register shortcuts with new config
-        self._register_all_shortcuts()
-
-    def _reload_config_from_db(self) -> None:
+    def _reload_plugin_config(self) -> None:
         """Reload genre_editor config from database."""
         db = self.context.database
 
@@ -223,59 +196,25 @@ class GenreEditorPlugin:
         self.context.emit(Events.TRACK_METADATA_UPDATED, filepath=Path(filepath))
 
         # Update file tags
-        try:
-            from mutagen import File
-            from mutagen.easyid3 import EasyID3
-            from mutagen.id3 import ID3NoHeaderError
+        from jukebox.utils.tag_writer import save_audio_tags
 
-            if filepath.lower().endswith(".mp3"):
-                # Use EasyID3 for MP3
-                try:
-                    audio = EasyID3(filepath)
-                except ID3NoHeaderError:
-                    audio = File(filepath, easy=True)
-                    audio.add_tags()
-
-                if new_genre:
-                    audio["genre"] = [new_genre]
-                elif "genre" in audio:
-                    del audio["genre"]
-
-                audio.save()
-            else:
-                # Use generic mutagen for other formats
-                audio = File(filepath)
-                if audio is None:
-                    logging.warning(f"Unsupported file format: {filepath}")
-                    return
-
-                if new_genre:
-                    audio["genre"] = [new_genre]
-                elif "genre" in audio:
-                    del audio["genre"]
-
-                audio.save()
-
+        success = save_audio_tags(filepath, {"genre": new_genre})
+        if success:
             logging.info(f"Saved genre '{new_genre}' for track {self.current_track_id}")
-
-        except Exception as e:
-            logging.error(f"Failed to save genre to file: {e}")
+        else:
+            logging.error(f"Failed to save genre to file: {filepath}")
 
         # Note: We don't emit TRACKS_ADDED here to avoid reloading the entire track list
         # The track list display will update on next full reload
 
     def activate(self, mode: str) -> None:
         """Activate plugin for this mode."""
-        # Enable all shortcuts
-        for shortcut in self.shortcuts:
-            shortcut.setEnabled(True)
+        self._activate_shortcuts()
         logging.debug(f"[Genre Editor] Activated for {mode} mode")
 
     def deactivate(self, mode: str) -> None:
         """Deactivate plugin for this mode."""
-        # Disable all shortcuts
-        for shortcut in self.shortcuts:
-            shortcut.setEnabled(False)
+        self._deactivate_shortcuts()
         logging.debug(f"[Genre Editor] Deactivated for {mode} mode")
 
     def shutdown(self) -> None:

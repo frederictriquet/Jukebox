@@ -195,60 +195,13 @@ class MetadataEditorPlugin:
         self.context.database.conn.commit()
 
         # Update file tags
-        try:
-            from mutagen import File
-            from mutagen.easyid3 import EasyID3
-            from mutagen.id3 import ID3NoHeaderError
+        from jukebox.utils.tag_writer import save_audio_tags
 
-            # Try to determine file format
-            if filepath.lower().endswith(".mp3"):
-                # Use EasyID3 for MP3
-                try:
-                    audio = EasyID3(filepath)
-                except ID3NoHeaderError:
-                    # No ID3 tag exists, create one
-                    audio = File(filepath, easy=True)
-                    audio.add_tags()
-
-                # Map our tag names to EasyID3 keys
-                tag_mapping = {
-                    "artist": "artist",
-                    "title": "title",
-                    "album": "album",
-                    "albumartist": "albumartist",
-                    "genre": "genre",
-                    "date": "date",
-                }
-
-                for our_tag, value in sanitized_values.items():
-                    easy_tag = tag_mapping.get(our_tag, our_tag)
-                    if value:
-                        audio[easy_tag] = [value]  # EasyID3 expects lists
-                    elif easy_tag in audio:
-                        del audio[easy_tag]
-
-                audio.save()
-
-            else:
-                # Use generic mutagen for FLAC, AIFF, WAV, etc.
-                audio = File(filepath)
-                if audio is None:
-                    logging.warning(f"Unsupported file format: {filepath}")
-                    return
-
-                # For non-MP3, use lowercase tags
-                for tag_name, value in sanitized_values.items():
-                    if value:
-                        audio[tag_name.lower()] = [value]
-                    elif tag_name.lower() in audio:
-                        del audio[tag_name.lower()]
-
-                audio.save()
-
+        success = save_audio_tags(filepath, sanitized_values)
+        if success:
             logging.info(f"Saved metadata for track {self.current_track_id}")
-
-        except Exception as e:
-            logging.error(f"Failed to save file tags: {e}")
+        else:
+            logging.error(f"Failed to save file tags: {filepath}")
 
         # Note: We don't emit TRACKS_ADDED here to avoid reloading the entire track list
         # The track list display will update on next full reload
