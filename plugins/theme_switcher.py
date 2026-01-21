@@ -1,9 +1,18 @@
 """Theme switcher plugin."""
 
+from __future__ import annotations
+
 import logging
-from typing import Any
+from typing import TYPE_CHECKING
 
 from jukebox.ui.theme_manager import ThemeManager
+
+if TYPE_CHECKING:
+    from jukebox.core.protocols import (
+        PluginContextProtocol,
+        ShortcutManagerProtocol,
+        UIBuilderProtocol,
+    )
 
 
 class ThemeSwitcherPlugin:
@@ -15,17 +24,17 @@ class ThemeSwitcherPlugin:
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: Any = None
+        self.context: PluginContextProtocol | None = None
         self.current_theme: str = "dark"
 
-    def initialize(self, context: Any) -> None:
+    def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
         self.context = context
         self.current_theme = context.config.ui.theme
         # Apply initial theme from config
         ThemeManager.apply_theme(self.current_theme)
 
-    def register_ui(self, ui_builder: Any) -> None:
+    def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register theme switcher in menu."""
         menu = ui_builder.get_or_create_menu("&View")
         ui_builder.add_menu_action(menu, "Dark Theme", lambda: self._switch_theme("dark"))
@@ -33,7 +42,7 @@ class ThemeSwitcherPlugin:
         ui_builder.add_menu_separator(menu)
         ui_builder.add_menu_action(menu, "Toggle Theme", self._toggle_theme, shortcut="Ctrl+T")
 
-    def register_shortcuts(self, shortcut_manager: Any) -> None:
+    def register_shortcuts(self, shortcut_manager: ShortcutManagerProtocol) -> None:
         """Register keyboard shortcuts."""
         # Ctrl+T is already registered via menu action
         pass

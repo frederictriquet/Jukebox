@@ -1,12 +1,17 @@
 """Loop player plugin for repeating a section of a track."""
 
+from __future__ import annotations
+
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QPushButton
 
 from jukebox.core.event_bus import Events
+
+if TYPE_CHECKING:
+    from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
 
 
 class LoopPlayerPlugin:
@@ -19,7 +24,7 @@ class LoopPlayerPlugin:
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: Any = None
+        self.context: PluginContextProtocol | None = None
         self.loop_button: QPushButton | None = None
         self.loop_active: bool = False
         self.loop_start: float = 0.0  # Position in seconds
@@ -28,7 +33,7 @@ class LoopPlayerPlugin:
         self.waveform_widget: Any = None
         self.loop_region: Any = None  # pyqtgraph LinearRegionItem
 
-    def initialize(self, context: Any) -> None:
+    def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
         self.context = context
 
@@ -46,7 +51,7 @@ class LoopPlayerPlugin:
         self.position_timer.setInterval(50)  # Check every 50ms
         self.position_timer.timeout.connect(self._check_position)
 
-    def register_ui(self, ui_builder: Any) -> None:
+    def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register loop button in player controls."""
         main_window = self.context.app
         controls = main_window.controls

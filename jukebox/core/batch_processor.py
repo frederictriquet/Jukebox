@@ -5,9 +5,12 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, QThread, QTimer, Signal
 
 from jukebox.core.event_bus import Events
+
+# Cleanup interval for orphan workers (in milliseconds)
+ORPHAN_CLEANUP_INTERVAL_MS = 30_000  # 30 seconds
 
 
 class BatchProcessor(QObject):
@@ -32,8 +35,42 @@ class BatchProcessor(QObject):
         processor.start(items_to_process)
     """
 
-    # Class variable to keep orphan workers alive across all instances
+    # Class variables for orphan worker management
     _global_orphan_workers: list[QThread] = []
+    _cleanup_timer: QTimer | None = None
+
+    @classmethod
+    def _start_cleanup_timer(cls) -> None:
+        """Start the periodic cleanup timer if not already running."""
+        if cls._cleanup_timer is None:
+            cls._cleanup_timer = QTimer()
+            cls._cleanup_timer.timeout.connect(cls._cleanup_orphan_workers)
+        if not cls._cleanup_timer.isActive():
+            cls._cleanup_timer.start(ORPHAN_CLEANUP_INTERVAL_MS)
+            logging.debug("[BatchProcessor] Started orphan worker cleanup timer")
+
+    @classmethod
+    def _cleanup_orphan_workers(cls) -> None:
+        """Remove finished workers from the orphan list.
+
+        Stops the timer when no orphans remain to avoid unnecessary polling.
+        """
+        before_count = len(cls._global_orphan_workers)
+        cls._global_orphan_workers = [
+            w for w in cls._global_orphan_workers if w.isRunning()
+        ]
+        after_count = len(cls._global_orphan_workers)
+
+        if before_count != after_count:
+            logging.debug(
+                f"[BatchProcessor] Cleaned up {before_count - after_count} "
+                f"finished orphan workers ({after_count} remaining)"
+            )
+
+        # Stop timer if no orphans remain
+        if after_count == 0 and cls._cleanup_timer is not None:
+            cls._cleanup_timer.stop()
+            logging.debug("[BatchProcessor] Stopped orphan worker cleanup timer (no orphans)")
 
     # Signals
     progress = Signal(int, int, object)  # current, total, current_item
@@ -326,10 +363,8 @@ class BatchProcessor(QObject):
         self.current_worker.setParent(None)
         BatchProcessor._global_orphan_workers.append(self.current_worker)
 
-        # Cleanup finished orphans
-        BatchProcessor._global_orphan_workers = [
-            w for w in BatchProcessor._global_orphan_workers if w.isRunning()
-        ]
+        # Start periodic cleanup timer (will clean up finished workers)
+        BatchProcessor._start_cleanup_timer()
 
         self.current_worker = None
 

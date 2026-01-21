@@ -1,12 +1,17 @@
 """Genre editor plugin with custom code-based genre system."""
 
+from __future__ import annotations
+
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from jukebox.core.event_bus import Events
 from jukebox.core.shortcut_mixin import ShortcutMixin
+
+if TYPE_CHECKING:
+    from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
 
 
 class GenreEditorPlugin(ShortcutMixin):
@@ -19,12 +24,12 @@ class GenreEditorPlugin(ShortcutMixin):
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: Any = None
+        self.context: PluginContextProtocol | None = None
         self.current_track_id: int | None = None
         self.current_genre: str = ""
         self._init_shortcut_mixin()
 
-    def initialize(self, context: Any) -> None:
+    def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
         self.context = context
 
@@ -33,7 +38,7 @@ class GenreEditorPlugin(ShortcutMixin):
         # Subscribe to settings changes to reload shortcuts
         context.subscribe(Events.PLUGIN_SETTINGS_CHANGED, self._on_settings_changed)
 
-    def register_ui(self, ui_builder: Any) -> None:
+    def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register UI (just keyboard shortcuts)."""
         pass
 

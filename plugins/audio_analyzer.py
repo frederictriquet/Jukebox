@@ -1,14 +1,19 @@
 """Audio analysis plugin - extracts musical features."""
 
+from __future__ import annotations
+
 import logging
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from jukebox.core.event_bus import Events
+
+if TYPE_CHECKING:
+    from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
 
 # Whitelist of valid audio_analysis columns (prevents SQL injection)
 AUDIO_ANALYSIS_COLUMNS: frozenset[str] = frozenset([
@@ -238,11 +243,11 @@ class AudioAnalyzerPlugin:
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: Any = None
+        self.context: PluginContextProtocol | None = None
         self.analysis_widget: AnalysisWidget | None = None
         self.current_track_id: int | None = None
 
-    def initialize(self, context: Any) -> None:
+    def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
         self.context = context
 
@@ -252,8 +257,7 @@ class AudioAnalyzerPlugin:
         context.subscribe(Events.TRACK_LOADED, self._on_track_loaded)
         context.subscribe(Events.AUDIO_ANALYSIS_COMPLETE, self._on_analysis_complete)
 
-
-    def register_ui(self, ui_builder: Any) -> None:
+    def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register analysis widget."""
         self.analysis_widget = AnalysisWidget()
         ui_builder.add_bottom_widget(self.analysis_widget)

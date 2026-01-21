@@ -1,10 +1,23 @@
 """Plugin management system."""
 
+from __future__ import annotations
+
 import importlib
 import inspect
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from jukebox.core.protocols import (
+        AudioPlayerProtocol,
+        DatabaseProtocol,
+        EventBusProtocol,
+        JukeboxConfigProtocol,
+        PluginContextProtocol,
+        UIBuilderProtocol,
+    )
 
 
 class JukeboxPlugin(Protocol):
@@ -15,11 +28,11 @@ class JukeboxPlugin(Protocol):
     description: str
     modes: list[str]  # Modes where this plugin is active (default: all modes)
 
-    def initialize(self, context: Any) -> None:
+    def initialize(self, context: PluginContextProtocol) -> None:
         """Called when plugin is loaded (once at startup)."""
         ...
 
-    def register_ui(self, ui_builder: Any) -> None:
+    def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register UI elements (once at startup)."""
         ...
 
@@ -37,23 +50,34 @@ class JukeboxPlugin(Protocol):
 
 
 class PluginContext:
-    """Context provided to plugins."""
+    """Context provided to plugins.
 
-    def __init__(self, app: Any):
-        """Initialize context."""
+    Provides typed access to application services:
+        - database: Database operations (tracks, waveforms, analysis, settings)
+        - player: Audio playback control
+        - config: Application configuration
+        - event_bus: Event pub/sub system
+    """
+
+    def __init__(self, app: Any) -> None:
+        """Initialize context.
+
+        Args:
+            app: Application instance (MainWindow)
+        """
         self.app = app
-        self.database = app.database
-        self.player = app.player
-        self.config = app.config
-        self.event_bus = getattr(app, "event_bus", None)
+        self.database: DatabaseProtocol = app.database
+        self.player: AudioPlayerProtocol = app.player
+        self.config: JukeboxConfigProtocol = app.config
+        self.event_bus: EventBusProtocol | None = getattr(app, "event_bus", None)
 
     def emit(self, event: str, **data: Any) -> None:
-        """Emit event."""
+        """Emit an event to all subscribers."""
         if self.event_bus:
             self.event_bus.emit(event, **data)
 
-    def subscribe(self, event: str, callback: Any) -> None:
-        """Subscribe to event."""
+    def subscribe(self, event: str, callback: Callable[..., None]) -> None:
+        """Subscribe to an event."""
         if self.event_bus:
             self.event_bus.subscribe(event, callback)
 

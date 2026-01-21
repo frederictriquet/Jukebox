@@ -1,10 +1,15 @@
 """Status bar plugin - displays status messages from other plugins."""
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QLabel, QStatusBar
 
 from jukebox.core.event_bus import Events
+
+if TYPE_CHECKING:
+    from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
 
 
 class StatusBarPlugin:
@@ -21,16 +26,16 @@ class StatusBarPlugin:
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: Any = None
+        self.context: PluginContextProtocol | None = None
 
-    def initialize(self, context: Any) -> None:
+    def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
         self.context = context
 
         # Subscribe to status events
         context.subscribe(Events.STATUS_MESSAGE, self._on_status_message)
 
-    def register_ui(self, ui_builder: Any) -> None:
+    def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register status bar."""
         # Use Qt's built-in status bar (always at bottom, visible in all modes)
         StatusBarPlugin._status_bar = QStatusBar()

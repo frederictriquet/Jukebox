@@ -124,10 +124,11 @@ class TrackListModel(QAbstractTableModel):
 
         if waveform_cache:
             import logging
-            import pickle
+
+            from jukebox.utils.waveform_serializer import deserialize_waveform
 
             try:
-                waveform = pickle.loads(waveform_cache["waveform_data"])
+                waveform = deserialize_waveform(waveform_cache["waveform_data"])
                 # Update track data
                 self.tracks[row]["waveform_data"] = waveform
 
@@ -140,7 +141,7 @@ class TrackListModel(QAbstractTableModel):
                 # Emit dataChanged to refresh the waveform column only
                 waveform_index = self.index(row, 0)  # Waveform is column 0
                 self.dataChanged.emit(waveform_index, waveform_index, [])
-            except Exception as e:
+            except (ValueError, Exception) as e:
                 logging.error(
                     f"[TrackListModel] Failed to update waveform for {filepath}: {e}", exc_info=True
                 )
@@ -290,11 +291,12 @@ class TrackListModel(QAbstractTableModel):
 
                 if waveform_cache:
                     import logging
-                    import pickle
+
+                    from jukebox.utils.waveform_serializer import deserialize_waveform
 
                     try:
-                        waveform = pickle.loads(waveform_cache["waveform_data"])
-                    except Exception as e:
+                        waveform = deserialize_waveform(waveform_cache["waveform_data"])
+                    except (ValueError, Exception) as e:
                         logging.error(
                             f"[TrackListModel] Failed to load waveform for {filepath}: {e}",
                             exc_info=True,

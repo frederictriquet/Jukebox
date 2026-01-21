@@ -1,8 +1,17 @@
 """Playback navigation plugin with keyboard shortcuts."""
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from jukebox.core.event_bus import Events
+
+if TYPE_CHECKING:
+    from jukebox.core.protocols import (
+        PluginContextProtocol,
+        ShortcutManagerProtocol,
+        UIBuilderProtocol,
+    )
 
 
 class PlaybackNavigationPlugin:
@@ -14,7 +23,7 @@ class PlaybackNavigationPlugin:
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: Any = None
+        self.context: PluginContextProtocol | None = None
         self.last_seek_time: float = 0.0
         self.seek_multiplier: int = 1
         self.auto_play_next: bool = True
@@ -24,14 +33,14 @@ class PlaybackNavigationPlugin:
         self.auto_play_button: Any = None
         self.random_button: Any = None
 
-    def initialize(self, context: Any) -> None:
+    def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
         self.context = context
 
         # Subscribe to track finished event
         context.player.track_finished.connect(self._on_track_finished)
 
-    def register_ui(self, ui_builder: Any) -> None:
+    def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register auto-play and random mode menu and buttons."""
         # Add menu options
         menu = ui_builder.add_menu("&Playback")
@@ -79,7 +88,7 @@ class PlaybackNavigationPlugin:
             ui_builder.insert_widget_in_layout(layout, 3, self.auto_play_button)
             ui_builder.insert_widget_in_layout(layout, 4, self.random_button)
 
-    def register_shortcuts(self, shortcut_manager: Any) -> None:
+    def register_shortcuts(self, shortcut_manager: ShortcutManagerProtocol) -> None:
         """Register keyboard shortcuts."""
         shortcuts = self.context.config.shortcuts
 

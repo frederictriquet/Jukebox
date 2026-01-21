@@ -1,11 +1,20 @@
 """Track info display plugin."""
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from jukebox.core.event_bus import Events
+
+if TYPE_CHECKING:
+    from jukebox.core.protocols import (
+        PluginContextProtocol,
+        ShortcutManagerProtocol,
+        UIBuilderProtocol,
+    )
 
 
 class TrackInfoPlugin:
@@ -17,10 +26,10 @@ class TrackInfoPlugin:
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: Any = None
+        self.context: PluginContextProtocol | None = None
         self.info_widget: TrackInfoWidget | None = None
 
-    def initialize(self, context: Any) -> None:
+    def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
         self.context = context
 
@@ -28,7 +37,7 @@ class TrackInfoPlugin:
         context.subscribe(Events.TRACK_LOADED, self._on_track_loaded)
         context.subscribe(Events.POSITION_UPDATE, self._on_position_update)
 
-    def register_ui(self, ui_builder: Any) -> None:
+    def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register track info widget."""
         self.info_widget = TrackInfoWidget()
 
@@ -87,7 +96,7 @@ class TrackInfoPlugin:
         else:
             return f"{bytes_size / (1024 * 1024):.1f}MB"
 
-    def register_shortcuts(self, shortcut_manager: Any) -> None:
+    def register_shortcuts(self, shortcut_manager: ShortcutManagerProtocol) -> None:
         """Register keyboard shortcuts."""
         pass
 

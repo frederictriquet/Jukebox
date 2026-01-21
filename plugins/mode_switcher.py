@@ -1,10 +1,19 @@
 """Mode switcher plugin for jukebox vs curating modes."""
 
+from __future__ import annotations
+
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from jukebox.core.event_bus import Events
 from jukebox.core.mode_manager import AppMode, ModeManager
+
+if TYPE_CHECKING:
+    from jukebox.core.protocols import (
+        PluginContextProtocol,
+        ShortcutManagerProtocol,
+        UIBuilderProtocol,
+    )
 
 
 class ModeSwitcherPlugin:
@@ -17,12 +26,12 @@ class ModeSwitcherPlugin:
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: Any = None
+        self.context: PluginContextProtocol | None = None
         self.mode_manager: ModeManager | None = None
         self.jukebox_action: Any = None
         self.curating_action: Any = None
 
-    def initialize(self, context: Any) -> None:
+    def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
         self.context = context
 
@@ -36,7 +45,7 @@ class ModeSwitcherPlugin:
         # Connect to mode changes
         self.mode_manager.mode_changed.connect(self._on_mode_changed)
 
-    def register_ui(self, ui_builder: Any) -> None:
+    def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register mode switcher in menu."""
         menu = ui_builder.get_or_create_menu("&Settings")
 
@@ -137,7 +146,7 @@ class ModeSwitcherPlugin:
 
             QTimer.singleShot(50, overlay.deleteLater)
 
-    def register_shortcuts(self, shortcut_manager: Any) -> None:
+    def register_shortcuts(self, shortcut_manager: ShortcutManagerProtocol) -> None:
         """Register keyboard shortcuts."""
         # Ctrl+M is already registered via menu action
         pass

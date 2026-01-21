@@ -28,6 +28,15 @@ class BaseRepository:
             raise RuntimeError("Database not connected")
         return self._db.conn
 
+    def _commit(self) -> None:
+        """Commit if not inside a transaction.
+
+        When inside a database.transaction() block, commits are deferred
+        to the transaction manager.
+        """
+        if not self._db._in_transaction:
+            self._conn.commit()
+
 
 class TrackRepository(BaseRepository):
     """Repository for track operations."""
@@ -68,7 +77,7 @@ class TrackRepository(BaseRepository):
                 mode,
             ),
         )
-        self._conn.commit()
+        self._commit()
         return int(cursor.lastrowid) if cursor.lastrowid is not None else 0
 
     def search(
@@ -172,7 +181,7 @@ class TrackRepository(BaseRepository):
             True if deleted, False if track not found
         """
         cursor = self._conn.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
-        self._conn.commit()
+        self._commit()
         return cursor.rowcount > 0
 
     def delete_by_filepath(self, filepath: str | Path) -> bool:
@@ -187,7 +196,7 @@ class TrackRepository(BaseRepository):
         cursor = self._conn.execute(
             "DELETE FROM tracks WHERE filepath = ?", (str(filepath),)
         )
-        self._conn.commit()
+        self._commit()
         return cursor.rowcount > 0
 
     def update_metadata(self, track_id: int, metadata: dict[str, Any]) -> bool:
@@ -218,7 +227,7 @@ class TrackRepository(BaseRepository):
         cursor = self._conn.execute(
             f"UPDATE tracks SET {set_clause} WHERE id = ?", values
         )
-        self._conn.commit()
+        self._commit()
         return cursor.rowcount > 0
 
     def update_filepath(
@@ -242,7 +251,7 @@ class TrackRepository(BaseRepository):
             "UPDATE tracks SET filepath = ?, filename = ? WHERE id = ?",
             (new_filepath_str, new_filename, track_id),
         )
-        self._conn.commit()
+        self._commit()
         return cursor.rowcount > 0
 
     def update_mode(self, track_id: int, mode: str) -> bool:
@@ -259,7 +268,7 @@ class TrackRepository(BaseRepository):
             "UPDATE tracks SET mode = ? WHERE id = ?",
             (mode, track_id),
         )
-        self._conn.commit()
+        self._commit()
         return cursor.rowcount > 0
 
     def record_play(self, track_id: int, duration: float, completed: bool) -> None:
@@ -287,7 +296,7 @@ class TrackRepository(BaseRepository):
             (track_id,),
         )
 
-        self._conn.commit()
+        self._commit()
 
 
 class WaveformRepository(BaseRepository):
@@ -323,7 +332,7 @@ class WaveformRepository(BaseRepository):
             """,
             (track_id, waveform_data),
         )
-        self._conn.commit()
+        self._commit()
 
     def get_tracks_without_waveform(
         self, mode: str | None = None, limit: int | None = None
@@ -405,7 +414,7 @@ class AnalysisRepository(BaseRepository):
                 values,
             )
 
-        self._conn.commit()
+        self._commit()
 
     def exists(self, track_id: int) -> bool:
         """Check if a track has audio analysis.
@@ -490,4 +499,4 @@ class PluginSettingsRepository(BaseRepository):
             """,
             (plugin_name, key, value),
         )
-        self._conn.commit()
+        self._commit()

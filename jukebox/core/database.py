@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -36,6 +38,7 @@ class Database:
         """
         self.db_path = db_path
         self.conn: sqlite3.Connection | None = None
+        self._in_transaction: bool = False
         # Repositories (lazy initialized after connect)
         self._tracks: TrackRepository | None = None
         self._waveforms: WaveformRepository | None = None
@@ -82,6 +85,41 @@ class Database:
             from jukebox.core.repositories import PluginSettingsRepository
             self._settings = PluginSettingsRepository(self)
         return self._settings
+
+    # ========== Transaction Management ==========
+
+    @contextmanager
+    def transaction(self) -> Generator[None, None, None]:
+        """Context manager for database transactions.
+
+        Provides atomic operations with automatic commit on success
+        or rollback on failure. Repository methods will skip their
+        individual commits while inside a transaction.
+
+        Usage:
+            with database.transaction():
+                database.tracks.add(track1)
+                database.tracks.add(track2)
+                database.waveforms.save(track_id, data)
+            # All operations committed, or all rolled back on error
+
+        Raises:
+            RuntimeError: If database not connected
+        """
+        if self.conn is None:
+            raise RuntimeError("Database not connected")
+
+        self._in_transaction = True
+        try:
+            # SQLite auto-commits by default, so we start a transaction explicitly
+            self.conn.execute("BEGIN")
+            yield
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+        finally:
+            self._in_transaction = False
 
     # ========== Schema Management ==========
 

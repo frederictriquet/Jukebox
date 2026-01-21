@@ -1,8 +1,10 @@
 """Configuration manager plugin - UI for managing plugin settings."""
 
+from __future__ import annotations
+
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent, QKeySequence
@@ -24,6 +26,13 @@ from PySide6.QtWidgets import (
 
 from jukebox.core.event_bus import Events
 
+if TYPE_CHECKING:
+    from jukebox.core.protocols import (
+        PluginContextProtocol,
+        ShortcutManagerProtocol,
+        UIBuilderProtocol,
+    )
+
 
 class ConfManagerPlugin:
     """Plugin configuration manager with GUI."""
@@ -35,20 +44,20 @@ class ConfManagerPlugin:
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: Any = None
+        self.context: PluginContextProtocol | None = None
         self.conf_dialog: ConfigDialog | None = None
 
-    def initialize(self, context: Any) -> None:
+    def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
         self.context = context
 
-    def register_ui(self, ui_builder: Any) -> None:
+    def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register configuration menu."""
         # Add menu item
         menu = ui_builder.get_or_create_menu("&Settings")
         ui_builder.add_menu_action(menu, "Plugin &Configuration...", self._show_config_dialog)
 
-    def register_shortcuts(self, shortcut_manager: Any) -> None:
+    def register_shortcuts(self, shortcut_manager: ShortcutManagerProtocol) -> None:
         """No shortcuts for this plugin."""
         pass
 
@@ -273,7 +282,7 @@ class ShortcutInput(QLineEdit):
 class ConfigDialog(QDialog):
     """Configuration dialog for plugins."""
 
-    def __init__(self, context: Any):
+    def __init__(self, context: PluginContextProtocol):
         """Initialize dialog."""
         super().__init__()
         self.context = context

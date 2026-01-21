@@ -1,7 +1,12 @@
 """Recommendations plugin."""
 
+from __future__ import annotations
+
 import random
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
 
 
 class RecommendationsPlugin:
@@ -13,13 +18,13 @@ class RecommendationsPlugin:
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: Any = None
+        self.context: PluginContextProtocol | None = None
 
-    def initialize(self, context: Any) -> None:
+    def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
         self.context = context
 
-    def register_ui(self, ui_builder: Any) -> None:
+    def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register UI."""
         menu = ui_builder.get_or_create_menu("&Library")
         ui_builder.add_menu_action(menu, "Recommendations...", self._show_recommendations)

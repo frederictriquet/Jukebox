@@ -1,7 +1,9 @@
 """Waveform visualizer plugin."""
 
+from __future__ import annotations
+
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pyqtgraph as pg
@@ -9,6 +11,9 @@ from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from jukebox.core.event_bus import Events
+
+if TYPE_CHECKING:
+    from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
 
 
 class WaveformVisualizerPlugin:
@@ -24,11 +29,11 @@ class WaveformVisualizerPlugin:
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: Any = None
+        self.context: PluginContextProtocol | None = None
         self.waveform_widget: WaveformWidget | None = None
         self.current_track_id: int | None = None  # Currently displayed track
 
-    def initialize(self, context: Any) -> None:
+    def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
         self.context = context
 
@@ -53,7 +58,7 @@ class WaveformVisualizerPlugin:
             self.waveform_widget.clear_waveform()
         self.current_track_id = None
 
-    def register_ui(self, ui_builder: Any) -> None:
+    def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Add waveform widget."""
         waveform_config = self.context.config.waveform
         self.waveform_widget = WaveformWidget(waveform_config)

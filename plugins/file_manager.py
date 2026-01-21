@@ -1,14 +1,19 @@
 """File manager plugin for moving/renaming/deleting tracks."""
 
+from __future__ import annotations
+
 import logging
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtWidgets import QPushButton
 
 from jukebox.core.event_bus import Events
 from jukebox.core.shortcut_mixin import ShortcutMixin
+
+if TYPE_CHECKING:
+    from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
 
 
 class FileManagerPlugin(ShortcutMixin):
@@ -21,13 +26,13 @@ class FileManagerPlugin(ShortcutMixin):
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: Any = None
+        self.context: PluginContextProtocol | None = None
         self.current_track_id: int | None = None
         self.current_filepath: Path | None = None
         self.remove_button: QPushButton | None = None
         self._init_shortcut_mixin()
 
-    def initialize(self, context: Any) -> None:
+    def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
         self.context = context
 
@@ -36,7 +41,7 @@ class FileManagerPlugin(ShortcutMixin):
         # Subscribe to settings changes to reload shortcuts
         context.subscribe(Events.PLUGIN_SETTINGS_CHANGED, self._on_settings_changed)
 
-    def register_ui(self, ui_builder: Any) -> None:
+    def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register UI elements."""
         main_window = self.context.app
         controls = main_window.controls

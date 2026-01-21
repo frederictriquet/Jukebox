@@ -1,10 +1,15 @@
 """Metadata editor plugin."""
 
+from __future__ import annotations
+
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import QGridLayout, QLabel, QLineEdit, QWidget
+
+if TYPE_CHECKING:
+    from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
 
 
 class TabEventFilter(QObject):
@@ -76,12 +81,12 @@ class MetadataEditorPlugin:
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: Any = None
+        self.context: PluginContextProtocol | None = None
         self.editor_widget: MetadataEditorWidget | None = None
         self.tab_event_filter: TabEventFilter | None = None
         self.current_track_id: int | None = None
 
-    def initialize(self, context: Any) -> None:
+    def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
         self.context = context
 
@@ -90,7 +95,7 @@ class MetadataEditorPlugin:
 
         context.subscribe(Events.TRACK_LOADED, self._on_track_loaded)
 
-    def register_ui(self, ui_builder: Any) -> None:
+    def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register metadata editor widget."""
         # Get field configuration
         field_configs = self.context.config.metadata_editor.fields

@@ -1,10 +1,15 @@
 """File curator plugin for organizing music files."""
 
+from __future__ import annotations
+
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QDialog, QLabel, QPushButton, QVBoxLayout
+
+if TYPE_CHECKING:
+    from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
 
 
 class FileCuratorPlugin:
@@ -16,13 +21,13 @@ class FileCuratorPlugin:
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: Any = None
+        self.context: PluginContextProtocol | None = None
 
-    def initialize(self, context: Any) -> None:
+    def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
         self.context = context
 
-    def register_ui(self, ui_builder: Any) -> None:
+    def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register UI."""
         menu = ui_builder.get_or_create_menu("&Tools")
         ui_builder.add_menu_action(menu, "Organize Files...", self._show_organizer)
@@ -89,7 +94,7 @@ class FileCuratorPlugin:
 class OrganizerDialog(QDialog):
     """Dialog for file organization."""
 
-    def __init__(self, context: Any):
+    def __init__(self, context: PluginContextProtocol):
         """Initialize dialog."""
         super().__init__()
         self.context = context
