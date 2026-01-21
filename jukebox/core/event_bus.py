@@ -45,12 +45,18 @@ class EventBus:
         logging.debug("Cleared all event subscribers")
 
     def emit(self, event: str, **data: Any) -> None:
-        """Emit event."""
+        """Emit event.
+
+        Note: Copies subscriber list before iteration to allow callbacks
+        to safely subscribe/unsubscribe during emission (same-thread safety).
+        Not thread-safe for concurrent access from multiple threads.
+        """
         if event not in self.subscribers:
             return
 
         logging.debug(f"Emitting event: {event}")
-        for callback in self.subscribers[event]:
+        # Copy list to allow safe modification during iteration
+        for callback in list(self.subscribers[event]):
             try:
                 callback(**data)
             except Exception as e:

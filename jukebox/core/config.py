@@ -22,6 +22,7 @@ class UIConfig(BaseModel):
     window_height: int = Field(ge=480, default=768)
     theme: str = "dark"
     mode: str = "jukebox"
+    waveform_cache_size: int = Field(ge=10, le=10000, default=500)
 
 
 class ShortcutsConfig(BaseModel):

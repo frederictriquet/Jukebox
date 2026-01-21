@@ -1,9 +1,41 @@
 """Cell renderer for track list columns."""
 
-from typing import Any
+from collections import OrderedDict
+from typing import Any, TypeVar
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPixmap
+
+K = TypeVar("K")
+V = TypeVar("V")
+
+
+class LRUCache(OrderedDict[K, V]):
+    """Simple LRU cache with maximum size limit."""
+
+    def __init__(self, maxsize: int = 500) -> None:
+        """Initialize LRU cache.
+
+        Args:
+            maxsize: Maximum number of items to store
+        """
+        super().__init__()
+        self.maxsize = maxsize
+
+    def get_item(self, key: K) -> V | None:
+        """Get item and move to end (most recently used)."""
+        if key in self:
+            self.move_to_end(key)
+            return self[key]
+        return None
+
+    def put(self, key: K, value: V) -> None:
+        """Add item and evict oldest if over capacity."""
+        if key in self:
+            self.move_to_end(key)
+        self[key] = value
+        if len(self) > self.maxsize:
+            self.popitem(last=False)  # Remove oldest (first) item
 
 
 class CellRenderer:
@@ -231,8 +263,19 @@ class DurationStyler(Styler):
 class WaveformStyler(Styler):
     """Styler for waveform column (mini waveform preview)."""
 
-    # Cache for rendered waveforms (avoid re-rendering on every paint)
-    _cache: dict[int, QPixmap] = {}
+    # LRU cache for rendered waveforms (configurable size via configure())
+    _cache: LRUCache[int, QPixmap] = LRUCache(maxsize=500)
+
+    @classmethod
+    def configure(cls, cache_size: int) -> None:
+        """Configure the waveform cache size.
+
+        Should be called once at startup before any waveforms are rendered.
+
+        Args:
+            cache_size: Maximum number of waveform pixmaps to cache
+        """
+        cls._cache = LRUCache(maxsize=cache_size)
 
     def display(self, data: Any, track: dict[str, Any]) -> str:
         """Display simple indicator if no waveform."""
@@ -254,8 +297,9 @@ class WaveformStyler(Styler):
 
         # Cache key based on filepath hash
         cache_key = hash(str(track.get("filepath")))
-        if cache_key in WaveformStyler._cache:
-            return WaveformStyler._cache[cache_key]
+        cached = WaveformStyler._cache.get_item(cache_key)
+        if cached is not None:
+            return cached
 
         # Create a mini waveform pixmap (200x16 for compact display)
         width, height = 200, 16
@@ -302,8 +346,8 @@ class WaveformStyler(Styler):
 
         painter.end()
 
-        # Cache the result
-        WaveformStyler._cache[cache_key] = pixmap
+        # Cache the result (LRU eviction if over capacity)
+        WaveformStyler._cache.put(cache_key, pixmap)
 
         return pixmap
 

@@ -26,6 +26,7 @@ from jukebox.core.plugin_manager import PluginContext, PluginManager
 from jukebox.core.shortcut_manager import ShortcutManager
 from jukebox.ui.components.player_controls import PlayerControls
 from jukebox.ui.components.search_bar import SearchBar
+from jukebox.ui.components.track_cell_renderer import WaveformStyler
 from jukebox.ui.components.track_list import TrackList
 from jukebox.ui.ui_builder import UIBuilder
 from jukebox.utils.metadata import MetadataExtractor
@@ -110,6 +111,9 @@ class MainWindow(QMainWindow):
         self.search_bar = SearchBar()
         self.search_bar.search_triggered.connect(self._perform_search)
         layout.addWidget(self.search_bar)
+
+        # Configure waveform cache size from config
+        WaveformStyler.configure(self.config.ui.waveform_cache_size)
 
         # Track list (with stretch to take all available space)
         self.track_list = TrackList(
