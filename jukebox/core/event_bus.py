@@ -106,6 +106,11 @@ class Events:
             kwargs: track_id (int) - Database ID of the track
         AUDIO_ANALYSIS_COMPLETE: Audio analysis finished for a track
             kwargs: track_id (int) - Database ID of the track
+
+    Capability Events (plugins declare their capabilities):
+        POSITION_SEEKING_PROVIDED: A plugin provides position seeking UI
+            kwargs: None
+            Note: MainWindow listens to this to avoid adding fallback slider
     """
 
     # Track events
@@ -134,3 +139,6 @@ class Events:
     PLUGIN_SETTINGS_CHANGED = "plugin_settings_changed"  # kwargs: None
     WAVEFORM_COMPLETE = "waveform_complete"  # kwargs: track_id (int)
     AUDIO_ANALYSIS_COMPLETE = "audio_analysis_complete"  # kwargs: track_id (int)
+
+    # Capability events (plugins declare their capabilities)
+    POSITION_SEEKING_PROVIDED = "position_seeking_provided"  # kwargs: None

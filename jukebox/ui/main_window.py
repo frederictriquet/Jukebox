@@ -66,14 +66,19 @@ class MainWindow(QMainWindow):
         self.event_bus.subscribe(Events.SELECT_RANDOM_TRACK, self._on_select_random_track)
         # Subscribe to track list manipulation events
         self.event_bus.subscribe(Events.LOAD_TRACK_LIST, self._on_load_track_list)
+        # Subscribe to capability events (plugins declare their capabilities)
+        self.event_bus.subscribe(
+            Events.POSITION_SEEKING_PROVIDED, self._on_position_seeking_provided
+        )
 
         # Timer for updating position
         self.position_timer = QTimer()
         self.position_timer.setInterval(100)
         self.position_timer.timeout.connect(self._update_position)
 
-        # Fallback position slider (if no waveform plugin)
+        # Fallback position slider (if no plugin provides position seeking)
         self.fallback_position_slider: Any = None
+        self._position_seeking_provided = False
 
         self._init_ui()
         self._connect_signals()
@@ -485,9 +490,8 @@ class MainWindow(QMainWindow):
             if hasattr(plugin, "register_shortcuts"):
                 plugin.register_shortcuts(self.shortcut_manager)
 
-        # Add fallback position slider if waveform plugin not loaded
-        waveform_loaded = "waveform_visualizer" in self.plugin_manager.plugins
-        if not waveform_loaded:
+        # Add fallback position slider if no plugin provides position seeking
+        if not self._position_seeking_provided:
             from PySide6.QtCore import Qt
 
             from jukebox.ui.components.clickable_slider import ClickableSlider
@@ -510,6 +514,14 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "mode_manager") or self.mode_manager is None:
             self.mode_manager = ModeManager(AppMode(self.config.ui.mode))
         self.mode_manager.mode_changed.connect(self._on_mode_changed)
+
+    def _on_position_seeking_provided(self) -> None:
+        """Handle POSITION_SEEKING_PROVIDED event.
+
+        Called when a plugin declares it provides position seeking capability.
+        This prevents MainWindow from adding a fallback position slider.
+        """
+        self._position_seeking_provided = True
 
     def _on_select_next_track(self) -> None:
         """Handle SELECT_NEXT_TRACK event."""
