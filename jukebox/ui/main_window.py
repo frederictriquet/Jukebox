@@ -117,7 +117,10 @@ class MainWindow(QMainWindow):
 
         # Track list (with stretch to take all available space)
         self.track_list = TrackList(
-            database=self.database, event_bus=self.event_bus, config=self.config
+            database=self.database,
+            event_bus=self.event_bus,
+            config=self.config,
+            mode=self.config.ui.mode,
         )
         layout.addWidget(self.track_list, stretch=1)
 

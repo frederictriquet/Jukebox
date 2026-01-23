@@ -33,17 +33,25 @@ class TrackListModel(QAbstractTableModel):
     # Signal emitted after a row is deleted (so others can safely query the model)
     row_deleted = Signal(int)  # deleted_row index (before deletion)
 
-    def __init__(self, database: Any = None, event_bus: Any = None, config: Any = None) -> None:
+    def __init__(
+        self,
+        database: Any = None,
+        event_bus: Any = None,
+        config: Any = None,
+        mode: str = "jukebox",
+    ) -> None:
         """Initialize model.
 
         Args:
             database: Database instance (for refreshing track data)
             event_bus: Event bus instance (for subscribing to updates)
             config: Config instance (for genre names)
+            mode: Application mode ("jukebox" or "curating")
         """
         super().__init__()
         self.tracks: list[dict[str, Any]] = []  # Full track data from database
         self.filepath_to_row: dict[Path, int] = {}  # Cache for fast lookup
+        self._mode = mode
 
         # Build genre names mapping from config
         genre_names = {}
@@ -51,7 +59,7 @@ class TrackListModel(QAbstractTableModel):
             for code_config in config.genre_editor.codes:
                 genre_names[code_config.code] = code_config.name
 
-        self.cell_renderer = CellRenderer(COLUMNS, genre_names)
+        self.cell_renderer = CellRenderer(COLUMNS, genre_names, mode)
         self.database = database
         self.event_bus = event_bus
 
@@ -345,6 +353,22 @@ class TrackListModel(QAbstractTableModel):
         """
         return self.filepath_to_row.get(filepath, -1)
 
+    def set_mode(self, mode: str) -> None:
+        """Update the display mode and refresh the view.
+
+        Args:
+            mode: Application mode ("jukebox" or "curating")
+        """
+        if mode != self._mode:
+            self._mode = mode
+            self.cell_renderer.set_mode(mode)
+            # Refresh filename column for all rows
+            if self.tracks:
+                filename_col = COLUMNS.index("filename")
+                top_left = self.index(0, filename_col)
+                bottom_right = self.index(len(self.tracks) - 1, filename_col)
+                self.dataChanged.emit(top_left, bottom_right, [])
+
 
 class TrackList(QTableView):
     """Widget for displaying audio tracks as a table."""
@@ -354,7 +378,12 @@ class TrackList(QTableView):
     files_dropped = Signal(list)  # List of Path objects (files and directories)
 
     def __init__(
-        self, parent: Any = None, database: Any = None, event_bus: Any = None, config: Any = None
+        self,
+        parent: Any = None,
+        database: Any = None,
+        event_bus: Any = None,
+        config: Any = None,
+        mode: str = "jukebox",
     ):
         """Initialize track list.
 
@@ -363,11 +392,12 @@ class TrackList(QTableView):
             database: Database instance (for refreshing data)
             event_bus: Event bus instance (for subscribing to updates)
             config: Config instance (for genre names)
+            mode: Application mode ("jukebox" or "curating")
         """
         super().__init__(parent)
 
         # Set model
-        model = TrackListModel(database, event_bus, config)
+        model = TrackListModel(database, event_bus, config, mode)
         self.setModel(model)
 
         # Table configuration
@@ -503,6 +533,16 @@ class TrackList(QTableView):
     def set_playlists(self, playlists: list[Any]) -> None:
         """Set available playlists for context menu."""
         self.playlists = playlists
+
+    def set_mode(self, mode: str) -> None:
+        """Update the display mode.
+
+        Args:
+            mode: Application mode ("jukebox" or "curating")
+        """
+        model = self.model()
+        if isinstance(model, TrackListModel):
+            model.set_mode(mode)
 
     def _on_row_clicked(self, index: QModelIndex) -> None:
         """Handle row click."""

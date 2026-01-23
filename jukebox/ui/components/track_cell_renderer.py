@@ -41,22 +41,38 @@ class LRUCache(OrderedDict[K, V]):
 class CellRenderer:
     """Dispatch rendering to column-specific stylers."""
 
-    def __init__(self, columns: list[str], genre_names: dict[str, str] | None = None):
+    def __init__(
+        self,
+        columns: list[str],
+        genre_names: dict[str, str] | None = None,
+        mode: str = "jukebox",
+    ):
         """Initialize renderer with column names.
 
         Args:
             columns: List of column names
             genre_names: Mapping of genre codes to full names (optional)
+            mode: Application mode ("jukebox" or "curating")
         """
         self.columns = columns
         self.stylers = {
             "waveform": WaveformStyler(),
             "stats": StatsStyler(),
-            "filename": FilenameStyler(),
+            "filename": FilenameStyler(mode),
             "genre": GenreStyler(genre_names or {}),
             "rating": RatingStyler(),
             "duration": DurationStyler(),
         }
+
+    def set_mode(self, mode: str) -> None:
+        """Update the display mode.
+
+        Args:
+            mode: Application mode ("jukebox" or "curating")
+        """
+        filename_styler = self.stylers.get("filename")
+        if isinstance(filename_styler, FilenameStyler):
+            filename_styler.set_mode(mode)
 
     def get_style(self, track: dict[str, Any], column: int, role: int) -> Any:
         """Get styled value for a cell.
@@ -131,23 +147,53 @@ class Styler:
 
 
 class FilenameStyler(Styler):
-    """Styler for filename column."""
+    """Styler for filename column.
+
+    In jukebox mode: displays "artist - title", tooltip shows filename
+    In curating mode: displays filename, tooltip shows full path
+    """
+
+    def __init__(self, mode: str = "jukebox"):
+        """Initialize with application mode.
+
+        Args:
+            mode: Application mode ("jukebox" or "curating")
+        """
+        self.mode = mode
+
+    def set_mode(self, mode: str) -> None:
+        """Update the display mode.
+
+        Args:
+            mode: Application mode ("jukebox" or "curating")
+        """
+        self.mode = mode
 
     def display(self, data: Any, track: dict[str, Any]) -> str:
-        """Display artist - title or filename."""
-        artist = track.get("artist", "")
-        title = track.get("title", "")
+        """Display based on mode."""
+        if self.mode == "jukebox":
+            # Jukebox mode: show artist - title
+            artist = track.get("artist", "")
+            title = track.get("title", "")
 
-        if artist and title:
-            return f"{artist} - {title}"
-        elif title:
-            return title
+            if artist and title:
+                return f"{artist} - {title}"
+            elif title:
+                return title
+            else:
+                return track["filepath"].name
         else:
+            # Curating mode: show filename
             return track["filepath"].name
 
     def tooltip(self, data: Any, track: dict[str, Any]) -> str:
-        """Show full path."""
-        return str(track["filepath"])
+        """Show tooltip based on mode."""
+        if self.mode == "jukebox":
+            # Jukebox mode: show filename in tooltip
+            return track["filepath"].name
+        else:
+            # Curating mode: show full path in tooltip
+            return str(track["filepath"])
 
 
 class GenreStyler(Styler):

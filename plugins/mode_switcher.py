@@ -128,6 +128,9 @@ class ModeSwitcherPlugin:
             # Event subscriptions remain active
             main_window.plugin_manager.switch_mode(mode.value)
 
+            # Update track list display mode (jukebox: artist-title, curating: filename)
+            main_window.track_list.set_mode(mode.value)
+
             # Reload tracks for new mode
             main_window._load_tracks_from_db()
 
