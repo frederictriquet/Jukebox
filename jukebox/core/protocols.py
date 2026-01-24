@@ -175,6 +175,8 @@ class LoopPlayerConfigProtocol(Protocol):
     """Protocol for loop player configuration."""
 
     duration: float
+    coarse_step: float
+    fine_step: float
 
 
 class MetadataEditorConfigProtocol(Protocol):

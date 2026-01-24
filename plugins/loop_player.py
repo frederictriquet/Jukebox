@@ -82,11 +82,27 @@ class LoopPlayerPlugin:
             else:
                 layout.addWidget(self.loop_button)
 
-        # Add menu option in Playback menu
+        # Add menu options in Playback menu
         menu = ui_builder.get_or_create_menu("&Playback")
         ui_builder.add_menu_separator(menu)
+        ui_builder.add_menu_action(menu, "Toggle Loop", self._toggle_loop, shortcut="Ctrl+L")
         ui_builder.add_menu_action(
-            menu, "Toggle Loop", self._toggle_loop, shortcut="Ctrl+L"
+            menu,
+            "Move Loop Forward (Coarse)",
+            self._move_loop_coarse_forward,
+            shortcut="Ctrl+Right",
+        )
+        ui_builder.add_menu_action(
+            menu,
+            "Move Loop Backward (Coarse)",
+            self._move_loop_coarse_backward,
+            shortcut="Ctrl+Left",
+        )
+        ui_builder.add_menu_action(
+            menu, "Move Loop Forward (Fine)", self._move_loop_fine_forward, shortcut="Shift+Right"
+        )
+        ui_builder.add_menu_action(
+            menu, "Move Loop Backward (Fine)", self._move_loop_fine_backward, shortcut="Shift+Left"
         )
 
         # Get reference to waveform widget if available
@@ -217,6 +233,91 @@ class LoopPlayerPlugin:
             except Exception as e:
                 logging.error(f"[Loop Player] Error hiding loop region: {e}", exc_info=True)
 
+    def _move_loop(self, delta: float) -> None:
+        """Move loop position by delta seconds.
+
+        Args:
+            delta: Seconds to move (positive = forward, negative = backward)
+        """
+        if not self.loop_active:
+            return
+
+        player = self.context.player
+        if not player.current_file:
+            return
+
+        track = self.context.database.tracks.get_by_filepath(player.current_file)
+        if not track or not track["duration_seconds"]:
+            return
+
+        track_duration = track["duration_seconds"]
+        loop_duration = self.loop_end - self.loop_start
+
+        # Calculate new positions
+        new_start = self.loop_start + delta
+        new_end = self.loop_end + delta
+
+        # Clamp to valid range
+        if new_start < 0:
+            new_start = 0
+            new_end = loop_duration
+        elif new_end > track_duration:
+            new_end = track_duration
+            new_start = track_duration - loop_duration
+
+        self.loop_start = new_start
+        self.loop_end = new_end
+
+        # Update visual region
+        self._update_loop_region()
+
+        logging.debug(f"[Loop Player] Loop moved to {self.loop_start:.2f}s - {self.loop_end:.2f}s")
+
+    def _move_loop_coarse_forward(self) -> None:
+        """Move loop forward by coarse step."""
+        step = self.context.config.loop_player.coarse_step
+        self._move_loop(step)
+
+    def _move_loop_coarse_backward(self) -> None:
+        """Move loop backward by coarse step."""
+        step = self.context.config.loop_player.coarse_step
+        self._move_loop(-step)
+
+    def _move_loop_fine_forward(self) -> None:
+        """Move loop forward by fine step."""
+        step = self.context.config.loop_player.fine_step
+        self._move_loop(step)
+
+    def _move_loop_fine_backward(self) -> None:
+        """Move loop backward by fine step."""
+        step = self.context.config.loop_player.fine_step
+        self._move_loop(-step)
+
+    def _update_loop_region(self) -> None:
+        """Update loop region display on waveform."""
+        if not self.loop_region or not self.waveform_widget:
+            return
+
+        try:
+            player = self.context.player
+            track = self.context.database.tracks.get_by_filepath(player.current_file)
+
+            if not track or not track["duration_seconds"]:
+                return
+
+            track_duration = track["duration_seconds"]
+            waveform_length = self.waveform_widget.expected_length
+            if waveform_length <= 0:
+                return
+
+            x_start = (self.loop_start / track_duration) * waveform_length
+            x_end = (self.loop_end / track_duration) * waveform_length
+
+            self.loop_region.setRegion([x_start, x_end])
+
+        except Exception as e:
+            logging.error(f"[Loop Player] Error updating loop region: {e}", exc_info=True)
+
     def _update_button_style(self) -> None:
         """Update button style based on loop state."""
         if not self.loop_button:
@@ -256,8 +357,9 @@ class LoopPlayerPlugin:
         """Reload config when settings change."""
         logging.info("[Loop Player] Settings changed, reloading config from database")
 
-        # Reload duration setting from database
         db = self.context.database
+
+        # Reload duration setting
         duration_setting = db.conn.execute(
             "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
             ("loop_player", "duration"),
@@ -271,11 +373,43 @@ class LoopPlayerPlugin:
 
                 # Update button tooltip if button exists
                 if self.loop_button:
-                    self.loop_button.setToolTip(
-                        f"Loop section ({duration}s from current position)"
-                    )
+                    self.loop_button.setToolTip(f"Loop section ({duration}s from current position)")
             except ValueError:
-                logging.error(f"[Loop Player] Invalid duration value: {duration_setting['setting_value']}")
+                logging.error(
+                    f"[Loop Player] Invalid duration value: {duration_setting['setting_value']}"
+                )
+
+        # Reload coarse_step setting
+        coarse_setting = db.conn.execute(
+            "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
+            ("loop_player", "coarse_step"),
+        ).fetchone()
+
+        if coarse_setting:
+            try:
+                coarse_step = float(coarse_setting["setting_value"])
+                self.context.config.loop_player.coarse_step = coarse_step
+                logging.info(f"[Loop Player] Coarse step: {coarse_step}s")
+            except ValueError:
+                logging.error(
+                    f"[Loop Player] Invalid coarse_step value: {coarse_setting['setting_value']}"
+                )
+
+        # Reload fine_step setting
+        fine_setting = db.conn.execute(
+            "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
+            ("loop_player", "fine_step"),
+        ).fetchone()
+
+        if fine_setting:
+            try:
+                fine_step = float(fine_setting["setting_value"])
+                self.context.config.loop_player.fine_step = fine_step
+                logging.info(f"[Loop Player] Fine step: {fine_step}s")
+            except ValueError:
+                logging.error(
+                    f"[Loop Player] Invalid fine_step value: {fine_setting['setting_value']}"
+                )
 
     def get_settings_schema(self) -> dict[str, Any]:
         """Return settings schema for configuration UI.
@@ -290,7 +424,21 @@ class LoopPlayerPlugin:
                 "default": self.context.config.loop_player.duration,
                 "min": 1.0,
                 "max": 300.0,
-            }
+            },
+            "coarse_step": {
+                "label": "Coarse Step (seconds) - Ctrl+Arrows",
+                "type": "float",
+                "default": self.context.config.loop_player.coarse_step,
+                "min": 0.1,
+                "max": 10.0,
+            },
+            "fine_step": {
+                "label": "Fine Step (seconds) - Shift+Arrows",
+                "type": "float",
+                "default": self.context.config.loop_player.fine_step,
+                "min": 0.01,
+                "max": 1.0,
+            },
         }
 
     def shutdown(self) -> None:

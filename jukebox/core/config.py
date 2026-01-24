@@ -65,6 +65,8 @@ class LoopPlayerConfig(BaseModel):
     """Loop player configuration."""
 
     duration: float = Field(gt=0, default=30.0)
+    coarse_step: float = Field(gt=0, default=1.0)  # Seconds for Ctrl+Arrow
+    fine_step: float = Field(gt=0, default=0.1)  # Seconds for Shift+Arrow
 
 
 class WaveformConfig(BaseModel):
