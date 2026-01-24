@@ -32,6 +32,9 @@ class WaveformVisualizerPlugin:
         self.context: PluginContextProtocol | None = None
         self.waveform_widget: WaveformWidget | None = None
         self.current_track_id: int | None = None  # Currently displayed track
+        self._single_worker: QThread | None = (
+            None  # For single waveform regeneration  # Currently displayed track
+        )
 
     def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
@@ -76,8 +79,13 @@ class WaveformVisualizerPlugin:
         # Add menu for batch waveform generation
         menu = ui_builder.get_or_create_menu("&View")
         ui_builder.add_menu_separator(menu)
-        ui_builder.add_menu_action(
-            menu, "Generate All Waveforms", self._start_batch_waveform
+        ui_builder.add_menu_action(menu, "Generate All Waveforms", self._start_batch_waveform)
+
+        # Add context menu action for regenerating waveform
+        ui_builder.add_track_context_action(
+            text="Regenerate Waveform",
+            callback=self._regenerate_waveform,
+            separator_before=True,
         )
 
     def _update_cursor(self, position: float) -> None:
@@ -126,6 +134,46 @@ class WaveformVisualizerPlugin:
                     added = WaveformVisualizerPlugin._batch_processor.add_priority_item(item)
                     if added:
                         logging.info(f"[Waveform] Track {track_id} added to priority queue")
+
+    def _regenerate_waveform(self, track: dict[str, Any]) -> None:
+        """Regenerate waveform for a specific track.
+
+        Args:
+            track: Track dictionary with id, filepath, etc.
+        """
+        track_id = track.get("id")
+        filepath = track.get("filepath")
+
+        if not track_id or not filepath:
+            logging.warning("[Waveform] Cannot regenerate: missing track_id or filepath")
+            return
+
+        logging.info(f"[Waveform] Regenerating waveform for track {track_id}")
+
+        # Delete existing waveform from cache
+        self.context.database.waveforms.delete(track_id)
+
+        # Clear display if this is the current track
+        if track_id == self.current_track_id and self.waveform_widget:
+            self.waveform_widget.clear_waveform()
+
+        # Create and start worker to regenerate
+        worker = CompleteWaveformWorker(
+            track_id=track_id,
+            filepath=filepath,
+            chunk_duration=self.context.config.waveform.chunk_duration,
+        )
+        worker.progress_update.connect(self._on_waveform_progress)
+        worker.complete.connect(
+            lambda result: self._on_batch_waveform_complete((track_id, filepath), result)
+        )
+        worker.error.connect(
+            lambda error: self._on_batch_waveform_error((track_id, filepath), error)
+        )
+
+        # Store reference to prevent garbage collection
+        self._single_worker = worker
+        worker.start()
 
     def _start_batch_waveform(self) -> None:
         """Start batch waveform generation for all tracks."""
@@ -213,7 +261,9 @@ class WaveformVisualizerPlugin:
             logging.debug(f"[Batch Waveform] Saved: {filename}")
 
         except Exception as e:
-            logging.error(f"[Batch Waveform] Failed to save results for track {track_id}: {e}", exc_info=True)
+            logging.error(
+                f"[Batch Waveform] Failed to save results for track {track_id}: {e}", exc_info=True
+            )
 
     def _on_batch_waveform_error(self, item: tuple[int, str], error: str) -> None:
         """Handle batch waveform error."""

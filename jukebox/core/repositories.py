@@ -333,6 +333,18 @@ class WaveformRepository(BaseRepository):
         )
         self._commit()
 
+    def delete(self, track_id: int) -> None:
+        """Delete waveform data for a track.
+
+        Args:
+            track_id: Track ID
+        """
+        self._conn.execute(
+            "DELETE FROM waveform_cache WHERE track_id = ?",
+            (track_id,),
+        )
+        self._commit()
+
     def get_tracks_without_waveform(
         self, mode: str | None = None, limit: int | None = None
     ) -> list[sqlite3.Row]:
