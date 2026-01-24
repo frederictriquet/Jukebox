@@ -425,6 +425,18 @@ class AnalysisRepository(BaseRepository):
 
         self._commit()
 
+    def delete(self, track_id: int) -> None:
+        """Delete audio analysis data for a track.
+
+        Args:
+            track_id: Track ID
+        """
+        self._conn.execute(
+            "DELETE FROM audio_analysis WHERE track_id = ?",
+            (track_id,),
+        )
+        self._commit()
+
     def exists(self, track_id: int) -> bool:
         """Check if a track has audio analysis.
 

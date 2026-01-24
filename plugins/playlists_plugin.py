@@ -42,10 +42,20 @@ class PlaylistsPlugin:
         btn.clicked.connect(self._show_playlists)
         ui_builder.add_toolbar_widget(btn)
 
+        # Load existing playlists into context menu
+        self._update_context_menu()
+
     def _show_playlists(self) -> None:
         """Show playlist dialog."""
         dialog = PlaylistDialog(self.context)
         dialog.exec()
+
+    def _update_context_menu(self) -> None:
+        """Load playlists into track list context menu."""
+        playlists = self.context.database.conn.execute(
+            "SELECT * FROM playlists ORDER BY name"
+        ).fetchall()
+        self.context.app.track_list.set_playlists(playlists)
 
     def shutdown(self) -> None:
         """Cleanup on application exit. No cleanup needed for this plugin."""

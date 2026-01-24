@@ -16,35 +16,78 @@ if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
 
 # Whitelist of valid audio_analysis columns (prevents SQL injection)
-AUDIO_ANALYSIS_COLUMNS: frozenset[str] = frozenset([
-    # Core stats
-    "tempo", "rms_energy", "spectral_centroid", "zero_crossing_rate",
-    # Energy & dynamics
-    "rms_mean", "rms_std", "rms_p10", "rms_p90", "peak_amplitude",
-    "crest_factor", "loudness_variation",
-    # Frequency band energies
-    "sub_bass_mean", "sub_bass_ratio", "bass_mean", "bass_ratio",
-    "low_mid_mean", "low_mid_ratio", "mid_mean", "mid_ratio",
-    "high_mid_mean", "high_mid_ratio", "high_mean", "high_ratio",
-    # Spectral features
-    "spectral_centroid_std", "spectral_bandwidth", "spectral_rolloff",
-    "spectral_flatness", "spectral_contrast", "spectral_entropy",
-    # MFCC
-    "mfcc_1", "mfcc_2", "mfcc_3", "mfcc_4", "mfcc_5",
-    "mfcc_6", "mfcc_7", "mfcc_8", "mfcc_9", "mfcc_10",
-    # Percussive vs harmonic
-    "harmonic_energy", "percussive_energy", "perc_harm_ratio",
-    "onset_strength_mean", "percussive_onset_rate",
-    # Rhythm & tempo
-    "tempo_confidence", "beat_interval_mean", "beat_interval_std",
-    "onset_rate", "tempogram_periodicity",
-    # Harmony
-    "chroma_entropy", "chroma_centroid", "chroma_energy_std", "tonnetz_mean",
-    # Structure
-    "intro_energy_ratio", "core_energy_ratio", "outro_energy_ratio", "energy_slope",
-    # Legacy (from waveform analysis)
-    "dynamic_range",
-])
+AUDIO_ANALYSIS_COLUMNS: frozenset[str] = frozenset(
+    [
+        # Core stats
+        "tempo",
+        "rms_energy",
+        "spectral_centroid",
+        "zero_crossing_rate",
+        # Energy & dynamics
+        "rms_mean",
+        "rms_std",
+        "rms_p10",
+        "rms_p90",
+        "peak_amplitude",
+        "crest_factor",
+        "loudness_variation",
+        # Frequency band energies
+        "sub_bass_mean",
+        "sub_bass_ratio",
+        "bass_mean",
+        "bass_ratio",
+        "low_mid_mean",
+        "low_mid_ratio",
+        "mid_mean",
+        "mid_ratio",
+        "high_mid_mean",
+        "high_mid_ratio",
+        "high_mean",
+        "high_ratio",
+        # Spectral features
+        "spectral_centroid_std",
+        "spectral_bandwidth",
+        "spectral_rolloff",
+        "spectral_flatness",
+        "spectral_contrast",
+        "spectral_entropy",
+        # MFCC
+        "mfcc_1",
+        "mfcc_2",
+        "mfcc_3",
+        "mfcc_4",
+        "mfcc_5",
+        "mfcc_6",
+        "mfcc_7",
+        "mfcc_8",
+        "mfcc_9",
+        "mfcc_10",
+        # Percussive vs harmonic
+        "harmonic_energy",
+        "percussive_energy",
+        "perc_harm_ratio",
+        "onset_strength_mean",
+        "percussive_onset_rate",
+        # Rhythm & tempo
+        "tempo_confidence",
+        "beat_interval_mean",
+        "beat_interval_std",
+        "onset_rate",
+        "tempogram_periodicity",
+        # Harmony
+        "chroma_entropy",
+        "chroma_centroid",
+        "chroma_energy_std",
+        "tonnetz_mean",
+        # Structure
+        "intro_energy_ratio",
+        "core_energy_ratio",
+        "outro_energy_ratio",
+        "energy_slope",
+        # Legacy (from waveform analysis)
+        "dynamic_range",
+    ]
+)
 
 
 def analyze_audio_file(filepath: str, extract_ml_features: bool = False) -> dict[str, float]:
@@ -121,7 +164,9 @@ def _extract_ml_features(y: np.ndarray, sr: int) -> dict[str, float]:
     stft = np.abs(librosa.stft(y))
     freqs = librosa.fft_frequencies(sr=sr)
 
-    def band_energy(stft_mat: np.ndarray, freqs: np.ndarray, f_min: float, f_max: float) -> tuple[float, float]:
+    def band_energy(
+        stft_mat: np.ndarray, freqs: np.ndarray, f_min: float, f_max: float
+    ) -> tuple[float, float]:
         """Compute mean energy and ratio for a frequency band."""
         mask = (freqs >= f_min) & (freqs < f_max)
         band = stft_mat[mask, :]
@@ -167,7 +212,9 @@ def _extract_ml_features(y: np.ndarray, sr: int) -> dict[str, float]:
     y_harmonic, y_percussive = librosa.effects.hpss(y)
     features["harmonic_energy"] = float(np.mean(librosa.feature.rms(y=y_harmonic)[0]))
     features["percussive_energy"] = float(np.mean(librosa.feature.rms(y=y_percussive)[0]))
-    features["perc_harm_ratio"] = features["percussive_energy"] / (features["harmonic_energy"] + 1e-10)
+    features["perc_harm_ratio"] = features["percussive_energy"] / (
+        features["harmonic_energy"] + 1e-10
+    )
 
     onset_env = librosa.onset.onset_strength(y=y_percussive, sr=sr)
     features["onset_strength_mean"] = float(np.mean(onset_env))
@@ -246,6 +293,7 @@ class AudioAnalyzerPlugin:
         self.context: PluginContextProtocol | None = None
         self.analysis_widget: AnalysisWidget | None = None
         self.current_track_id: int | None = None
+        self._single_worker: QThread | None = None  # For single track regeneration
 
     def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
@@ -266,6 +314,12 @@ class AudioAnalyzerPlugin:
         menu = ui_builder.get_or_create_menu("&Tools")
         ui_builder.add_menu_separator(menu)
         ui_builder.add_menu_action(menu, "Analyze All Tracks...", self._start_batch_analysis)
+
+        # Add context menu action for regenerating analysis
+        ui_builder.add_track_context_action(
+            text="Regenerate Audio Analysis",
+            callback=self._regenerate_analysis,
+        )
 
     def _on_track_loaded(self, track_id: int) -> None:
         """Display track analysis when loaded, or add to priority queue if not cached."""
@@ -309,6 +363,41 @@ class AudioAnalyzerPlugin:
                     added = AudioAnalyzerPlugin._batch_processor.add_priority_item(item)
                     if added:
                         logging.info(f"[Audio Analysis] Track {track_id} added to priority queue")
+
+    def _regenerate_analysis(self, track: dict[str, Any]) -> None:
+        """Regenerate audio analysis for a specific track.
+
+        Args:
+            track: Track dictionary with id, filepath, etc.
+        """
+        track_id = track.get("id")
+        filepath = track.get("filepath")
+
+        if not track_id or not filepath:
+            logging.warning("[Audio Analysis] Cannot regenerate: missing track_id or filepath")
+            return
+
+        logging.info(f"[Audio Analysis] Regenerating analysis for track {track_id}")
+
+        # Delete existing analysis from cache
+        self.context.database.analysis.delete(track_id)
+
+        # Show analyzing state if this is the current track
+        if track_id == self.current_track_id and self.analysis_widget:
+            self.analysis_widget.show_analyzing()
+
+        # Create and start worker to regenerate
+        worker = AnalysisWorker(track_id=track_id, filepath=filepath)
+        worker.complete.connect(
+            lambda result: self._on_batch_analysis_complete((track_id, filepath), result)
+        )
+        worker.error.connect(
+            lambda error: self._on_batch_analysis_error((track_id, filepath), error)
+        )
+
+        # Store reference to prevent garbage collection
+        self._single_worker = worker
+        worker.start()
 
     def _on_analysis_complete(self, track_id: int) -> None:
         """Handle audio analysis completion event."""
@@ -416,7 +505,9 @@ class AudioAnalyzerPlugin:
             logging.debug(f"[Batch Analysis] Saved {feature_count} features for: {filename}")
 
         except Exception as e:
-            logging.error(f"[Batch Analysis] Failed to save results for track {track_id}: {e}", exc_info=True)
+            logging.error(
+                f"[Batch Analysis] Failed to save results for track {track_id}: {e}", exc_info=True
+            )
 
     def _on_batch_analysis_error(self, item: tuple[int, str], error: str) -> None:
         """Handle batch analysis error."""
