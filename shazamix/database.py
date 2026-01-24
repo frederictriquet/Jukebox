@@ -151,6 +151,8 @@ class FingerprintDB:
     ) -> list[tuple[int, int, int]]:
         """Query fingerprints by hash values.
 
+        Uses a temporary table for efficient lookup with large hash lists.
+
         Args:
             hashes: List of hash values to search for
 
@@ -162,17 +164,26 @@ class FingerprintDB:
 
         conn = self._get_connection()
 
-        # Use IN clause for batch query
-        placeholders = ",".join("?" * len(hashes))
+        # Use temporary table + JOIN for better performance with large hash lists
+        conn.execute("CREATE TEMP TABLE IF NOT EXISTS query_hashes (hash INTEGER PRIMARY KEY)")
+        conn.execute("DELETE FROM query_hashes")
+
+        # Batch insert hashes into temp table
+        conn.executemany(
+            "INSERT OR IGNORE INTO query_hashes (hash) VALUES (?)",
+            [(h,) for h in hashes]
+        )
+
+        # JOIN is faster than IN clause for large lists
         rows = conn.execute(
-            f"""
-            SELECT track_id, time_offset_ms, hash
-            FROM fingerprints
-            WHERE hash IN ({placeholders})
-            """,
-            hashes
+            """
+            SELECT f.track_id, f.time_offset_ms, f.hash
+            FROM fingerprints f
+            INNER JOIN query_hashes q ON f.hash = q.hash
+            """
         ).fetchall()
 
+        conn.execute("DELETE FROM query_hashes")
         conn.close()
 
         return [(row["track_id"], row["time_offset_ms"], row["hash"]) for row in rows]

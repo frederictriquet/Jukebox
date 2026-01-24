@@ -80,9 +80,7 @@ class TrackRepository(BaseRepository):
         self._commit()
         return int(cursor.lastrowid) if cursor.lastrowid is not None else 0
 
-    def search(
-        self, query: str, limit: int = 100, mode: str | None = None
-    ) -> list[sqlite3.Row]:
+    def search(self, query: str, limit: int = 100, mode: str | None = None) -> list[sqlite3.Row]:
         """Search tracks using FTS5.
 
         Args:
@@ -119,9 +117,7 @@ class TrackRepository(BaseRepository):
             )
         return cursor.fetchall()
 
-    def get_all(
-        self, limit: int | None = None, mode: str | None = None
-    ) -> list[sqlite3.Row]:
+    def get_all(self, limit: int | None = None, mode: str | None = None) -> list[sqlite3.Row]:
         """Get all tracks, optionally filtered by mode.
 
         Args:
@@ -165,9 +161,7 @@ class TrackRepository(BaseRepository):
         Returns:
             Track row or None
         """
-        cursor = self._conn.execute(
-            "SELECT * FROM tracks WHERE filepath = ?", (str(filepath),)
-        )
+        cursor = self._conn.execute("SELECT * FROM tracks WHERE filepath = ?", (str(filepath),))
         result = cursor.fetchone()
         return result if result is not None else None
 
@@ -193,9 +187,7 @@ class TrackRepository(BaseRepository):
         Returns:
             True if deleted, False if track not found
         """
-        cursor = self._conn.execute(
-            "DELETE FROM tracks WHERE filepath = ?", (str(filepath),)
-        )
+        cursor = self._conn.execute("DELETE FROM tracks WHERE filepath = ?", (str(filepath),))
         self._commit()
         return cursor.rowcount > 0
 
@@ -211,9 +203,18 @@ class TrackRepository(BaseRepository):
         """
         # Allowed fields for update
         allowed_fields = {
-            "title", "artist", "album", "album_artist", "genre",
-            "year", "track_number", "duration_seconds", "bitrate",
-            "sample_rate", "file_size", "date_modified",
+            "title",
+            "artist",
+            "album",
+            "album_artist",
+            "genre",
+            "year",
+            "track_number",
+            "duration_seconds",
+            "bitrate",
+            "sample_rate",
+            "file_size",
+            "date_modified",
         }
 
         # Filter to allowed fields only
@@ -224,9 +225,7 @@ class TrackRepository(BaseRepository):
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         values = list(updates.values()) + [track_id]
 
-        cursor = self._conn.execute(
-            f"UPDATE tracks SET {set_clause} WHERE id = ?", values
-        )
+        cursor = self._conn.execute(f"UPDATE tracks SET {set_clause} WHERE id = ?", values)
         self._commit()
         return cursor.rowcount > 0
 
@@ -377,9 +376,7 @@ class AnalysisRepository(BaseRepository):
         Returns:
             Analysis row or None if not analyzed
         """
-        cursor = self._conn.execute(
-            "SELECT * FROM audio_analysis WHERE track_id = ?", (track_id,)
-        )
+        cursor = self._conn.execute("SELECT * FROM audio_analysis WHERE track_id = ?", (track_id,))
         result = cursor.fetchone()
         return result if result is not None else None
 
@@ -425,9 +422,7 @@ class AnalysisRepository(BaseRepository):
         Returns:
             True if analysis exists
         """
-        cursor = self._conn.execute(
-            "SELECT 1 FROM audio_analysis WHERE track_id = ?", (track_id,)
-        )
+        cursor = self._conn.execute("SELECT 1 FROM audio_analysis WHERE track_id = ?", (track_id,))
         return cursor.fetchone() is not None
 
     def get_tracks_without_analysis(

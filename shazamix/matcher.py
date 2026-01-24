@@ -73,20 +73,56 @@ class Matcher:
         self.time_tolerance_ms = time_tolerance_ms
         self.min_confidence = min_confidence
 
-    def identify_track(self, audio_path: str) -> list[Match]:
+    def identify_track(
+        self,
+        audio_path: str,
+        max_duration_sec: float = 60.0,
+        sample_fingerprints: int = 500,
+    ) -> list[Match]:
         """Identify a single audio file against the database.
+
+        For faster identification, only analyzes a portion of the file
+        and samples fingerprints.
 
         Args:
             audio_path: Path to audio file
+            max_duration_sec: Maximum duration to analyze (from middle of track)
+            sample_fingerprints: Maximum fingerprints to use for matching
 
         Returns:
             List of matches sorted by confidence (highest first)
         """
-        # Extract fingerprints from query
-        query_fps = self.fingerprinter.extract_fingerprints(audio_path)
+        import librosa
+
+        # Load only a portion of the audio (from middle for better representation)
+        y, sr = librosa.load(
+            audio_path,
+            sr=self.fingerprinter.sample_rate,
+            mono=True,
+            duration=max_duration_sec * 2,  # Load more, then take middle
+        )
+
+        if len(y) == 0:
+            return []
+
+        # Take the middle portion if file is longer than max_duration
+        total_duration = len(y) / sr
+        if total_duration > max_duration_sec:
+            # Take middle portion
+            samples_to_take = int(max_duration_sec * sr)
+            start = (len(y) - samples_to_take) // 2
+            y = y[start:start + samples_to_take]
+
+        # Extract fingerprints
+        query_fps = self.fingerprinter.extract_fingerprints_from_array(y)
 
         if not query_fps:
             return []
+
+        # Sample fingerprints if too many (spread evenly across time)
+        if len(query_fps) > sample_fingerprints:
+            step = len(query_fps) // sample_fingerprints
+            query_fps = query_fps[::step][:sample_fingerprints]
 
         return self._match_fingerprints(query_fps)
 
@@ -95,66 +131,106 @@ class Matcher:
         mix_path: str,
         segment_duration_sec: float = 30.0,
         overlap_sec: float = 15.0,
+        progress_callback: callable | None = None,
+        max_workers: int = 4,
     ) -> list[Match]:
         """Analyze a mix file to identify all tracks used.
 
-        Splits the mix into overlapping segments and identifies each.
+        Splits the mix into overlapping segments and identifies each in parallel.
 
         Args:
             mix_path: Path to mix audio file
             segment_duration_sec: Duration of each analysis segment
             overlap_sec: Overlap between segments
+            progress_callback: Optional callback(current, total, message) for progress
+            max_workers: Number of parallel workers for segment analysis
 
         Returns:
             List of all matches found, merged and deduplicated
         """
         import librosa
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def log(msg: str) -> None:
+            if progress_callback:
+                progress_callback(-1, -1, msg)
+
+        log(f"Loading audio file...")
 
         # Load full mix
         y, sr = librosa.load(mix_path, sr=self.fingerprinter.sample_rate, mono=True)
         duration_sec = len(y) / sr
 
+        log(f"Mix duration: {duration_sec/60:.1f} minutes")
+
         # Calculate segment parameters
         segment_samples = int(segment_duration_sec * sr)
         hop_samples = int((segment_duration_sec - overlap_sec) * sr)
 
-        all_matches: list[Match] = []
-
-        # Process each segment
+        # Build list of segments to process
+        segments: list[tuple[int, np.ndarray]] = []
         position = 0
         while position < len(y):
             segment = y[position:position + segment_samples]
-
-            if len(segment) < sr * 5:  # Skip segments shorter than 5 seconds
+            if len(segment) < sr * 5:
                 break
-
-            # Extract fingerprints for this segment
-            segment_fps = self.fingerprinter.extract_fingerprints_from_array(segment)
-
-            if segment_fps:
-                # Adjust time offsets to be relative to mix start
-                segment_start_ms = int((position / sr) * 1000)
-                adjusted_fps = [
-                    Fingerprint(
-                        hash=fp.hash,
-                        time_offset_ms=fp.time_offset_ms + segment_start_ms,
-                        freq_bin=fp.freq_bin,
-                    )
-                    for fp in segment_fps
-                ]
-
-                matches = self._match_fingerprints(adjusted_fps)
-                all_matches.extend(matches)
-
+            segments.append((position, segment))
             position += hop_samples
+
+        total_segments = len(segments)
+        log(f"Processing {total_segments} segments with {max_workers} workers...")
+
+        def process_segment(args: tuple[int, np.ndarray]) -> list[Match]:
+            """Process a single segment and return matches."""
+            pos, segment_data = args
+            segment_fps = self.fingerprinter.extract_fingerprints_from_array(segment_data)
+
+            if not segment_fps:
+                return []
+
+            # Adjust time offsets to be relative to mix start
+            segment_start_ms = int((pos / sr) * 1000)
+            adjusted_fps = [
+                Fingerprint(
+                    hash=fp.hash,
+                    time_offset_ms=fp.time_offset_ms + segment_start_ms,
+                    freq_bin=fp.freq_bin,
+                )
+                for fp in segment_fps
+            ]
+
+            return self._match_fingerprints(adjusted_fps)
+
+        all_matches: list[Match] = []
+        completed = 0
+
+        # Process segments in parallel
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(process_segment, seg): seg[0] for seg in segments}
+
+            for future in as_completed(futures):
+                pos = futures[future]
+                try:
+                    matches = future.result()
+                    all_matches.extend(matches)
+                except Exception as e:
+                    log(f"Error processing segment at {pos/sr:.1f}s: {e}")
+
+                completed += 1
+                if progress_callback:
+                    progress_callback(completed, total_segments, f"Segment {completed}/{total_segments}")
+
+        log(f"Merging {len(all_matches)} raw matches...")
 
         # Merge and deduplicate matches
         merged = self._merge_matches(all_matches)
 
+        log(f"Found {len(merged)} unique tracks")
+
         return merged
 
     def _match_fingerprints(self, query_fps: list[Fingerprint]) -> list[Match]:
-        """Match fingerprints against database.
+        """Match fingerprints against database using vectorized numpy operations.
 
         Uses histogram-based temporal coherence:
         1. For each matching hash, compute time offset (query_time - db_time)
@@ -174,63 +250,84 @@ class Matcher:
         if not db_matches:
             return []
 
-        # Build lookup: hash -> list of query times
-        query_times_by_hash: dict[int, list[int]] = defaultdict(list)
+        # Build lookup: hash -> first query time
+        query_time_by_hash: dict[int, int] = {}
         for fp in query_fps:
-            query_times_by_hash[fp.hash].append(fp.time_offset_ms)
+            if fp.hash not in query_time_by_hash:
+                query_time_by_hash[fp.hash] = fp.time_offset_ms
 
-        # For each track, build histogram of time offsets
-        # Key insight: true matches will cluster at the same time offset
-        track_offsets: dict[int, list[int]] = defaultdict(list)
+        # Filter db_matches to only those with matching hashes and build arrays
+        filtered_matches = [
+            (track_id, db_time, hash_val)
+            for track_id, db_time, hash_val in db_matches
+            if hash_val in query_time_by_hash
+        ]
 
-        for track_id, db_time_ms, hash_val in db_matches:
-            # For each query fingerprint with this hash
-            for query_time in query_times_by_hash[hash_val]:
-                # Time offset = query_time - db_time
-                # True matches: this offset is consistent across many fingerprints
-                offset = query_time - db_time_ms
-                track_offsets[track_id].append(offset)
+        if not filtered_matches:
+            return []
 
-        # Analyze each track's offset histogram
+        # Convert to numpy arrays for vectorized operations
+        db_track_ids = np.array([m[0] for m in filtered_matches], dtype=np.int32)
+        db_times = np.array([m[1] for m in filtered_matches], dtype=np.int32)
+        db_hashes = np.array([m[2] for m in filtered_matches], dtype=np.int64)
+
+        # Vectorized: get query times for each db match
+        query_times = np.array([query_time_by_hash[h] for h in db_hashes], dtype=np.int32)
+
+        # Compute all offsets at once
+        offsets = query_times - db_times
+
+        # Get unique tracks and their best matches
+        unique_tracks = np.unique(db_track_ids)
+
+        # For efficiency, only analyze top N tracks by raw match count
+        track_counts = [(t, np.sum(db_track_ids == t)) for t in unique_tracks]
+        track_counts.sort(key=lambda x: -x[1])
+        top_tracks = [t for t, c in track_counts[:100] if c >= self.min_matches]
+
         matches: list[Match] = []
         total_query_fps = len(query_fps)
+        track_info_cache: dict[int, dict | None] = {}
 
-        for track_id, offsets in track_offsets.items():
-            if len(offsets) < self.min_matches:
+        for track_id_np in top_tracks:
+            track_id = int(track_id_np)  # Convert numpy int to Python int
+
+            # Get offsets for this track
+            mask = db_track_ids == track_id_np
+            track_offsets = offsets[mask]
+
+            if len(track_offsets) < self.min_matches:
                 continue
 
-            # Find clusters of consistent offsets (histogram peaks)
-            clusters = self._find_offset_clusters(offsets)
+            # Fast histogram using numpy
+            bin_width = 100  # ms
+            if len(track_offsets) > 0:
+                min_off, max_off = track_offsets.min(), track_offsets.max()
+                if max_off - min_off < bin_width:
+                    # All offsets in one bin
+                    best_count = len(track_offsets)
+                    best_offset = int(np.median(track_offsets))
+                else:
+                    bins = np.arange(min_off, max_off + bin_width, bin_width)
+                    hist, edges = np.histogram(track_offsets, bins=bins)
+                    best_bin = np.argmax(hist)
+                    best_count = int(hist[best_bin])
+                    best_offset = int(edges[best_bin] + bin_width // 2)
 
-            for cluster_offset, cluster_count, cluster_offsets in clusters:
-                if cluster_count < self.min_matches:
+                if best_count < self.min_matches:
                     continue
 
-                # Get track info
-                track_info = self.db.get_track_info(track_id)
+                # Get track info (cached)
+                if track_id not in track_info_cache:
+                    track_info_cache[track_id] = self.db.get_track_info(track_id)
+                track_info = track_info_cache[track_id]
+
                 if not track_info:
                     continue
 
-                # Calculate confidence:
-                # - Based on ratio of matching fingerprints to query total
-                # - Bonus for tight temporal clustering
-                match_ratio = cluster_count / total_query_fps
-
-                # Tightness: how concentrated are the offsets?
-                if len(cluster_offsets) > 1:
-                    offset_std = np.std(cluster_offsets)
-                    tightness_bonus = max(0, 1 - offset_std / 1000)  # Bonus if std < 1000ms
-                else:
-                    tightness_bonus = 1.0
-
-                confidence = min(1.0, match_ratio * 10 * (0.5 + 0.5 * tightness_bonus))
-
-                # Estimate query position
-                query_start = cluster_offset if cluster_offset > 0 else 0
-                track_start = -cluster_offset if cluster_offset < 0 else 0
-
-                # Estimate duration from spread of matching fingerprints
-                duration_ms = max(cluster_offsets) - min(cluster_offsets) if cluster_offsets else 0
+                # Calculate confidence
+                match_ratio = best_count / total_query_fps
+                confidence = min(1.0, match_ratio * 5)  # Simplified scoring
 
                 match = Match(
                     track_id=track_id,
@@ -239,19 +336,19 @@ class Matcher:
                     filename=track_info.get("filename", ""),
                     filepath=track_info.get("filepath", ""),
                     confidence=confidence,
-                    query_start_ms=query_start,
-                    track_start_ms=track_start,
-                    duration_ms=duration_ms,
-                    match_count=cluster_count,
-                    time_stretch_ratio=1.0,  # TODO: estimate from offset drift
+                    query_start_ms=max(0, best_offset),
+                    track_start_ms=max(0, -best_offset),
+                    duration_ms=0,
+                    match_count=int(best_count),
+                    time_stretch_ratio=1.0,
                 )
                 matches.append(match)
 
-        # Sort by confidence (descending), then by match count
-        matches.sort(key=lambda m: (-m.confidence, -m.match_count))
+        # Sort by match count (most reliable metric)
+        matches.sort(key=lambda m: -m.match_count)
 
-        # Filter by minimum confidence
-        matches = [m for m in matches if m.confidence >= self.min_confidence]
+        # Filter by minimum confidence and keep top results
+        matches = [m for m in matches if m.confidence >= self.min_confidence][:20]
 
         return matches
 

@@ -188,22 +188,40 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     matcher = Matcher(db, min_matches=args.min_matches, min_confidence=args.min_confidence)
 
     print(f"Analyzing mix: {args.file}")
-    print(f"Segment duration: {args.segment}s, overlap: {args.overlap}s")
+    print(f"Segment duration: {args.segment}s, overlap: {args.overlap}s, workers: {args.workers}")
     print()
+
+    last_progress = [0]  # Use list for closure
+
+    def progress_callback(current: int, total: int, message: str) -> None:
+        """Display progress."""
+        if current < 0:
+            # Log message
+            print(f"[*] {message}")
+        else:
+            # Progress update - only print every 5 segments or at end
+            if current == total or current - last_progress[0] >= 5:
+                elapsed = time.time() - start
+                rate = current / elapsed if elapsed > 0 else 0
+                remaining = (total - current) / rate if rate > 0 else 0
+                print(f"[{current}/{total}] {message} - {rate:.1f} seg/s - ETA: {remaining:.0f}s")
+                last_progress[0] = current
 
     start = time.time()
     matches = matcher.analyze_mix(
         args.file,
         segment_duration_sec=args.segment,
         overlap_sec=args.overlap,
+        progress_callback=progress_callback,
+        max_workers=args.workers,
     )
     elapsed = time.time() - start
 
     if not matches:
-        print("No tracks identified.")
+        print("\nNo tracks identified.")
         return 0
 
-    print(f"Analysis completed in {elapsed:.1f}s")
+    print(f"\nAnalysis completed in {elapsed:.1f}s")
     print()
 
     # Generate and print cue sheet
@@ -325,6 +343,12 @@ def main() -> int:
         type=float,
         default=0.1,
         help="Minimum confidence to report (default: 0.1)",
+    )
+    analyze_parser.add_argument(
+        "--workers", "-w",
+        type=int,
+        default=4,
+        help="Number of parallel workers (default: 4)",
     )
     analyze_parser.set_defaults(func=cmd_analyze)
 

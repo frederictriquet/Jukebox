@@ -56,9 +56,7 @@ class BatchProcessor(QObject):
         Stops the timer when no orphans remain to avoid unnecessary polling.
         """
         before_count = len(cls._global_orphan_workers)
-        cls._global_orphan_workers = [
-            w for w in cls._global_orphan_workers if w.isRunning()
-        ]
+        cls._global_orphan_workers = [w for w in cls._global_orphan_workers if w.isRunning()]
         after_count = len(cls._global_orphan_workers)
 
         if before_count != after_count:

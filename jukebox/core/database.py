@@ -59,6 +59,7 @@ class Database:
         """Get the track repository."""
         if self._tracks is None:
             from jukebox.core.repositories import TrackRepository
+
             self._tracks = TrackRepository(self)
         return self._tracks
 
@@ -67,6 +68,7 @@ class Database:
         """Get the waveform repository."""
         if self._waveforms is None:
             from jukebox.core.repositories import WaveformRepository
+
             self._waveforms = WaveformRepository(self)
         return self._waveforms
 
@@ -75,6 +77,7 @@ class Database:
         """Get the analysis repository."""
         if self._analysis is None:
             from jukebox.core.repositories import AnalysisRepository
+
             self._analysis = AnalysisRepository(self)
         return self._analysis
 
@@ -83,6 +86,7 @@ class Database:
         """Get the plugin settings repository."""
         if self._settings is None:
             from jukebox.core.repositories import PluginSettingsRepository
+
             self._settings = PluginSettingsRepository(self)
         return self._settings
 

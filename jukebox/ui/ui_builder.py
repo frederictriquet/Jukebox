@@ -7,6 +7,30 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu, QToolBar, QWidget
 
 
+class ContextMenuAction:
+    """A context menu action registered by a plugin."""
+
+    def __init__(
+        self,
+        text: str,
+        callback: Callable[[dict[str, Any]], None],
+        icon: str | None = None,
+        separator_before: bool = False,
+    ):
+        """Initialize context menu action.
+
+        Args:
+            text: Action text displayed in menu
+            callback: Function called with track dict when action is triggered
+            icon: Optional icon name
+            separator_before: Add separator before this action
+        """
+        self.text = text
+        self.callback = callback
+        self.icon = icon
+        self.separator_before = separator_before
+
+
 class UIBuilder:
     """API for plugins to inject UI elements."""
 
@@ -16,6 +40,7 @@ class UIBuilder:
         self.plugin_menus: list[QMenu] = []
         self.plugin_widgets: list[QWidget] = []  # Track all widgets added by plugins
         self.shared_menus: dict[str, QMenu] = {}  # Keep references to shared menus
+        self.track_context_actions: list[ContextMenuAction] = []  # Track context menu actions
 
     def add_menu(self, name: str) -> QMenu:
         """Add menu to menubar and track it."""
@@ -128,3 +153,40 @@ class UIBuilder:
             widget.hide()
             widget.deleteLater()
         self.plugin_widgets.clear()
+
+    def add_track_context_action(
+        self,
+        text: str,
+        callback: Callable[[dict[str, Any]], None],
+        icon: str | None = None,
+        separator_before: bool = False,
+    ) -> ContextMenuAction:
+        """Add an action to the track list context menu.
+
+        Args:
+            text: Action text displayed in menu
+            callback: Function called with track dict when action is triggered.
+                     The track dict contains: id, filepath, filename, title, artist, etc.
+            icon: Optional icon name
+            separator_before: Add separator before this action
+
+        Returns:
+            The created ContextMenuAction
+
+        Example:
+            def on_analyze(track):
+                print(f"Analyzing {track['filepath']}")
+
+            ui_builder.add_track_context_action("Analyze Track", on_analyze)
+        """
+        action = ContextMenuAction(text, callback, icon, separator_before)
+        self.track_context_actions.append(action)
+        return action
+
+    def get_track_context_actions(self) -> list[ContextMenuAction]:
+        """Get all registered track context menu actions."""
+        return self.track_context_actions
+
+    def clear_track_context_actions(self) -> None:
+        """Clear all track context menu actions."""
+        self.track_context_actions.clear()

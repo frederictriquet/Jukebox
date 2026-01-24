@@ -554,7 +554,7 @@ class TrackList(QTableView):
     def _show_context_menu(self, position: Any) -> None:
         """Show context menu on right-click."""
         index = self.indexAt(position)
-        if not index.isValid() or not self.playlists:
+        if not index.isValid():
             return
 
         filepath = self.model().data(index, Qt.ItemDataRole.UserRole)
@@ -562,16 +562,84 @@ class TrackList(QTableView):
             return
 
         menu = QMenu(self)
-        add_menu = menu.addMenu("Add to Playlist")
 
-        for playlist in self.playlists:
-            action = QAction(playlist["name"], self)
-            action.triggered.connect(
-                lambda checked, p=playlist, fp=filepath: self._add_to_playlist(fp, p["id"])
-            )
-            add_menu.addAction(action)
+        # Default actions always available
+        show_in_finder = QAction("Show in Finder", self)
+        show_in_finder.triggered.connect(lambda: self._show_in_finder(filepath))
+        menu.addAction(show_in_finder)
+
+        copy_path = QAction("Copy Path", self)
+        copy_path.triggered.connect(lambda: self._copy_path_to_clipboard(filepath))
+        menu.addAction(copy_path)
+
+        # Add playlist submenu if playlists exist
+        if self.playlists:
+            menu.addSeparator()
+            add_menu = menu.addMenu("Add to Playlist")
+            for playlist in self.playlists:
+                action = QAction(playlist["name"], self)
+                action.triggered.connect(
+                    lambda checked, p=playlist, fp=filepath: self._add_to_playlist(fp, p["id"])
+                )
+                add_menu.addAction(action)
+
+        # Add plugin context menu actions
+        main_window = self.window()
+        if hasattr(main_window, "ui_builder"):
+            plugin_actions = main_window.ui_builder.get_track_context_actions()
+            if plugin_actions:
+                menu.addSeparator()
+                # Get track info from database for plugin callbacks
+                track_dict = self._get_track_dict(filepath)
+
+                for ctx_action in plugin_actions:
+                    if ctx_action.separator_before:
+                        menu.addSeparator()
+
+                    action = QAction(ctx_action.text, self)
+                    # Capture ctx_action and track_dict in closure
+                    action.triggered.connect(
+                        lambda checked, cb=ctx_action.callback, t=track_dict: cb(t)
+                    )
+                    menu.addAction(action)
 
         menu.exec(self.mapToGlobal(position))
+
+    def _show_in_finder(self, filepath: Path) -> None:
+        """Open Finder and select the file."""
+        import subprocess
+
+        filepath_str = str(filepath) if isinstance(filepath, Path) else filepath
+        subprocess.run(["open", "-R", filepath_str])
+
+    def _copy_path_to_clipboard(self, filepath: Path) -> None:
+        """Copy file path to clipboard."""
+        from PySide6.QtWidgets import QApplication
+
+        clipboard = QApplication.clipboard()
+        filepath_str = str(filepath) if isinstance(filepath, Path) else filepath
+        clipboard.setText(filepath_str)
+
+    def _get_track_dict(self, filepath: Path) -> dict[str, Any]:
+        """Get track information as dictionary for plugin callbacks.
+
+        Args:
+            filepath: Path to the track file
+
+        Returns:
+            Dictionary with track information
+        """
+        main_window = self.window()
+        if hasattr(main_window, "database"):
+            track = main_window.database.get_track_by_filepath(str(filepath))
+            if track:
+                return dict(track)
+
+        # Fallback: return minimal info from filepath
+        return {
+            "filepath": str(filepath),
+            "filename": filepath.name if isinstance(filepath, Path) else Path(filepath).name,
+        }
 
     def _add_to_playlist(self, filepath: Path, playlist_id: int) -> None:
         """Add track to playlist."""
