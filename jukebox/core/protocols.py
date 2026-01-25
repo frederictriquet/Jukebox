@@ -203,6 +203,11 @@ class VideoExporterConfigProtocol(Protocol):
     dynamics_enabled: bool
     vjing_enabled: bool
     video_background_enabled: bool
+    waveform_height_ratio: float
+    waveform_bass_color: str
+    waveform_mid_color: str
+    waveform_treble_color: str
+    waveform_cursor_color: str
     vjing_mappings: list[Any]
 
 

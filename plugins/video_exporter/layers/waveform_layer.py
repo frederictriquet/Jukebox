@@ -19,10 +19,10 @@ class WaveformLayer(BaseVisualLayer):
     z_index = 2
 
     # Default colors (similar to waveform_visualizer plugin)
-    BASS_COLOR = (0, 102, 255, 255)  # Blue
-    MID_COLOR = (0, 255, 0, 255)  # Green
-    TREBLE_COLOR = (255, 255, 255, 255)  # White
-    CURSOR_COLOR = (255, 255, 255, 200)  # White semi-transparent
+    DEFAULT_BASS_COLOR = (0, 102, 255, 255)  # Blue
+    DEFAULT_MID_COLOR = (0, 255, 0, 255)  # Green
+    DEFAULT_TREBLE_COLOR = (255, 255, 255, 255)  # White
+    DEFAULT_CURSOR_COLOR = (255, 255, 255, 200)  # White semi-transparent
 
     def __init__(
         self,
@@ -33,6 +33,10 @@ class WaveformLayer(BaseVisualLayer):
         sr: int,
         duration: float,
         waveform_height_ratio: float = 0.3,
+        bass_color: str | None = None,
+        mid_color: str | None = None,
+        treble_color: str | None = None,
+        cursor_color: str | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize waveform layer.
@@ -45,10 +49,46 @@ class WaveformLayer(BaseVisualLayer):
             sr: Sample rate.
             duration: Duration in seconds.
             waveform_height_ratio: Height of waveform as ratio of frame height.
+            bass_color: Hex color for bass frequencies.
+            mid_color: Hex color for mid frequencies.
+            treble_color: Hex color for treble frequencies.
+            cursor_color: Hex color for cursor.
             **kwargs: Additional parameters.
         """
         self.waveform_height_ratio = waveform_height_ratio
+        # Parse colors from hex or use defaults
+        self.bass_color = self._parse_color(bass_color, self.DEFAULT_BASS_COLOR)
+        self.mid_color = self._parse_color(mid_color, self.DEFAULT_MID_COLOR)
+        self.treble_color = self._parse_color(treble_color, self.DEFAULT_TREBLE_COLOR)
+        self.cursor_color = self._parse_color(cursor_color, self.DEFAULT_CURSOR_COLOR, alpha=200)
         super().__init__(width, height, fps, audio, sr, duration, **kwargs)
+
+    @staticmethod
+    def _parse_color(
+        hex_color: str | None,
+        default: tuple[int, int, int, int],
+        alpha: int = 255,
+    ) -> tuple[int, int, int, int]:
+        """Parse hex color to RGBA tuple.
+
+        Args:
+            hex_color: Hex color string (e.g., "#0066FF").
+            default: Default RGBA tuple if hex_color is None or invalid.
+            alpha: Alpha value (0-255).
+
+        Returns:
+            RGBA color tuple.
+        """
+        if not hex_color:
+            return default
+        try:
+            hex_color = hex_color.lstrip("#")
+            r = int(hex_color[0:2], 16)
+            g = int(hex_color[2:4], 16)
+            b = int(hex_color[4:6], 16)
+            return (r, g, b, alpha)
+        except (ValueError, IndexError):
+            return default
 
     def _precompute(self) -> None:
         """Pre-compute waveform data for all frames."""
@@ -158,16 +198,16 @@ class WaveformLayer(BaseVisualLayer):
 
         if self._use_filtering:
             # Draw 3-band waveform
-            self._draw_band(draw, self.bass_envelope, y_center, waveform_height, self.BASS_COLOR)
+            self._draw_band(draw, self.bass_envelope, y_center, waveform_height, self.bass_color)
             self._draw_band(
-                draw, self.mid_envelope, y_center, waveform_height * 0.7, self.MID_COLOR
+                draw, self.mid_envelope, y_center, waveform_height * 0.7, self.mid_color
             )
             self._draw_band(
-                draw, self.treble_envelope, y_center, waveform_height * 0.4, self.TREBLE_COLOR
+                draw, self.treble_envelope, y_center, waveform_height * 0.4, self.treble_color
             )
         else:
             # Draw simple waveform
-            self._draw_band(draw, self.waveform_data, y_center, waveform_height, self.MID_COLOR)
+            self._draw_band(draw, self.waveform_data, y_center, waveform_height, self.mid_color)
 
         # Draw cursor
         draw.line(
@@ -175,7 +215,7 @@ class WaveformLayer(BaseVisualLayer):
                 (cursor_x, y_center - waveform_height // 2),
                 (cursor_x, y_center + waveform_height // 2),
             ],
-            fill=self.CURSOR_COLOR,
+            fill=self.cursor_color,
             width=2,
         )
 

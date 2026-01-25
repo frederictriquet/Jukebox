@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
-from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -103,6 +102,14 @@ class VideoExportWorker(QThread):
 
         # Initialize frame renderer with enabled layers
         try:
+            # Build waveform config from main config
+            waveform_config = {
+                "height_ratio": self.config.get("waveform_height_ratio", 0.3),
+                "bass_color": self.config.get("waveform_bass_color"),
+                "mid_color": self.config.get("waveform_mid_color"),
+                "treble_color": self.config.get("waveform_treble_color"),
+                "cursor_color": self.config.get("waveform_cursor_color"),
+            }
             renderer = FrameRenderer(
                 width=width,
                 height=height,
@@ -114,6 +121,7 @@ class VideoExportWorker(QThread):
                 track_metadata=track_metadata,
                 video_clips_folder=self.config.get("video_clips_folder", ""),
                 vjing_mappings=self.config.get("vjing_mappings", {}),
+                waveform_config=waveform_config,
             )
         except Exception as e:
             self.error.emit(f"Failed to initialize renderer: {e}")
@@ -180,8 +188,6 @@ class VideoExportWorker(QThread):
             total_frames: Total number of frames to render.
             fps: Frames per second.
         """
-        from concurrent.futures import FIRST_COMPLETED, wait
-
         # Buffer to store rendered frames waiting to be written
         frame_buffer: dict[int, NDArray[np.uint8]] = {}
         next_frame_to_write = 0

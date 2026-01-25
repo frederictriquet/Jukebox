@@ -163,6 +163,12 @@ class VideoExporterConfig(BaseModel):
     dynamics_enabled: bool = True
     vjing_enabled: bool = False
     video_background_enabled: bool = False
+    # Waveform layer settings
+    waveform_height_ratio: float = Field(ge=0.1, le=0.8, default=0.3)
+    waveform_bass_color: str = "#0066FF"  # Blue
+    waveform_mid_color: str = "#00FF00"  # Green
+    waveform_treble_color: str = "#FFFFFF"  # White
+    waveform_cursor_color: str = "#FFFFFF"  # White
     # VJing effect mappings
     vjing_mappings: list[VJingEffectMappingConfig] = [
         VJingEffectMappingConfig(letter="E", effect="strobe"),

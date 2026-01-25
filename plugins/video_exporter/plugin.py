@@ -145,7 +145,15 @@ class VideoExporterPlugin:
             return result["setting_value"] if result else None
 
         # Reload string settings
-        for key in ("default_resolution", "output_directory", "video_clips_folder"):
+        for key in (
+            "default_resolution",
+            "output_directory",
+            "video_clips_folder",
+            "waveform_bass_color",
+            "waveform_mid_color",
+            "waveform_treble_color",
+            "waveform_cursor_color",
+        ):
             value = get_setting(key)
             if value is not None:
                 setattr(config, key, value)
@@ -159,6 +167,15 @@ class VideoExporterPlugin:
                 logging.debug(f"[Video Exporter] default_fps: {config.default_fps}")
             except ValueError:
                 logging.error(f"[Video Exporter] Invalid default_fps value: {value}")
+
+        # Reload float settings
+        value = get_setting("waveform_height_ratio")
+        if value is not None:
+            try:
+                config.waveform_height_ratio = float(value)
+                logging.debug(f"[Video Exporter] waveform_height_ratio: {config.waveform_height_ratio}")
+            except ValueError:
+                logging.error(f"[Video Exporter] Invalid waveform_height_ratio value: {value}")
 
         # Reload boolean settings
         for key in (
@@ -216,7 +233,8 @@ class VideoExporterPlugin:
         return {
             "default_resolution": {
                 "label": "Default Resolution",
-                "type": "string",
+                "type": "choice",
+                "options": ["1080p", "720p", "square_1080", "square_720", "vertical"],
                 "default": self.context.config.video_exporter.default_resolution,
             },
             "default_fps": {
@@ -240,6 +258,33 @@ class VideoExporterPlugin:
                 "label": "Enable Waveform Layer",
                 "type": "bool",
                 "default": self.context.config.video_exporter.waveform_enabled,
+            },
+            "waveform_height_ratio": {
+                "label": "Waveform Height Ratio",
+                "type": "float",
+                "default": self.context.config.video_exporter.waveform_height_ratio,
+                "min": 0.1,
+                "max": 0.8,
+            },
+            "waveform_bass_color": {
+                "label": "Waveform Bass Color",
+                "type": "color",
+                "default": self.context.config.video_exporter.waveform_bass_color,
+            },
+            "waveform_mid_color": {
+                "label": "Waveform Mid Color",
+                "type": "color",
+                "default": self.context.config.video_exporter.waveform_mid_color,
+            },
+            "waveform_treble_color": {
+                "label": "Waveform Treble Color",
+                "type": "color",
+                "default": self.context.config.video_exporter.waveform_treble_color,
+            },
+            "waveform_cursor_color": {
+                "label": "Waveform Cursor Color",
+                "type": "color",
+                "default": self.context.config.video_exporter.waveform_cursor_color,
             },
             "text_enabled": {
                 "label": "Enable Text Layer",

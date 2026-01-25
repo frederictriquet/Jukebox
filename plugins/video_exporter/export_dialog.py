@@ -331,6 +331,12 @@ class ExportDialog(QDialog):
             "vjing_mappings": {
                 m.letter: m.effect for m in self.context.config.video_exporter.vjing_mappings
             },
+            # Waveform layer settings
+            "waveform_height_ratio": self.context.config.video_exporter.waveform_height_ratio,
+            "waveform_bass_color": self.context.config.video_exporter.waveform_bass_color,
+            "waveform_mid_color": self.context.config.video_exporter.waveform_mid_color,
+            "waveform_treble_color": self.context.config.video_exporter.waveform_treble_color,
+            "waveform_cursor_color": self.context.config.video_exporter.waveform_cursor_color,
         }
 
     def _start_export(self) -> None:

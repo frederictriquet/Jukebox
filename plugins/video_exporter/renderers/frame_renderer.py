@@ -29,6 +29,7 @@ class FrameRenderer:
         track_metadata: dict[str, Any],
         video_clips_folder: str = "",
         vjing_mappings: dict[str, str] | None = None,
+        waveform_config: dict[str, Any] | None = None,
     ) -> None:
         """Initialize frame renderer.
 
@@ -43,6 +44,7 @@ class FrameRenderer:
             track_metadata: Track metadata dictionary.
             video_clips_folder: Path to folder with video clips for background.
             vjing_mappings: Genre letter to effect mapping.
+            waveform_config: Waveform layer configuration (height_ratio, colors).
         """
         self.width = width
         self.height = height
@@ -53,6 +55,7 @@ class FrameRenderer:
         self.track_metadata = track_metadata
         self.video_clips_folder = video_clips_folder
         self.vjing_mappings = vjing_mappings or {}
+        self.waveform_config = waveform_config or {}
 
         # Initialize enabled layers
         self.layers: list[BaseVisualLayer] = []
@@ -110,7 +113,14 @@ class FrameRenderer:
             try:
                 from plugins.video_exporter.layers.waveform_layer import WaveformLayer
 
-                layer = WaveformLayer(**common_kwargs)
+                layer = WaveformLayer(
+                    **common_kwargs,
+                    waveform_height_ratio=self.waveform_config.get("height_ratio", 0.3),
+                    bass_color=self.waveform_config.get("bass_color"),
+                    mid_color=self.waveform_config.get("mid_color"),
+                    treble_color=self.waveform_config.get("treble_color"),
+                    cursor_color=self.waveform_config.get("cursor_color"),
+                )
                 self.layers.append(layer)
                 logging.info("[Frame Renderer] Waveform layer enabled")
             except Exception as e:

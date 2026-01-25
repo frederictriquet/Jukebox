@@ -135,6 +135,12 @@ video_exporter:
   dynamics_enabled: true
   vjing_enabled: false
   video_background_enabled: false
+  # Waveform layer settings
+  waveform_height_ratio: 0.15
+  waveform_bass_color: "#0066FF"
+  waveform_mid_color: "#00FF00"
+  waveform_treble_color: "#FFFFFF"
+  waveform_cursor_color: "#FFFFFF"
   vjing_mappings:
     - letter: "E"
       effect: "strobe"
