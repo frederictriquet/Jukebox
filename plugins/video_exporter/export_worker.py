@@ -124,6 +124,7 @@ class VideoExportWorker(QThread):
                 vjing_preset=self.config.get("vjing_preset", ""),
                 vjing_presets=self.config.get("vjing_presets", {}),
                 waveform_config=waveform_config,
+                effect_intensities=self.config.get("effect_intensities", {}),
             )
         except Exception as e:
             self.error.emit(f"Failed to initialize renderer: {e}")

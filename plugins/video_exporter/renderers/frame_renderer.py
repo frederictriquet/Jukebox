@@ -33,6 +33,7 @@ class FrameRenderer:
         vjing_presets: dict[str, list[str]] | None = None,
         waveform_config: dict[str, Any] | None = None,
         use_gpu: bool = True,
+        effect_intensities: dict[str, float] | None = None,
     ) -> None:
         """Initialize frame renderer.
 
@@ -51,6 +52,7 @@ class FrameRenderer:
             vjing_presets: Available presets {name: [effects]}.
             waveform_config: Waveform layer configuration (height_ratio, colors).
             use_gpu: Whether to enable GPU acceleration (disable for parallel rendering).
+            effect_intensities: Per-effect intensity overrides {effect_name: intensity}.
         """
         self.width = width
         self.height = height
@@ -65,6 +67,7 @@ class FrameRenderer:
         self.vjing_presets = vjing_presets or {}
         self.waveform_config = waveform_config or {}
         self.use_gpu = use_gpu
+        self.effect_intensities = effect_intensities or {}
 
         # Initialize enabled layers
         self.layers: list[BaseVisualLayer] = []
@@ -162,6 +165,7 @@ class FrameRenderer:
                     preset=self.vjing_preset,
                     presets=self.vjing_presets,
                     use_gpu=self.use_gpu,
+                    effect_intensities=self.effect_intensities,
                 )
                 self.layers.append(layer)
                 logging.info("[Frame Renderer] VJing layer enabled")

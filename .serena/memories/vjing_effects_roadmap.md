@@ -124,7 +124,7 @@ Cette roadmap définit le plan d'implémentation et d'amélioration des effets v
 ### 8.4 Configuration avancée
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Intensité par effet | ⬜ | Slider d'intensité individuel |
+| Intensité par effet | ✅ | Slider d'intensité individuel |
 | Palette de couleurs | ⬜ | Palettes configurables par effet |
 | Sensibilité audio | ⬜ | Ajuster réactivité par bande |
 | Mode preview | ⬜ | Aperçu temps réel dans le dialog |
@@ -182,6 +182,21 @@ DEFAULT_MAPPINGS = {
 ---
 
 ## Changelog
+
+### v1.11 (2026-01-25)
+- Ajout intensité par effet (sliders individuels dans le dialog)
+- Nouveau paramètre `effect_intensities` dans VJingLayer
+- Méthode `_get_intensity(effect_name)` pour récupérer l'intensité
+- `_current_intensity` mis à jour avant chaque effet
+- UI: slider global + sliders pour fractal, plasma, wormhole, voronoi, metaballs, fire, smoke
+
+### v1.10 (2026-01-25)
+- Fix crash GPU avec workers parallèles (OpenGL non thread-safe)
+- Système de pré-rendu GPU : frames GPU rendues séquentiellement avant les workers
+- Cache `_gpu_frame_cache` dans VJingLayer pour stocker les frames pré-rendues
+- Méthode `prerender_gpu_frames()` dans VJingLayer
+- Méthode `prerender_gpu()` dans FrameRenderer
+- Le GPU est utilisé efficacement, puis le compositing est parallélisé
 
 ### v1.9 (2026-01-25)
 - Ajout shaders GPU avec ModernGL pour effets lourds

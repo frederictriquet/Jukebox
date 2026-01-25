@@ -335,6 +335,7 @@ class VJingLayer(BaseVisualLayer):
         preset: str = "",
         presets: dict[str, list[str]] | None = None,
         intensity: float = 0.7,
+        effect_intensities: dict[str, float] | None = None,
         transitions_enabled: bool = True,
         transition_duration: float = 2.0,
         effect_cycle_duration: float = 8.0,
@@ -354,7 +355,8 @@ class VJingLayer(BaseVisualLayer):
             effect_mappings: Custom letter to effects list mappings.
             preset: Name of preset to use (overrides genre mapping).
             presets: Available presets {name: [effects]}.
-            intensity: Effect intensity (0.0 to 1.0).
+            intensity: Default effect intensity (0.0 to 1.0).
+            effect_intensities: Per-effect intensity overrides {effect_name: intensity}.
             transitions_enabled: Enable smooth transitions between effects.
             transition_duration: Duration of fade transition in seconds.
             effect_cycle_duration: How long each effect is prominently visible.
@@ -362,7 +364,10 @@ class VJingLayer(BaseVisualLayer):
             **kwargs: Additional parameters.
         """
         self.genre = genre
-        self.intensity = intensity
+        self.effect_intensities = effect_intensities or {}
+        # Use _global from effect_intensities if provided, otherwise use intensity param
+        self.intensity = self.effect_intensities.pop("_global", intensity)
+        self._current_intensity = self.intensity  # Set by render() for current effect
         self.preset = preset
         self.presets = presets or {}
         self.transitions_enabled = transitions_enabled
@@ -428,6 +433,17 @@ class VJingLayer(BaseVisualLayer):
 
         logging.debug(f"[VJingLayer] Initialized {len(self.lfos)} LFOs")
 
+    def _get_intensity(self, effect_name: str) -> float:
+        """Get intensity for a specific effect.
+
+        Args:
+            effect_name: Name of the effect.
+
+        Returns:
+            Effect-specific intensity if set, otherwise default intensity.
+        """
+        return self.effect_intensities.get(effect_name, self.intensity)
+
     def _init_gpu_renderer(self) -> None:
         """Initialize GPU shader renderer if available.
 
@@ -490,6 +506,7 @@ class VJingLayer(BaseVisualLayer):
             frame_cache: dict[str, Image.Image] = {}
 
             for effect_name in gpu_effects:
+                effect_intensity = self._get_intensity(effect_name)
                 img = self._gpu_renderer.render(
                     effect_name,
                     time_pos,
@@ -497,7 +514,7 @@ class VJingLayer(BaseVisualLayer):
                     bass=ctx["bass"],
                     mid=ctx["mid"],
                     treble=ctx["treble"],
-                    intensity=self.intensity,
+                    intensity=effect_intensity,
                 )
                 if img is not None:
                     frame_cache[effect_name] = img
@@ -548,7 +565,7 @@ class VJingLayer(BaseVisualLayer):
             bass=ctx.get("bass", 0.5),
             mid=ctx.get("mid", 0.5),
             treble=ctx.get("treble", 0.5),
-            intensity=self.intensity,
+            intensity=self._current_intensity,
         )
 
     def _determine_effects(self) -> list[str]:
@@ -823,6 +840,7 @@ class VJingLayer(BaseVisualLayer):
         else:
             # Render all active effects (composited together)
             for effect_name in self.active_effects:
+                self._current_intensity = self._get_intensity(effect_name)
                 effect_method = getattr(self, f"_render_{effect_name}", self._render_wave)
                 effect_method(img, frame_idx, time_pos, ctx)
 
@@ -898,6 +916,9 @@ class VJingLayer(BaseVisualLayer):
             # Create temporary image for this effect
             effect_img = self.create_transparent_image()
 
+            # Set effect-specific intensity
+            self._current_intensity = self._get_intensity(effect_name)
+
             # Render effect
             effect_method = getattr(self, f"_render_{effect_name}", self._render_wave)
             effect_method(effect_img, frame_idx, time_pos, ctx)
@@ -954,8 +975,8 @@ class VJingLayer(BaseVisualLayer):
 
         max_radius = min(self.width, self.height) // 2
         decay = math.exp(-frames_since_beat / 10)
-        radius = int(max_radius * decay * self.intensity)
-        alpha = int(150 * decay * self.intensity)
+        radius = int(max_radius * decay * self._current_intensity)
+        alpha = int(150 * decay * self._current_intensity)
 
         if radius > 5:
             # Draw expanding ring
@@ -980,7 +1001,7 @@ class VJingLayer(BaseVisualLayer):
             # Strobe frequency increases with energy
             strobe_rate = 2 if energy > 0.7 else 3 if energy > 0.5 else 4
             if frame_idx % strobe_rate < strobe_rate // 2 + 1:
-                alpha = min(255, int(300 * energy * self.intensity))
+                alpha = min(255, int(300 * energy * self._current_intensity))
                 flash = Image.new("RGBA", (self.width, self.height), (255, 255, 255, alpha))
                 img.paste(flash, (0, 0), flash)
 
@@ -1001,14 +1022,14 @@ class VJingLayer(BaseVisualLayer):
 
         for i, amplitude in enumerate(fft):
             x = i * bar_width
-            height = int(amplitude * max_height * self.intensity)
+            height = int(amplitude * max_height * self._current_intensity)
 
             # Color gradient based on frequency
             hue = i / n_bars
             r = int(255 * (1 - hue))
             g = int(255 * abs(0.5 - hue) * 2)
             b = int(255 * hue)
-            alpha = int(180 * self.intensity)
+            alpha = int(180 * self._current_intensity)
 
             # Draw bar from bottom
             y = self.height - height
@@ -1067,7 +1088,7 @@ class VJingLayer(BaseVisualLayer):
         center = (self.width // 2, self.height // 2)
 
         # Draw warped concentric shapes
-        n_shapes = int(10 * bass * self.intensity)
+        n_shapes = int(10 * bass * self._current_intensity)
         for i in range(n_shapes):
             progress = i / max(n_shapes, 1)
             base_radius = 50 + progress * min(self.width, self.height) * 0.4
@@ -1087,7 +1108,7 @@ class VJingLayer(BaseVisualLayer):
                 points.append((x, y))
             points.append(points[0])  # Close shape
 
-            alpha = int(100 * (1 - progress) * self.intensity)
+            alpha = int(100 * (1 - progress) * self._current_intensity)
             color = (int(255 * bass), 50, int(255 * (1 - bass)), alpha)
             draw.line(points, fill=color, width=2)
 
@@ -1133,7 +1154,7 @@ class VJingLayer(BaseVisualLayer):
                 particle["y"] = random.random() * self.height
 
             # Draw particle
-            size = int(particle["size"] * (1 + energy * 0.5) * self.intensity)
+            size = int(particle["size"] * (1 + energy * 0.5) * self._current_intensity)
             alpha = int(150 * self.intensity * (particle["life"] / 100))
             color = (*particle["color"], alpha)
 
@@ -1244,8 +1265,8 @@ class VJingLayer(BaseVisualLayer):
 
                 if p["life"] > 0:
                     x, y = int(p["x"]), int(p["y"])
-                    size = int(p["size"] * (p["life"] / 60) * self.intensity)
-                    alpha = int(200 * (p["life"] / 60) * self.intensity)
+                    size = int(p["size"] * (p["life"] / 60) * self._current_intensity)
+                    alpha = int(200 * (p["life"] / 60) * self._current_intensity)
 
                     if 0 <= x < self.width and 0 <= y < self.height:
                         draw.ellipse(
@@ -1385,7 +1406,7 @@ class VJingLayer(BaseVisualLayer):
             points.append(points[0])
 
             # Color fades with depth, modulated by LFO
-            alpha = int(200 * (1 - z) * self.intensity)
+            alpha = int(200 * (1 - z) * self._current_intensity)
             hue = (i / n_rings + hue_offset) % 1.0
             r = int(100 + 155 * (1 - hue))
             g = int(50 + 100 * energy)
@@ -1428,7 +1449,7 @@ class VJingLayer(BaseVisualLayer):
                 r = int(255 * (1 - progress))
                 g = int(100 + 155 * energy)
                 b = int(255 * progress)
-                alpha = int(180 * self.intensity)
+                alpha = int(180 * self._current_intensity)
                 draw.line([points[i], points[i + 1]], fill=(r, g, b, alpha), width=2)
 
     # ========================================================================
@@ -1442,7 +1463,7 @@ class VJingLayer(BaseVisualLayer):
         bass = ctx["bass"]
 
         # Offset amount based on bass
-        offset = int(5 + bass * 15 * self.intensity)
+        offset = int(5 + bass * 15 * self._current_intensity)
 
         if offset < 2:
             return
@@ -1469,7 +1490,7 @@ class VJingLayer(BaseVisualLayer):
         bass = ctx["bass"]
 
         # Pixel size based on bass
-        pixel_size = int(5 + bass * 20 * self.intensity)
+        pixel_size = int(5 + bass * 20 * self._current_intensity)
 
         if pixel_size < 3:
             return
@@ -1481,7 +1502,7 @@ class VJingLayer(BaseVisualLayer):
         pixelated = small.resize((self.width, self.height), Image.Resampling.NEAREST)
 
         # Blend with original based on energy
-        alpha = int(255 * bass * self.intensity)
+        alpha = int(255 * bass * self._current_intensity)
         mask = Image.new("L", (self.width, self.height), alpha)
         img.paste(Image.composite(pixelated, img, mask), (0, 0))
 
@@ -1531,7 +1552,7 @@ class VJingLayer(BaseVisualLayer):
         bass = ctx["bass"]
 
         # Fire height based on bass
-        fire_height = int(self.height * 0.4 * (0.5 + bass * 0.5) * self.intensity)
+        fire_height = int(self.height * 0.4 * (0.5 + bass * 0.5) * self._current_intensity)
 
         for y in range(fire_height):
             progress = y / max(fire_height, 1)
@@ -1544,7 +1565,7 @@ class VJingLayer(BaseVisualLayer):
             else:
                 r, g, b = int(255 - (progress - 0.6) * 400), 0, 0
 
-            alpha = int(150 * (1 - progress) * self.intensity)
+            alpha = int(150 * (1 - progress) * self._current_intensity)
 
             # Animated flame shape using turbulence noise
             for x in range(0, self.width, 3):
@@ -1588,7 +1609,7 @@ class VJingLayer(BaseVisualLayer):
                 new_ripples.append(ripple)
 
                 # Draw concentric circles
-                alpha = int(100 * (ripple["life"] / 60) * self.intensity)
+                alpha = int(100 * (ripple["life"] / 60) * self._current_intensity)
                 for i in range(3):
                     r = ripple["radius"] - i * 10
                     if r > 0:
@@ -1709,7 +1730,7 @@ class VJingLayer(BaseVisualLayer):
             # Pulsating size
             base_size = 100 + i * 50
             pulse = math.sin(time_pos * 2 + i) * 20 * energy
-            size = int((base_size + pulse) * self.intensity)
+            size = int((base_size + pulse) * self._current_intensity)
 
             x = self.width // 2 + math.cos(time_pos + i * 2) * 100
             y = self.height // 2 + math.sin(time_pos * 0.5 + i) * 50
@@ -1743,7 +1764,7 @@ class VJingLayer(BaseVisualLayer):
         n_grooves = 15
         for i in range(n_grooves):
             radius = max_radius * (i + 1) / n_grooves
-            alpha = int(60 * self.intensity)
+            alpha = int(60 * self._current_intensity)
 
             # Draw partial arc that rotates
             start_angle = rotation + i * 0.2
@@ -1884,7 +1905,7 @@ class VJingLayer(BaseVisualLayer):
         normalized = (iterations * 255 // max_iter).astype(np.uint8)
         colored = self.fractal_palette[normalized]
 
-        alpha_value = int(200 * self.intensity)
+        alpha_value = int(200 * self._current_intensity)
         fractal_small = Image.fromarray(colored, mode="RGB")
         fractal_full = fractal_small.resize(
             (self.width, self.height), Image.Resampling.BILINEAR
@@ -1931,12 +1952,12 @@ class VJingLayer(BaseVisualLayer):
             r = int(max_radius * r_ratio)
             draw.ellipse(
                 [cx - r, cy - r, cx + r, cy + r],
-                outline=(0, 100, 0, int(60 * self.intensity)),
+                outline=(0, 100, 0, int(60 * self._current_intensity)),
                 width=1,
             )
 
         # Draw cross lines
-        alpha = int(60 * self.intensity)
+        alpha = int(60 * self._current_intensity)
         draw.line([(cx - max_radius, cy), (cx + max_radius, cy)], fill=(0, 100, 0, alpha))
         draw.line([(cx, cy - max_radius), (cx, cy + max_radius)], fill=(0, 100, 0, alpha))
 
@@ -1944,7 +1965,7 @@ class VJingLayer(BaseVisualLayer):
         num_trail = 30
         for i in range(num_trail):
             trail_angle = angle - i * 0.03
-            trail_alpha = int((1.0 - i / num_trail) * 180 * self.intensity)
+            trail_alpha = int((1.0 - i / num_trail) * 180 * self._current_intensity)
             x_end = cx + int(math.cos(trail_angle) * max_radius)
             y_end = cy + int(math.sin(trail_angle) * max_radius)
 
@@ -1977,7 +1998,7 @@ class VJingLayer(BaseVisualLayer):
                 if blip["life"] > 0:
                     bx = cx + int(math.cos(blip["angle"]) * blip["distance"])
                     by = cy + int(math.sin(blip["angle"]) * blip["distance"])
-                    alpha = int((blip["life"] / 30) * 255 * self.intensity)
+                    alpha = int((blip["life"] / 30) * 255 * self._current_intensity)
                     size = int(blip["size"])
                     draw.ellipse(
                         [bx - size, by - size, bx + size, by + size],
@@ -2069,7 +2090,7 @@ class VJingLayer(BaseVisualLayer):
         # Convert to RGBA with alpha
         plasma_rgba = plasma_full.convert("RGBA")
         r_ch, g_ch, b_ch, _ = plasma_rgba.split()
-        alpha_value = int(180 * self.intensity)
+        alpha_value = int(180 * self._current_intensity)
         alpha = Image.new("L", (self.width, self.height), alpha_value)
         plasma_rgba = Image.merge("RGBA", (r_ch, g_ch, b_ch, alpha))
 
@@ -2151,7 +2172,7 @@ class VJingLayer(BaseVisualLayer):
 
         wormhole_rgba = wormhole_full.convert("RGBA")
         r_ch, g_ch, b_ch, _ = wormhole_rgba.split()
-        alpha_value = int(200 * self.intensity)
+        alpha_value = int(200 * self._current_intensity)
         alpha = Image.new("L", (self.width, self.height), alpha_value)
         wormhole_rgba = Image.merge("RGBA", (r_ch, g_ch, b_ch, alpha))
 
@@ -2234,7 +2255,7 @@ class VJingLayer(BaseVisualLayer):
                 r = max(0, min(255, base_brightness - blue_tint // 2))
                 g = max(0, min(255, base_brightness - blue_tint // 3))
                 b = max(0, min(255, base_brightness + blue_tint))
-                alpha = int(min(255, base_brightness) * self.intensity)
+                alpha = int(min(255, base_brightness) * self._current_intensity)
 
                 # Draw star
                 if size <= 1:
@@ -2360,7 +2381,7 @@ class VJingLayer(BaseVisualLayer):
 
         # Draw main bolt
         brightness = int(255 * intensity * (1 - depth * 0.15))
-        alpha = int(min(255, brightness + 50) * self.intensity)
+        alpha = int(min(255, brightness + 50) * self._current_intensity)
         width = max(1, 4 - depth)
 
         # Core (white/blue)
@@ -2496,7 +2517,7 @@ class VJingLayer(BaseVisualLayer):
 
         voronoi_rgba = voronoi_full.convert("RGBA")
         r_ch, g_ch, b_ch, _ = voronoi_rgba.split()
-        alpha_value = int(180 * self.intensity)
+        alpha_value = int(180 * self._current_intensity)
         alpha = Image.new("L", (self.width, self.height), alpha_value)
         voronoi_rgba = Image.merge("RGBA", (r_ch, g_ch, b_ch, alpha))
 
@@ -2592,7 +2613,7 @@ class VJingLayer(BaseVisualLayer):
         b[inside] = np.clip(b[inside].astype(np.int16) + 80, 0, 255).astype(np.uint8)
 
         rgb = np.stack([r, g, b], axis=-1)
-        alpha_arr = (glow * 200 * self.intensity).astype(np.uint8)
+        alpha_arr = (glow * 200 * self._current_intensity).astype(np.uint8)
         rgba = np.dstack([rgb, alpha_arr])
 
         metaball_small = Image.fromarray(rgba, mode="RGBA")
@@ -2697,7 +2718,7 @@ class VJingLayer(BaseVisualLayer):
                 continue
 
             # Calculate alpha based on life
-            alpha = int(p["alpha"] * p["life"] * 255 * self.intensity)
+            alpha = int(p["alpha"] * p["life"] * 255 * self._current_intensity)
             if alpha < 5:
                 continue
 

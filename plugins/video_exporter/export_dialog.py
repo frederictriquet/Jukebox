@@ -17,13 +17,17 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QGridLayout,
     QProgressBar,
     QPushButton,
+    QScrollArea,
+    QSlider,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
+from PySide6.QtCore import Qt
 
 from jukebox.core.event_bus import Events
 
@@ -115,6 +119,39 @@ class ExportDialog(QDialog):
             QCheckBox {
                 spacing: 8px;
                 padding: 4px 0;
+            }
+            QLabel {
+                color: #ffffff;
+            }
+            QComboBox {
+                color: #ffffff;
+                background: #3c3c3c;
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 4px 8px;
+            }
+            QComboBox::drop-down {
+                border: none;
+            }
+            QComboBox QAbstractItemView {
+                color: #ffffff;
+                background: #3c3c3c;
+                selection-background-color: #0078d4;
+            }
+            QSlider::groove:horizontal {
+                height: 6px;
+                background: #555;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background: #0078d4;
+                width: 14px;
+                margin: -4px 0;
+                border-radius: 7px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #0078d4;
+                border-radius: 3px;
             }
         """)
 
@@ -218,8 +255,14 @@ class ExportDialog(QDialog):
 
     def _create_layers_tab(self) -> None:
         """Create the layers settings tab."""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
+        # Create scroll area for the tab content
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+
+        # Content widget inside scroll area
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setSpacing(12)
 
         # Layer toggles group
@@ -255,25 +298,93 @@ class ExportDialog(QDialog):
         self.video_bg_check = QCheckBox("Video Background")
         layers_layout.addWidget(self.video_bg_check)
 
+        # Video folder selector (indented under Video Background)
+        video_folder_layout = QHBoxLayout()
+        video_folder_layout.addSpacing(24)  # Indent
+        video_folder_layout.addWidget(QLabel("Folder:"))
+        self.video_folder_edit = QLineEdit()
+        self.video_folder_edit.setPlaceholderText("Click to select folder...")
+        self.video_folder_edit.setReadOnly(True)
+        self.video_folder_edit.setCursor(Qt.PointingHandCursor)
+        self.video_folder_edit.mousePressEvent = lambda e: self._browse_video_folder()
+        video_folder_layout.addWidget(self.video_folder_edit)
+        layers_layout.addLayout(video_folder_layout)
+
         layout.addWidget(layers_group)
 
-        # Video background folder
-        bg_group = QGroupBox("Video Background Settings")
-        bg_layout = QFormLayout(bg_group)
+        # Effect intensities group
+        intensity_group = QGroupBox("Effect Intensities")
+        intensity_group.setMinimumHeight(320)  # Ensure enough height for all sliders
+        intensity_layout = QGridLayout(intensity_group)
+        intensity_layout.setContentsMargins(12, 20, 12, 12)
+        intensity_layout.setVerticalSpacing(8)
+        intensity_layout.setColumnStretch(1, 1)  # Slider column stretches
+        intensity_layout.setColumnMinimumWidth(0, 80)  # Label column min width
+        intensity_layout.setColumnMinimumWidth(2, 40)  # Percentage column min width
 
-        video_folder_layout = QHBoxLayout()
-        self.video_folder_edit = QLineEdit()
-        self.video_folder_edit.setPlaceholderText("Folder with video clips...")
-        video_folder_layout.addWidget(self.video_folder_edit)
-        browse_video_button = QPushButton("Browse...")
-        browse_video_button.clicked.connect(self._browse_video_folder)
-        video_folder_layout.addWidget(browse_video_button)
-        bg_layout.addRow("Video Clips Folder:", video_folder_layout)
+        row = 0
 
-        layout.addWidget(bg_group)
+        # Global intensity slider
+        global_label = QLabel("Global:")
+        global_label.setFixedHeight(28)
+        self.global_intensity_slider = QSlider(Qt.Horizontal)
+        self.global_intensity_slider.setRange(0, 100)
+        self.global_intensity_slider.setValue(70)
+        self.global_intensity_slider.setMinimumWidth(150)
+        self.global_intensity_slider.setFixedHeight(28)
+        self.global_intensity_slider.setToolTip("Default intensity for all effects")
+        self.global_intensity_label = QLabel("70%")
+        self.global_intensity_label.setMinimumWidth(40)
+        self.global_intensity_label.setFixedHeight(28)
+        self.global_intensity_slider.valueChanged.connect(
+            lambda v: self.global_intensity_label.setText(f"{v}%")
+        )
+        intensity_layout.addWidget(global_label, row, 0)
+        intensity_layout.addWidget(self.global_intensity_slider, row, 1)
+        intensity_layout.addWidget(self.global_intensity_label, row, 2)
+        row += 1
+
+        # Per-effect intensity sliders (main GPU effects)
+        self.effect_intensity_sliders: dict[str, QSlider] = {}
+        self.effect_intensity_labels: dict[str, QLabel] = {}
+
+        gpu_effects = [
+            ("fractal", "Fractal"),
+            ("plasma", "Plasma"),
+            ("wormhole", "Wormhole"),
+            ("voronoi", "Voronoi"),
+            ("metaballs", "Metaballs"),
+            ("fire", "Fire"),
+            ("smoke", "Smoke"),
+        ]
+
+        for effect_id, effect_name in gpu_effects:
+            name_label = QLabel(f"{effect_name}:")
+            name_label.setFixedHeight(28)
+            slider = QSlider(Qt.Horizontal)
+            slider.setRange(0, 100)
+            slider.setValue(70)
+            slider.setMinimumWidth(150)
+            slider.setFixedHeight(28)
+            slider.setToolTip(f"Intensity for {effect_name} effect")
+            value_label = QLabel("70%")
+            value_label.setMinimumWidth(40)
+            value_label.setFixedHeight(28)
+            slider.valueChanged.connect(
+                lambda v, lbl=value_label: lbl.setText(f"{v}%")
+            )
+            intensity_layout.addWidget(name_label, row, 0)
+            intensity_layout.addWidget(slider, row, 1)
+            intensity_layout.addWidget(value_label, row, 2)
+            self.effect_intensity_sliders[effect_id] = slider
+            self.effect_intensity_labels[effect_id] = value_label
+            row += 1
+
+        layout.addWidget(intensity_group)
         layout.addStretch()
 
-        self.tabs.addTab(tab, "Layers")
+        scroll.setWidget(content)
+        self.tabs.addTab(scroll, "Layers")
 
     def _load_defaults(self) -> None:
         """Load default values from config."""
@@ -315,6 +426,30 @@ class ExportDialog(QDialog):
         if directory:
             self.video_folder_edit.setText(directory)
 
+
+    def _get_effect_intensities(self) -> dict[str, float]:
+        """Build effect intensities dictionary from UI sliders.
+
+        Returns:
+            Dictionary of effect_name -> intensity (0.0-1.0).
+            Only includes effects with non-default intensities.
+        """
+        global_intensity = self.global_intensity_slider.value() / 100.0
+        intensities: dict[str, float] = {}
+
+        for effect_id, slider in self.effect_intensity_sliders.items():
+            effect_intensity = slider.value() / 100.0
+            # Only include if different from global
+            if abs(effect_intensity - global_intensity) > 0.01:
+                intensities[effect_id] = effect_intensity
+
+        # Set global intensity for all effects not explicitly set
+        # This is handled by VJingLayer using self.intensity as default
+        # We store it as "_global" key for reference
+        intensities["_global"] = global_intensity
+
+        return intensities
+
     def _get_export_config(self) -> dict[str, Any]:
         """Get export configuration from UI.
 
@@ -355,6 +490,8 @@ class ExportDialog(QDialog):
             "waveform_mid_color": self.context.config.video_exporter.waveform_mid_color,
             "waveform_treble_color": self.context.config.video_exporter.waveform_treble_color,
             "waveform_cursor_color": self.context.config.video_exporter.waveform_cursor_color,
+            # Effect intensities
+            "effect_intensities": self._get_effect_intensities(),
         }
 
     def _start_export(self) -> None:
