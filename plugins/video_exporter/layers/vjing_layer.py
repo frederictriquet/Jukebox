@@ -25,15 +25,17 @@ class VJingLayer(BaseVisualLayer):
     - Rhythm: pulse, strobe
     - Spectrum: fft_bars, fft_rings, bass_warp
     - Particles: particles, flow_field, explosion
-    - Geometric: kaleidoscope, lissajous, tunnel, spiral, fractal
+    - Geometric: kaleidoscope, lissajous, tunnel, spiral, fractal, wormhole
     - Post-processing: chromatic, glitch, pixelate, feedback
-    - Nature: fire, water, aurora
+    - Nature: fire, water, aurora, plasma
     - Classic: wave, neon, vinyl
+    - Cyber: radar
     """
 
     z_index = 4
 
     # Default effect mappings (based on genre_editor codes)
+    # Valid genres: D, C, P, T, H, G, I, A, W, B, F, R, L, U, O, N
     DEFAULT_MAPPINGS = {
         "D": "aurora",  # Deep - chill, ambient
         "C": "kaleidoscope",  # Classic - elegant
@@ -43,10 +45,12 @@ class VJingLayer(BaseVisualLayer):
         "G": "flow_field",  # Garden - natural
         "I": "neon",  # Ibiza - club, colorful
         "A": "wave",  # A Cappella - soft
-        "W": "aurora",  # Weed - chill, relaxing
+        "W": "plasma",  # Weed - chill, psychedelic
         "B": "glitch",  # Banger - intense
+        "F": "particles",  # Fun - playful, festive
         "R": "vinyl",  # Retro - vintage
-        "L": "lissajous",  # Loop - repetitive
+        "L": "lissajous",  # Loop - repetitive, hypnotic
+        "U": "wormhole",  # Unclassable - weird, experimental
         "O": "flow_field",  # Organic - natural
         "N": "wave",  # Namaste - zen, calm
     }
@@ -76,6 +80,9 @@ class VJingLayer(BaseVisualLayer):
         "neon",
         "vinyl",
         "fractal",
+        "radar",
+        "plasma",
+        "wormhole",
     ]
 
     def __init__(
@@ -226,6 +233,10 @@ class VJingLayer(BaseVisualLayer):
             self._init_water()
         if "fractal" in self.active_effects:
             self._init_fractal()
+        if "plasma" in self.active_effects:
+            self._init_plasma()
+        if "wormhole" in self.active_effects:
+            self._init_wormhole()
 
     def _detect_beats(self) -> None:
         """Simple beat detection based on energy peaks."""
@@ -1353,3 +1364,271 @@ class VJingLayer(BaseVisualLayer):
 
         # Composite onto image
         img.paste(fractal_rgba, (0, 0), fractal_rgba)
+
+    # ========================================================================
+    # RADAR EFFECT
+    # ========================================================================
+
+    def _render_radar(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render radar sweep effect.
+
+        Rotating beam with blips appearing on beats.
+
+        Args:
+            img: Image to draw on.
+            frame_idx: Frame index.
+            time_pos: Time position in seconds.
+            ctx: Audio context dict.
+        """
+        draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        is_beat = ctx["is_beat"]
+
+        cx, cy = self.width // 2, self.height // 2
+        max_radius = min(self.width, self.height) // 2 - 20
+
+        # Sweep angle - rotates over time, speed affected by energy
+        sweep_speed = 1.0 + energy * 0.5
+        angle = time_pos * sweep_speed * 2
+
+        # Draw concentric circles (grid)
+        for r_ratio in [0.25, 0.5, 0.75, 1.0]:
+            r = int(max_radius * r_ratio)
+            draw.ellipse(
+                [cx - r, cy - r, cx + r, cy + r],
+                outline=(0, 100, 0, int(60 * self.intensity)),
+                width=1,
+            )
+
+        # Draw cross lines
+        alpha = int(60 * self.intensity)
+        draw.line([(cx - max_radius, cy), (cx + max_radius, cy)], fill=(0, 100, 0, alpha))
+        draw.line([(cx, cy - max_radius), (cx, cy + max_radius)], fill=(0, 100, 0, alpha))
+
+        # Draw sweep beam with trail
+        num_trail = 30
+        for i in range(num_trail):
+            trail_angle = angle - i * 0.03
+            trail_alpha = int((1.0 - i / num_trail) * 180 * self.intensity)
+            x_end = cx + int(math.cos(trail_angle) * max_radius)
+            y_end = cy + int(math.sin(trail_angle) * max_radius)
+
+            # Brighter green for main beam
+            if i < 3:
+                color = (100, 255, 100, trail_alpha)
+            else:
+                color = (0, int(200 * (1 - i / num_trail)), 0, trail_alpha)
+
+            draw.line([(cx, cy), (x_end, y_end)], fill=color, width=2 if i < 5 else 1)
+
+        # Draw blips on beats
+        if is_beat:
+            # Add new blip at random position on current sweep line
+            if not hasattr(self, "radar_blips"):
+                self.radar_blips = []
+            blip_dist = random.random() * max_radius * 0.8 + max_radius * 0.1
+            self.radar_blips.append({
+                "angle": angle,
+                "distance": blip_dist,
+                "life": 30,
+                "size": 3 + bass * 5,
+            })
+
+        # Draw and update blips
+        if hasattr(self, "radar_blips"):
+            new_blips = []
+            for blip in self.radar_blips:
+                blip["life"] -= 1
+                if blip["life"] > 0:
+                    bx = cx + int(math.cos(blip["angle"]) * blip["distance"])
+                    by = cy + int(math.sin(blip["angle"]) * blip["distance"])
+                    alpha = int((blip["life"] / 30) * 255 * self.intensity)
+                    size = int(blip["size"])
+                    draw.ellipse(
+                        [bx - size, by - size, bx + size, by + size],
+                        fill=(100, 255, 100, alpha),
+                    )
+                    new_blips.append(blip)
+            self.radar_blips = new_blips[:50]  # Limit blips
+
+    # ========================================================================
+    # PLASMA EFFECT
+    # ========================================================================
+
+    def _init_plasma(self) -> None:
+        """Initialize plasma effect coordinate grid."""
+        self.plasma_scale = 4
+        self.plasma_width = self.width // self.plasma_scale
+        self.plasma_height = self.height // self.plasma_scale
+        # Create coordinate grids
+        y_coords = np.linspace(0, 4 * math.pi, self.plasma_height)
+        x_coords = np.linspace(0, 4 * math.pi, self.plasma_width)
+        self.plasma_x, self.plasma_y = np.meshgrid(x_coords, y_coords)
+
+    def _render_plasma(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render animated plasma effect.
+
+        Classic plasma using combined sine waves with audio modulation.
+
+        Args:
+            img: Image to draw on.
+            frame_idx: Frame index.
+            time_pos: Time position in seconds.
+            ctx: Audio context dict.
+        """
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        mid = ctx["mid"]
+
+        # Time-based animation
+        t = time_pos * 2
+
+        # Plasma function - multiple sine waves combined
+        # Each component modulated by different audio bands
+        v1 = np.sin(self.plasma_x + t + bass * math.pi)
+        v2 = np.sin(self.plasma_y + t * 0.7 + mid * math.pi)
+        v3 = np.sin((self.plasma_x + self.plasma_y + t * 0.5) * 0.5)
+        v4 = np.sin(
+            np.sqrt(
+                (self.plasma_x - 2 * math.pi) ** 2 + (self.plasma_y - 2 * math.pi) ** 2
+            )
+            + t
+            + energy * math.pi
+        )
+
+        # Combine waves
+        plasma = (v1 + v2 + v3 + v4) / 4.0
+
+        # Normalize to 0-1
+        plasma = (plasma + 1.0) / 2.0
+
+        # Create RGB from plasma value
+        # Use cycling colors based on time
+        r = ((np.sin(plasma * math.pi * 2 + t) + 1) / 2 * 255).astype(np.uint8)
+        g = ((np.sin(plasma * math.pi * 2 + t + 2 * math.pi / 3) + 1) / 2 * 255).astype(
+            np.uint8
+        )
+        b = ((np.sin(plasma * math.pi * 2 + t + 4 * math.pi / 3) + 1) / 2 * 255).astype(
+            np.uint8
+        )
+
+        # Stack to RGB
+        rgb = np.stack([r, g, b], axis=-1)
+
+        # Create image and upscale
+        plasma_small = Image.fromarray(rgb, mode="RGB")
+        plasma_full = plasma_small.resize(
+            (self.width, self.height), Image.Resampling.BILINEAR
+        )
+
+        # Convert to RGBA with alpha
+        plasma_rgba = plasma_full.convert("RGBA")
+        r_ch, g_ch, b_ch, _ = plasma_rgba.split()
+        alpha_value = int(180 * self.intensity)
+        alpha = Image.new("L", (self.width, self.height), alpha_value)
+        plasma_rgba = Image.merge("RGBA", (r_ch, g_ch, b_ch, alpha))
+
+        # Composite
+        img.paste(plasma_rgba, (0, 0), plasma_rgba)
+
+    # ========================================================================
+    # WORMHOLE EFFECT
+    # ========================================================================
+
+    def _init_wormhole(self) -> None:
+        """Initialize wormhole effect coordinate grid."""
+        self.wormhole_scale = 3
+        self.wormhole_width = self.width // self.wormhole_scale
+        self.wormhole_height = self.height // self.wormhole_scale
+        # Create coordinate grid centered at origin
+        y_coords = np.linspace(-1, 1, self.wormhole_height)
+        x_coords = np.linspace(-1.5, 1.5, self.wormhole_width)  # Adjust for aspect ratio
+        x_grid, y_grid = np.meshgrid(x_coords, y_coords)
+        # Pre-compute polar coordinates
+        self.wormhole_r = np.sqrt(x_grid**2 + y_grid**2)
+        self.wormhole_theta = np.arctan2(y_grid, x_grid)
+
+    def _render_wormhole(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render wormhole/tunnel vortex effect.
+
+        Spiraling tunnel with depth illusion, pulled by bass.
+
+        Args:
+            img: Image to draw on.
+            frame_idx: Frame index.
+            time_pos: Time position in seconds.
+            ctx: Audio context dict.
+        """
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        mid = ctx["mid"]
+        is_beat = ctx["is_beat"]
+
+        # Animation speed
+        t = time_pos * 3
+
+        # Spiral twist amount (more twist with bass)
+        twist = 3.0 + bass * 2.0
+
+        # Pull effect (zoom into center over time)
+        pull = t * 2 + bass * 0.5
+
+        # Create tunnel pattern
+        # Radial distance creates tunnel depth
+        # Theta + radius*twist creates spiral
+        spiral_angle = self.wormhole_theta + self.wormhole_r * twist - pull
+
+        # Create ring pattern
+        ring_pattern = np.sin(self.wormhole_r * 15 - pull * 3 + mid * math.pi)
+
+        # Create spiral pattern
+        spiral_pattern = np.sin(spiral_angle * 8 + energy * math.pi)
+
+        # Combine patterns
+        combined = (ring_pattern + spiral_pattern) / 2
+
+        # Distance-based fade (darker in center, brighter at edges creates depth)
+        depth_fade = np.clip(self.wormhole_r * 1.5, 0.1, 1.0)
+
+        # Normalize
+        combined = (combined + 1) / 2 * depth_fade
+
+        # Create colors - purple/blue shifting based on time
+        hue_shift = t * 0.5
+        r = ((np.sin(combined * math.pi + hue_shift) + 1) / 2 * 100 + 50).astype(np.uint8)
+        g = ((np.sin(combined * math.pi + hue_shift + 1) + 1) / 2 * 50).astype(np.uint8)
+        b = ((np.sin(combined * math.pi + hue_shift + 2) + 1) / 2 * 200 + 55).astype(
+            np.uint8
+        )
+
+        # Beat pulse - flash brighter
+        if is_beat:
+            r = np.clip(r.astype(np.int16) + 80, 0, 255).astype(np.uint8)
+            g = np.clip(g.astype(np.int16) + 60, 0, 255).astype(np.uint8)
+            b = np.clip(b.astype(np.int16) + 60, 0, 255).astype(np.uint8)
+
+        # Stack to RGB
+        rgb = np.stack([r, g, b], axis=-1)
+
+        # Create image and upscale
+        wormhole_small = Image.fromarray(rgb, mode="RGB")
+        wormhole_full = wormhole_small.resize(
+            (self.width, self.height), Image.Resampling.BILINEAR
+        )
+
+        # Convert to RGBA
+        wormhole_rgba = wormhole_full.convert("RGBA")
+        r_ch, g_ch, b_ch, _ = wormhole_rgba.split()
+        alpha_value = int(200 * self.intensity)
+        alpha = Image.new("L", (self.width, self.height), alpha_value)
+        wormhole_rgba = Image.merge("RGBA", (r_ch, g_ch, b_ch, alpha))
+
+        # Composite
+        img.paste(wormhole_rgba, (0, 0), wormhole_rgba)

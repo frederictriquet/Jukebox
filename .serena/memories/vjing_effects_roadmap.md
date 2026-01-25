@@ -94,14 +94,14 @@ Cette roadmap définit le plan d'implémentation et d'amélioration des effets v
 
 ## Phase 8 : Améliorations futures (🔄 À FAIRE)
 
-### 8.1 Effets supplémentaires (Priorité Haute)
+### 8.1 Effets supplémentaires (Priorité Haute) ✅ COMPLÉTÉ
 | Effet | Status | Description | Complexité |
 |-------|--------|-------------|------------|
 | `fractal` | ✅ | Fractales Julia animées (modulées par audio) | Élevée |
-| `wormhole` | ⬜ | Trou de ver avec distorsion | Moyenne |
-| `plasma` | ⬜ | Plasma coloré ondulant | Moyenne |
-| `matrix` | ⬜ | Pluie de caractères style Matrix | Faible |
-| `radar` | ⬜ | Balayage radar circulaire | Faible |
+| `wormhole` | ✅ | Trou de ver avec distorsion spirale | Moyenne |
+| `plasma` | ✅ | Plasma coloré ondulant (sinus combinés) | Moyenne |
+| `matrix` | ✅ | Pluie de caractères style Matrix | Faible |
+| `radar` | ✅ | Balayage radar circulaire avec blips | Faible |
 
 ### 8.2 Effets supplémentaires (Priorité Moyenne)
 | Effet | Status | Description | Complexité |
@@ -133,20 +133,24 @@ Cette roadmap définit le plan d'implémentation et d'amélioration des effets v
 
 ## Mappings par défaut actuels
 
+Genres valides: D, C, P, T, H, G, I, A, W, B, F, R, L, U, O, N
+
 ```python
 DEFAULT_MAPPINGS = {
     "D": "aurora",       # Deep - chill, ambient
     "C": "kaleidoscope", # Classic - elegant
     "P": "strobe",       # Power - energetic
-    "T": "tunnel",       # Trance - hypnotic
+    "T": "fractal",      # Trance - hypnotic, psychedelic
     "H": "fire",         # House - groovy, warm
     "G": "flow_field",   # Garden - natural
     "I": "neon",         # Ibiza - club, colorful
     "A": "wave",         # A Cappella - soft
-    "W": "aurora",       # Weed - chill, relaxing
+    "W": "plasma",       # Weed - chill, psychedelic
     "B": "glitch",       # Banger - intense
+    "F": "matrix",       # Fun - playful, geeky
     "R": "vinyl",        # Retro - vintage
-    "L": "lissajous",    # Loop - repetitive
+    "L": "lissajous",    # Loop - repetitive, hypnotic
+    "U": "wormhole",     # Unclassable - weird, experimental
     "O": "flow_field",   # Organic - natural
     "N": "wave",         # Namaste - zen, calm
 }
@@ -178,6 +182,13 @@ DEFAULT_MAPPINGS = {
 ---
 
 ## Changelog
+
+### v1.2 (2026-01-25)
+- Ajout effet `matrix` (pluie de caractères katakana style Matrix)
+- Ajout effet `radar` (balayage radar avec blips sur beats)
+- Ajout effet `plasma` (plasma ondulant multi-couleurs)
+- Ajout effet `wormhole` (tunnel spirale avec effet de profondeur)
+- Total: 27 effets disponibles
 
 ### v1.1 (2026-01-25)
 - Ajout effet `fractal` (Julia set animé)
