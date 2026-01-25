@@ -133,7 +133,7 @@ video_exporter:
   waveform_enabled: true
   text_enabled: true
   dynamics_enabled: true
-  vjing_enabled: false
+  vjing_enabled: true
   video_background_enabled: false
   # Waveform layer settings
   waveform_height_ratio: 0.15
@@ -145,7 +145,7 @@ video_exporter:
     - letter: "E"
       effect: "strobe"
     - letter: "T"
-      effect: "glitch"
+      effect: "fractal"
     - letter: "H"
       effect: "fire"
     - letter: "R"

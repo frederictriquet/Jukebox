@@ -142,6 +142,9 @@ class FrameRenderer:
 
                 # Get genre from metadata
                 genre = self._get_metadata("genre", "")
+                logging.info(
+                    f"[Frame Renderer] VJing: genre='{genre}', mappings={self.vjing_mappings}"
+                )
                 layer = VJingLayer(
                     **common_kwargs,
                     genre=genre,

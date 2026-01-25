@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import random
 from typing import TYPE_CHECKING, Any
@@ -24,7 +25,7 @@ class VJingLayer(BaseVisualLayer):
     - Rhythm: pulse, strobe
     - Spectrum: fft_bars, fft_rings, bass_warp
     - Particles: particles, flow_field, explosion
-    - Geometric: kaleidoscope, lissajous, tunnel, spiral
+    - Geometric: kaleidoscope, lissajous, tunnel, spiral, fractal
     - Post-processing: chromatic, glitch, pixelate, feedback
     - Nature: fire, water, aurora
     - Classic: wave, neon, vinyl
@@ -37,7 +38,7 @@ class VJingLayer(BaseVisualLayer):
         "D": "aurora",  # Deep - chill, ambient
         "C": "kaleidoscope",  # Classic - elegant
         "P": "strobe",  # Power - energetic
-        "T": "tunnel",  # Trance - hypnotic
+        "T": "fractal",  # Trance - hypnotic, psychedelic
         "H": "fire",  # House - groovy, warm
         "G": "flow_field",  # Garden - natural
         "I": "neon",  # Ibiza - club, colorful
@@ -74,6 +75,7 @@ class VJingLayer(BaseVisualLayer):
         "wave",
         "neon",
         "vinyl",
+        "fractal",
     ]
 
     def __init__(
@@ -108,8 +110,13 @@ class VJingLayer(BaseVisualLayer):
         # Merge custom mappings with defaults (custom takes precedence)
         self.effect_mappings = {**self.DEFAULT_MAPPINGS, **(effect_mappings or {})}
 
+        logging.info(f"[VJingLayer] Initializing with genre='{genre}'")
+        logging.debug(f"[VJingLayer] Effect mappings: {self.effect_mappings}")
+
         # Determine which effects to use based on genre (can be multiple)
         self.active_effects = self._determine_effects()
+
+        logging.info(f"[VJingLayer] Active effects: {self.active_effects}")
 
         super().__init__(width, height, fps, audio, sr, duration, **kwargs)
 
@@ -217,6 +224,8 @@ class VJingLayer(BaseVisualLayer):
             self._init_feedback()
         if "water" in self.active_effects:
             self._init_water()
+        if "fractal" in self.active_effects:
+            self._init_fractal()
 
     def _detect_beats(self) -> None:
         """Simple beat detection based on energy peaks."""
@@ -1194,3 +1203,153 @@ class VJingLayer(BaseVisualLayer):
                 # Slight color variation
                 gray = 180 + int(20 * math.sin(angle * 5))
                 draw.ellipse([x - 1, y - 1, x + 1, y + 1], fill=(gray, gray, gray, alpha))
+
+    # ========================================================================
+    # FRACTAL EFFECTS
+    # ========================================================================
+
+    def _init_fractal(self) -> None:
+        """Initialize fractal computation grid.
+
+        Pre-computes the coordinate grid for Julia set rendering.
+        Uses lower resolution for performance, then upscales.
+        """
+        # Use lower resolution for performance (will be upscaled)
+        self.fractal_scale = 4  # Render at 1/4 resolution
+        self.fractal_width = self.width // self.fractal_scale
+        self.fractal_height = self.height // self.fractal_scale
+
+        # Pre-compute coordinate grids (complex plane)
+        # These will be transformed per-frame based on zoom/position
+        y_coords = np.linspace(-1.5, 1.5, self.fractal_height)
+        x_coords = np.linspace(-2.0, 2.0, self.fractal_width)
+        self.fractal_x, self.fractal_y = np.meshgrid(x_coords, y_coords)
+
+        # Color palette for fractal (fire-like gradient)
+        self.fractal_palette = self._create_fractal_palette()
+
+    def _create_fractal_palette(self) -> NDArray:
+        """Create a color palette for fractal coloring.
+
+        Returns:
+            Array of shape (256, 3) with RGB colors.
+        """
+        palette = np.zeros((256, 3), dtype=np.uint8)
+
+        for i in range(256):
+            t = i / 255.0
+
+            if t < 0.16:
+                # Black to dark blue
+                palette[i] = [0, 0, int(t * 6 * 128)]
+            elif t < 0.42:
+                # Dark blue to blue-cyan
+                p = (t - 0.16) / 0.26
+                palette[i] = [0, int(p * 200), 128 + int(p * 127)]
+            elif t < 0.6425:
+                # Blue-cyan to yellow
+                p = (t - 0.42) / 0.2225
+                palette[i] = [int(p * 255), 200 + int(p * 55), int(255 * (1 - p))]
+            elif t < 0.8575:
+                # Yellow to orange-red
+                p = (t - 0.6425) / 0.215
+                palette[i] = [255, int(255 - p * 200), 0]
+            else:
+                # Orange-red to white
+                p = (t - 0.8575) / 0.1425
+                palette[i] = [255, int(55 + p * 200), int(p * 255)]
+
+        return palette
+
+    def _render_fractal(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render animated Julia set fractal.
+
+        The Julia set is computed with parameters modulated by audio:
+        - c parameter animated by time and bass
+        - Zoom level affected by energy
+        - Rotation based on time
+
+        Args:
+            img: Image to draw on.
+            frame_idx: Frame index.
+            time_pos: Time position in seconds.
+            ctx: Audio context dict.
+        """
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        mid = ctx["mid"]
+
+        # Julia set parameter c - animate it for morphing effect
+        # c moves in a circular path, modulated by audio
+        c_radius = 0.7 + bass * 0.15
+        c_angle = time_pos * 0.5 + mid * math.pi
+        c_real = c_radius * math.cos(c_angle)
+        c_imag = c_radius * math.sin(c_angle)
+
+        # Zoom level - affected by energy
+        zoom = 1.5 + energy * 0.5
+
+        # Rotation
+        rotation = time_pos * 0.2
+
+        # Create rotated and zoomed coordinate grid
+        cos_r = math.cos(rotation)
+        sin_r = math.sin(rotation)
+
+        # Apply rotation and zoom to coordinates
+        x_rot = (self.fractal_x * cos_r - self.fractal_y * sin_r) / zoom
+        y_rot = (self.fractal_x * sin_r + self.fractal_y * cos_r) / zoom
+
+        # Create complex grid
+        z = x_rot + 1j * y_rot
+        c = complex(c_real, c_imag)
+
+        # Compute Julia set with vectorized operations
+        max_iter = 50
+        iterations = np.zeros(z.shape, dtype=np.int32)
+        mask = np.ones(z.shape, dtype=bool)
+
+        for i in range(max_iter):
+            # Julia iteration: z = z^2 + c
+            z[mask] = z[mask] ** 2 + c
+
+            # Check for escape
+            escaped = np.abs(z) > 4
+            new_escaped = escaped & mask
+            iterations[new_escaped] = i
+            mask[escaped] = False
+
+            # Early exit if all escaped
+            if not np.any(mask):
+                break
+
+        # Points that never escaped get max iterations
+        iterations[mask] = max_iter
+
+        # Normalize iterations to 0-255 for color mapping
+        normalized = (iterations * 255 // max_iter).astype(np.uint8)
+
+        # Apply color palette
+        colored = self.fractal_palette[normalized]
+
+        # Apply intensity
+        alpha_value = int(200 * self.intensity)
+
+        # Create RGBA image from colored array
+        fractal_small = Image.fromarray(colored, mode="RGB")
+
+        # Upscale to full resolution with smooth interpolation
+        fractal_full = fractal_small.resize(
+            (self.width, self.height), Image.Resampling.BILINEAR
+        )
+
+        # Convert to RGBA with alpha
+        fractal_rgba = fractal_full.convert("RGBA")
+        r, g, b, _ = fractal_rgba.split()
+        alpha = Image.new("L", (self.width, self.height), alpha_value)
+        fractal_rgba = Image.merge("RGBA", (r, g, b, alpha))
+
+        # Composite onto image
+        img.paste(fractal_rgba, (0, 0), fractal_rgba)

@@ -97,7 +97,7 @@ Cette roadmap définit le plan d'implémentation et d'amélioration des effets v
 ### 8.1 Effets supplémentaires (Priorité Haute)
 | Effet | Status | Description | Complexité |
 |-------|--------|-------------|------------|
-| `fractal` | ⬜ | Fractales Julia/Mandelbrot animées | Élevée |
+| `fractal` | ✅ | Fractales Julia animées (modulées par audio) | Élevée |
 | `wormhole` | ⬜ | Trou de ver avec distorsion | Moyenne |
 | `plasma` | ⬜ | Plasma coloré ondulant | Moyenne |
 | `matrix` | ⬜ | Pluie de caractères style Matrix | Faible |
@@ -178,6 +178,10 @@ DEFAULT_MAPPINGS = {
 ---
 
 ## Changelog
+
+### v1.1 (2026-01-25)
+- Ajout effet `fractal` (Julia set animé)
+- Mapping: T (Trance) → fractal
 
 ### v1.0 (2026-01-25)
 - Implémentation initiale de 22 effets
