@@ -295,6 +295,29 @@ class ExportDialog(QDialog):
         preset_layout.addStretch()
         layers_layout.addLayout(preset_layout)
 
+        # Color palette selector
+        palette_layout = QHBoxLayout()
+        palette_layout.addWidget(QLabel("    Palette:"))
+        self.color_palette_combo = QComboBox()
+        palettes = [
+            ("neon", "Neon (Pink/Cyan/Yellow)"),
+            ("fire", "Fire (Orange/Red/Gold)"),
+            ("ice", "Ice (Blue/White)"),
+            ("nature", "Nature (Greens)"),
+            ("sunset", "Sunset (Coral/Peach)"),
+            ("ocean", "Ocean (Turquoise/Cyan)"),
+            ("cosmic", "Cosmic (Purple/Violet)"),
+            ("retro", "Retro (Mustard/Teal)"),
+            ("monochrome", "Monochrome (Grays)"),
+            ("rainbow", "Rainbow"),
+        ]
+        for palette_id, palette_name in palettes:
+            self.color_palette_combo.addItem(palette_name, palette_id)
+        self.color_palette_combo.setToolTip("Color palette for VJing effects")
+        palette_layout.addWidget(self.color_palette_combo)
+        palette_layout.addStretch()
+        layers_layout.addLayout(palette_layout)
+
         self.video_bg_check = QCheckBox("Video Background")
         layers_layout.addWidget(self.video_bg_check)
 
@@ -329,11 +352,11 @@ class ExportDialog(QDialog):
         global_label.setFixedHeight(28)
         self.global_intensity_slider = QSlider(Qt.Horizontal)
         self.global_intensity_slider.setRange(0, 100)
-        self.global_intensity_slider.setValue(70)
+        self.global_intensity_slider.setValue(100)
         self.global_intensity_slider.setMinimumWidth(150)
         self.global_intensity_slider.setFixedHeight(28)
         self.global_intensity_slider.setToolTip("Default intensity for all effects")
-        self.global_intensity_label = QLabel("70%")
+        self.global_intensity_label = QLabel("100%")
         self.global_intensity_label.setMinimumWidth(40)
         self.global_intensity_label.setFixedHeight(28)
         self.global_intensity_slider.valueChanged.connect(
@@ -363,11 +386,11 @@ class ExportDialog(QDialog):
             name_label.setFixedHeight(28)
             slider = QSlider(Qt.Horizontal)
             slider.setRange(0, 100)
-            slider.setValue(70)
+            slider.setValue(100)
             slider.setMinimumWidth(150)
             slider.setFixedHeight(28)
             slider.setToolTip(f"Intensity for {effect_name} effect")
-            value_label = QLabel("70%")
+            value_label = QLabel("100%")
             value_label.setMinimumWidth(40)
             value_label.setFixedHeight(28)
             slider.valueChanged.connect(
@@ -484,6 +507,7 @@ class ExportDialog(QDialog):
                 p.name: p.effects
                 for p in self.context.config.video_exporter.vjing_presets
             },
+            "color_palette": self.color_palette_combo.currentData(),
             # Waveform layer settings
             "waveform_height_ratio": self.context.config.video_exporter.waveform_height_ratio,
             "waveform_bass_color": self.context.config.video_exporter.waveform_bass_color,

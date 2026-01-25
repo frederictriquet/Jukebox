@@ -322,6 +322,82 @@ class VJingLayer(BaseVisualLayer):
         "smoke",
     ]
 
+    # Color palettes: each palette is a list of 4-6 RGB tuples
+    # Effects will use these colors for their visuals
+    COLOR_PALETTES: dict[str, list[tuple[int, int, int]]] = {
+        "neon": [
+            (255, 0, 128),    # Hot pink
+            (0, 255, 255),    # Cyan
+            (255, 255, 0),    # Yellow
+            (128, 0, 255),    # Purple
+            (0, 255, 128),    # Spring green
+        ],
+        "fire": [
+            (255, 68, 0),     # Orange red
+            (255, 154, 0),    # Orange
+            (255, 206, 0),    # Golden
+            (255, 100, 0),    # Deep orange
+            (200, 50, 0),     # Dark red
+        ],
+        "ice": [
+            (200, 240, 255),  # Ice white
+            (100, 200, 255),  # Light blue
+            (50, 150, 255),   # Sky blue
+            (0, 100, 200),    # Ocean blue
+            (180, 220, 255),  # Pale blue
+        ],
+        "nature": [
+            (34, 139, 34),    # Forest green
+            (107, 142, 35),   # Olive drab
+            (144, 238, 144),  # Light green
+            (85, 107, 47),    # Dark olive
+            (0, 128, 0),      # Green
+        ],
+        "sunset": [
+            (255, 94, 77),    # Coral
+            (255, 154, 86),   # Peach
+            (255, 206, 115),  # Light gold
+            (128, 0, 64),     # Deep magenta
+            (255, 128, 128),  # Light coral
+        ],
+        "ocean": [
+            (0, 105, 148),    # Deep sea
+            (72, 202, 228),   # Turquoise
+            (0, 150, 199),    # Ocean
+            (144, 224, 239),  # Light cyan
+            (0, 180, 216),    # Bright cyan
+        ],
+        "cosmic": [
+            (147, 112, 219),  # Medium purple
+            (75, 0, 130),     # Indigo
+            (238, 130, 238),  # Violet
+            (186, 85, 211),   # Medium orchid
+            (148, 0, 211),    # Dark violet
+        ],
+        "retro": [
+            (255, 183, 77),   # Mustard
+            (255, 112, 67),   # Deep orange
+            (100, 181, 246),  # Retro blue
+            (255, 241, 118),  # Light yellow
+            (77, 182, 172),   # Teal
+        ],
+        "monochrome": [
+            (255, 255, 255),  # White
+            (200, 200, 200),  # Light gray
+            (150, 150, 150),  # Medium gray
+            (100, 100, 100),  # Dark gray
+            (220, 220, 220),  # Very light gray
+        ],
+        "rainbow": [
+            (255, 0, 0),      # Red
+            (255, 165, 0),    # Orange
+            (255, 255, 0),    # Yellow
+            (0, 255, 0),      # Green
+            (0, 0, 255),      # Blue
+            (148, 0, 211),    # Violet
+        ],
+    }
+
     def __init__(
         self,
         width: int,
@@ -334,8 +410,9 @@ class VJingLayer(BaseVisualLayer):
         effect_mappings: dict[str, list[str]] | None = None,
         preset: str = "",
         presets: dict[str, list[str]] | None = None,
-        intensity: float = 0.7,
+        intensity: float = 1.0,
         effect_intensities: dict[str, float] | None = None,
+        color_palette: str = "neon",
         transitions_enabled: bool = True,
         transition_duration: float = 2.0,
         effect_cycle_duration: float = 8.0,
@@ -357,6 +434,7 @@ class VJingLayer(BaseVisualLayer):
             presets: Available presets {name: [effects]}.
             intensity: Default effect intensity (0.0 to 1.0).
             effect_intensities: Per-effect intensity overrides {effect_name: intensity}.
+            color_palette: Name of color palette to use (neon, fire, ice, etc.).
             transitions_enabled: Enable smooth transitions between effects.
             transition_duration: Duration of fade transition in seconds.
             effect_cycle_duration: How long each effect is prominently visible.
@@ -370,6 +448,8 @@ class VJingLayer(BaseVisualLayer):
         self._current_intensity = self.intensity  # Set by render() for current effect
         self.preset = preset
         self.presets = presets or {}
+        self.color_palette_name = color_palette
+        self.color_palette = self.COLOR_PALETTES.get(color_palette, self.COLOR_PALETTES["neon"])
         self.transitions_enabled = transitions_enabled
         self.transition_duration = transition_duration
         self.effect_cycle_duration = effect_cycle_duration
@@ -443,6 +523,36 @@ class VJingLayer(BaseVisualLayer):
             Effect-specific intensity if set, otherwise default intensity.
         """
         return self.effect_intensities.get(effect_name, self.intensity)
+
+    def _get_palette_color(self, index: int) -> tuple[int, int, int]:
+        """Get a color from the current palette by index.
+
+        Args:
+            index: Color index (will wrap around if out of range).
+
+        Returns:
+            RGB tuple.
+        """
+        return self.color_palette[index % len(self.color_palette)]
+
+    def _get_random_palette_color(self) -> tuple[int, int, int]:
+        """Get a random color from the current palette.
+
+        Returns:
+            RGB tuple.
+        """
+        return random.choice(self.color_palette)
+
+    def _get_palette_colors(self, count: int) -> list[tuple[int, int, int]]:
+        """Get multiple colors from the palette.
+
+        Args:
+            count: Number of colors to return.
+
+        Returns:
+            List of RGB tuples (wraps around if count > palette size).
+        """
+        return [self._get_palette_color(i) for i in range(count)]
 
     def _init_gpu_renderer(self) -> None:
         """Initialize GPU shader renderer if available.
@@ -766,9 +876,7 @@ class VJingLayer(BaseVisualLayer):
                 "vx": (random.random() - 0.5) * 2,
                 "vy": (random.random() - 0.5) * 2,
                 "size": random.random() * 10 + 5,
-                "color": random.choice(
-                    [(255, 100, 100), (100, 255, 100), (100, 100, 255), (255, 255, 100)]
-                ),
+                "color": self._get_random_palette_color(),
                 "life": random.random() * 100,
             }
         )
@@ -1109,7 +1217,16 @@ class VJingLayer(BaseVisualLayer):
             points.append(points[0])  # Close shape
 
             alpha = int(100 * (1 - progress) * self._current_intensity)
-            color = (int(255 * bass), 50, int(255 * (1 - bass)), alpha)
+            # Blend between two palette colors based on bass intensity
+            c1 = self._get_palette_color(i)
+            c2 = self._get_palette_color(i + 1)
+            blend = bass
+            color = (
+                int(c1[0] * (1 - blend) + c2[0] * blend),
+                int(c1[1] * (1 - blend) + c2[1] * blend),
+                int(c1[2] * (1 - blend) + c2[2] * blend),
+                alpha
+            )
             draw.line(points, fill=color, width=2)
 
     # ========================================================================
@@ -1207,14 +1324,13 @@ class VJingLayer(BaseVisualLayer):
             x2 = x + int(math.cos(angle) * length)
             y2 = y + int(math.sin(angle) * length)
 
-            # Color based on position and noise
-            hue = (particle["x"] / self.width + particle["y"] / self.height) / 2
-            r = int(100 + 155 * (1 - hue))
-            g = int(150 + 105 * energy)
-            b = int(100 + 155 * hue)
+            # Color based on position using palette
+            color_progress = (particle["x"] / self.width + particle["y"] / self.height) / 2
+            color_idx = int(color_progress * len(self.color_palette))
+            base_color = self._get_palette_color(color_idx)
             alpha = int(100 * self.intensity * (particle["life"] / 100))
 
-            draw.line([(x, y), (x2, y2)], fill=(r, g, b, alpha), width=1)
+            draw.line([(x, y), (x2, y2)], fill=(*base_color, alpha), width=1)
 
     def _render_explosion(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
@@ -1242,9 +1358,7 @@ class VJingLayer(BaseVisualLayer):
                         "vx": math.cos(angle) * speed,
                         "vy": math.sin(angle) * speed,
                         "size": random.random() * 5 + 2,
-                        "color": random.choice(
-                            [(255, 200, 50), (255, 100, 0), (255, 255, 100), (255, 150, 0)]
-                        ),
+                        "color": self._get_random_palette_color(),
                         "life": 40 + random.random() * 20,
                     }
                 )
@@ -1304,11 +1418,10 @@ class VJingLayer(BaseVisualLayer):
                 x = center[0] + distance * math.cos(angle)
                 y = center[1] + distance * math.sin(angle)
 
-                # Color varies by segment and shape
-                hue = (segment / n_segments + i * 0.1) % 1.0
-                r = int(255 * (1 - hue))
-                g = int(255 * abs(0.5 - hue) * 2)
-                b = int(255 * hue)
+                # Color from palette varies by segment and shape
+                color_idx = (segment + i) % len(self.color_palette)
+                base_color = self.color_palette[color_idx]
+                r, g, b = base_color
                 alpha = int(150 * self.intensity * (1 - i / n_shapes))
 
                 # Draw polygon
@@ -1351,13 +1464,9 @@ class VJingLayer(BaseVisualLayer):
                 y = center[1] + amplitude_y * math.sin(b * t)
                 points.append((x, y))
 
-            # Color per curve
-            colors = [
-                (255, 100, 100, 150),
-                (100, 255, 100, 150),
-                (100, 100, 255, 150),
-            ]
-            color = colors[curve % len(colors)]
+            # Color per curve from palette
+            base_color = self._get_palette_color(curve)
+            color = (*base_color, 150)
 
             if len(points) >= 2:
                 draw.line(points, fill=color, width=2)
@@ -1659,15 +1768,8 @@ class VJingLayer(BaseVisualLayer):
                 ) * 30 * energy
                 points.append((x, y))
 
-            # Aurora colors: green, blue, purple, pink
-            colors = [
-                (100, 255, 150),  # Green
-                (50, 200, 255),  # Cyan
-                (150, 100, 255),  # Purple
-                (255, 100, 200),  # Pink
-                (100, 255, 200),  # Teal
-            ]
-            base_color = colors[band % len(colors)]
+            # Use palette colors
+            base_color = self._get_palette_color(band)
 
             # Draw band with varying alpha
             if len(points) >= 2:
@@ -1708,7 +1810,8 @@ class VJingLayer(BaseVisualLayer):
 
             if len(points) >= 2:
                 alpha = int(100 * self.intensity / (i + 1))
-                color = (100, 200, 255, alpha)
+                base_color = self._get_palette_color(i)
+                color = (*base_color, alpha)
                 draw.line(points, fill=color, width=2)
 
     def _render_neon(
@@ -1718,13 +1821,7 @@ class VJingLayer(BaseVisualLayer):
         draw = ImageDraw.Draw(img)
         energy = ctx["energy"]
 
-        # Draw neon shapes
-        colors = [
-            (255, 0, 255, 150),  # Magenta
-            (0, 255, 255, 150),  # Cyan
-            (255, 255, 0, 150),  # Yellow
-        ]
-
+        # Draw neon shapes using palette colors
         n_shapes = 3
         for i in range(n_shapes):
             # Pulsating size
@@ -1735,7 +1832,8 @@ class VJingLayer(BaseVisualLayer):
             x = self.width // 2 + math.cos(time_pos + i * 2) * 100
             y = self.height // 2 + math.sin(time_pos * 0.5 + i) * 50
 
-            color = colors[i % len(colors)]
+            base_color = self._get_palette_color(i)
+            color = (*base_color, 150)
 
             # Draw glowing shape with multiple layers
             for offset in range(3, 0, -1):
@@ -2422,17 +2520,13 @@ class VJingLayer(BaseVisualLayer):
         """Initialize Voronoi diagram points."""
         self.voronoi_num_points = 20
         self.voronoi_points: list[dict[str, Any]] = []
-        for _ in range(self.voronoi_num_points):
+        for i in range(self.voronoi_num_points):
             self.voronoi_points.append({
                 "x": random.random() * self.width,
                 "y": random.random() * self.height,
                 "vx": (random.random() - 0.5) * 2,
                 "vy": (random.random() - 0.5) * 2,
-                "color": (
-                    random.randint(50, 255),
-                    random.randint(50, 255),
-                    random.randint(50, 255),
-                ),
+                "color": self._get_palette_color(i),
             })
 
     def _render_voronoi(
