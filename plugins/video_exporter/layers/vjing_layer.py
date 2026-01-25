@@ -370,6 +370,8 @@ class VJingLayer(BaseVisualLayer):
         self.effect_cycle_duration = effect_cycle_duration
         self.use_gpu = use_gpu
         self._gpu_renderer: GPUShaderRenderer | None = None
+        # Cache for pre-rendered GPU frames: {frame_idx: {effect_name: Image}}
+        self._gpu_frame_cache: dict[int, dict[str, Image.Image]] = {}
 
         # Merge custom mappings with defaults (custom takes precedence)
         self.effect_mappings: dict[str, list[str]] = {
@@ -451,19 +453,91 @@ class VJingLayer(BaseVisualLayer):
             logging.warning(f"[VJingLayer] Failed to initialize GPU renderer: {e}")
             self._gpu_renderer = None
 
+    def prerender_gpu_frames(self) -> int:
+        """Pre-render all GPU effects for parallel rendering mode.
+
+        This method renders all GPU-accelerated effects sequentially and caches
+        the results. Workers can then retrieve cached frames without accessing
+        the GPU context from multiple threads.
+
+        Returns:
+            Number of frames pre-rendered.
+        """
+        if not self._gpu_renderer:
+            return 0
+
+        # Find which effects need GPU pre-rendering
+        gpu_effects = [e for e in self.active_effects if self._gpu_renderer.has_shader(e)]
+        if not gpu_effects:
+            return 0
+
+        logging.info(
+            f"[VJingLayer] Pre-rendering {self.total_frames} frames for GPU effects: {gpu_effects}"
+        )
+
+        prerendered = 0
+        for frame_idx in range(self.total_frames):
+            time_pos = frame_idx / self.fps
+
+            # Build audio context for this frame
+            ctx = {
+                "energy": float(self.energy[frame_idx]) if frame_idx < len(self.energy) else 0.5,
+                "bass": float(self.bass_energy[frame_idx]) if frame_idx < len(self.bass_energy) else 0.5,
+                "mid": float(self.mid_energy[frame_idx]) if frame_idx < len(self.mid_energy) else 0.5,
+                "treble": float(self.treble_energy[frame_idx]) if frame_idx < len(self.treble_energy) else 0.5,
+            }
+
+            frame_cache: dict[str, Image.Image] = {}
+
+            for effect_name in gpu_effects:
+                img = self._gpu_renderer.render(
+                    effect_name,
+                    time_pos,
+                    energy=ctx["energy"],
+                    bass=ctx["bass"],
+                    mid=ctx["mid"],
+                    treble=ctx["treble"],
+                    intensity=self.intensity,
+                )
+                if img is not None:
+                    frame_cache[effect_name] = img
+
+            if frame_cache:
+                self._gpu_frame_cache[frame_idx] = frame_cache
+                prerendered += 1
+
+            # Log progress every second
+            if frame_idx > 0 and frame_idx % self.fps == 0:
+                logging.debug(f"[VJingLayer] GPU pre-render: {frame_idx}/{self.total_frames}")
+
+        logging.info(f"[VJingLayer] GPU pre-render complete: {prerendered} frames cached")
+
+        # Release GPU renderer after pre-rendering (no longer needed)
+        self._gpu_renderer = None
+
+        return prerendered
+
     def _render_gpu_effect(
-        self, shader_name: str, time_pos: float, ctx: dict
+        self, shader_name: str, frame_idx: int, time_pos: float, ctx: dict
     ) -> Image.Image | None:
-        """Try to render an effect using GPU shader.
+        """Try to render an effect using GPU shader or cache.
 
         Args:
             shader_name: Name of the shader (must match effect name).
+            frame_idx: Frame index (for cache lookup).
             time_pos: Time position in seconds.
             ctx: Audio context dictionary.
 
         Returns:
             RGBA PIL Image if GPU rendering succeeded, None otherwise.
         """
+        # Check cache first (used in parallel rendering mode)
+        if frame_idx in self._gpu_frame_cache:
+            cached = self._gpu_frame_cache[frame_idx].get(shader_name)
+            if cached is not None:
+                return cached
+
+        # No cache, try live GPU rendering
         if not self._gpu_renderer or not self._gpu_renderer.has_shader(shader_name):
             return None
 
@@ -1758,7 +1832,7 @@ class VJingLayer(BaseVisualLayer):
             ctx: Audio context dict.
         """
         # Try GPU rendering first
-        gpu_img = self._render_gpu_effect("fractal", time_pos, ctx)
+        gpu_img = self._render_gpu_effect("fractal", frame_idx, time_pos, ctx)
         if gpu_img:
             img.paste(gpu_img, (0, 0), gpu_img)
             return
@@ -1941,7 +2015,7 @@ class VJingLayer(BaseVisualLayer):
             ctx: Audio context dict.
         """
         # Try GPU rendering first
-        gpu_img = self._render_gpu_effect("plasma", time_pos, ctx)
+        gpu_img = self._render_gpu_effect("plasma", frame_idx, time_pos, ctx)
         if gpu_img:
             img.paste(gpu_img, (0, 0), gpu_img)
             return
@@ -2034,7 +2108,7 @@ class VJingLayer(BaseVisualLayer):
             ctx: Audio context dict.
         """
         # Try GPU rendering first
-        gpu_img = self._render_gpu_effect("wormhole", time_pos, ctx)
+        gpu_img = self._render_gpu_effect("wormhole", frame_idx, time_pos, ctx)
         if gpu_img:
             img.paste(gpu_img, (0, 0), gpu_img)
             return
@@ -2355,7 +2429,7 @@ class VJingLayer(BaseVisualLayer):
             ctx: Audio context dict.
         """
         # Try GPU rendering first
-        gpu_img = self._render_gpu_effect("voronoi", time_pos, ctx)
+        gpu_img = self._render_gpu_effect("voronoi", frame_idx, time_pos, ctx)
         if gpu_img:
             img.paste(gpu_img, (0, 0), gpu_img)
             return
@@ -2467,7 +2541,7 @@ class VJingLayer(BaseVisualLayer):
             ctx: Audio context dict.
         """
         # Try GPU rendering first
-        gpu_img = self._render_gpu_effect("metaballs", time_pos, ctx)
+        gpu_img = self._render_gpu_effect("metaballs", frame_idx, time_pos, ctx)
         if gpu_img:
             img.paste(gpu_img, (0, 0), gpu_img)
             return

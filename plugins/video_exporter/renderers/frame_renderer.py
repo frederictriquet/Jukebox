@@ -32,6 +32,7 @@ class FrameRenderer:
         vjing_preset: str = "",
         vjing_presets: dict[str, list[str]] | None = None,
         waveform_config: dict[str, Any] | None = None,
+        use_gpu: bool = True,
     ) -> None:
         """Initialize frame renderer.
 
@@ -49,6 +50,7 @@ class FrameRenderer:
             vjing_preset: Name of preset to use (empty = use genre mapping).
             vjing_presets: Available presets {name: [effects]}.
             waveform_config: Waveform layer configuration (height_ratio, colors).
+            use_gpu: Whether to enable GPU acceleration (disable for parallel rendering).
         """
         self.width = width
         self.height = height
@@ -62,6 +64,7 @@ class FrameRenderer:
         self.vjing_preset = vjing_preset
         self.vjing_presets = vjing_presets or {}
         self.waveform_config = waveform_config or {}
+        self.use_gpu = use_gpu
 
         # Initialize enabled layers
         self.layers: list[BaseVisualLayer] = []
@@ -158,6 +161,7 @@ class FrameRenderer:
                     effect_mappings=self.vjing_mappings,
                     preset=self.vjing_preset,
                     presets=self.vjing_presets,
+                    use_gpu=self.use_gpu,
                 )
                 self.layers.append(layer)
                 logging.info("[Frame Renderer] VJing layer enabled")
@@ -180,6 +184,24 @@ class FrameRenderer:
 
         # Sort by z-index
         self.layers.sort(key=lambda layer: layer.z_index)
+
+
+    def prerender_gpu(self) -> int:
+        """Pre-render GPU effects for all layers that support it.
+
+        Call this method before starting parallel frame rendering to cache
+        GPU-accelerated effects. The GPU will be used sequentially, then
+        parallel workers can use the cached results.
+
+        Returns:
+            Total number of frames pre-rendered across all layers.
+        """
+        total_prerendered = 0
+        for layer in self.layers:
+            if hasattr(layer, "prerender_gpu_frames"):
+                count = layer.prerender_gpu_frames()
+                total_prerendered += count
+        return total_prerendered
 
     def render_frame(self, frame_idx: int, time_pos: float) -> NDArray[np.uint8]:
         """Render a single frame by compositing all layers.

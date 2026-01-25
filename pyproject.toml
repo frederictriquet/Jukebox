@@ -32,6 +32,7 @@ video = [
     "Pillow>=10.0.0",
     "opencv-python>=4.8.0",  # Optional, for video background layer
     "noise>=1.2.2",  # Perlin/Simplex noise for VJing effects
+    "moderngl>=5.8.0",  # GPU shaders for heavy VJing effects
 ]
 dev = [
     "pytest>=7.4.0",

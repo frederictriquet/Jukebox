@@ -7,6 +7,7 @@ visual effects like plasma, fractals, and metaballs.
 from __future__ import annotations
 
 import logging
+import threading
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -23,6 +24,9 @@ except ImportError:
 
 if TYPE_CHECKING:
     pass  # Reserved for future type hints
+
+# Global lock for thread-safe GPU access (OpenGL contexts are NOT thread-safe)
+_gpu_lock = threading.Lock()
 
 
 # =============================================================================
@@ -309,6 +313,8 @@ class GPUShaderRenderer:
         self._vao: moderngl.VertexArray | None = None
         self._fbo: moderngl.Framebuffer | None = None
         self._initialized = False
+        # Track creator thread - OpenGL context can only be used from this thread
+        self._creator_thread_id: int | None = None
 
         if not MODERNGL_AVAILABLE:
             logging.warning("[GPU Renderer] ModernGL not available")
@@ -316,6 +322,7 @@ class GPUShaderRenderer:
 
         try:
             self._init_context()
+            self._creator_thread_id = threading.get_ident()
             self._initialized = True
             logging.info(f"[GPU Renderer] Initialized {width}x{height}")
         except Exception as e:
@@ -377,8 +384,11 @@ class GPUShaderRenderer:
 
     @property
     def available(self) -> bool:
-        """Check if GPU rendering is available."""
-        return self._initialized and self._ctx is not None
+        """Check if GPU rendering is available from current thread."""
+        if not self._initialized or self._ctx is None:
+            return False
+        # OpenGL context can only be used from the thread that created it
+        return threading.get_ident() == self._creator_thread_id
 
     def has_shader(self, name: str) -> bool:
         """Check if a shader is available.
@@ -418,39 +428,41 @@ class GPUShaderRenderer:
         if not self.available or shader_name not in self._programs:
             return None
 
-        try:
-            program = self._programs[shader_name]
+        # Serialize GPU access - OpenGL contexts are NOT thread-safe
+        with _gpu_lock:
+            try:
+                program = self._programs[shader_name]
 
-            # Set uniforms
-            if "time" in program:
-                program["time"].value = time_pos
-            if "energy" in program:
-                program["energy"].value = energy
-            if "bass" in program:
-                program["bass"].value = bass
-            if "mid" in program:
-                program["mid"].value = mid
-            if "resolution" in program:
-                program["resolution"].value = (float(self.width), float(self.height))
-            if "intensity" in program:
-                program["intensity"].value = intensity
+                # Set uniforms
+                if "time" in program:
+                    program["time"].value = time_pos
+                if "energy" in program:
+                    program["energy"].value = energy
+                if "bass" in program:
+                    program["bass"].value = bass
+                if "mid" in program:
+                    program["mid"].value = mid
+                if "resolution" in program:
+                    program["resolution"].value = (float(self.width), float(self.height))
+                if "intensity" in program:
+                    program["intensity"].value = intensity
 
-            # Render to framebuffer
-            self._fbo.use()
-            self._ctx.clear(0.0, 0.0, 0.0, 0.0)
-            program.vao.render(moderngl.TRIANGLE_STRIP)
+                # Render to framebuffer
+                self._fbo.use()
+                self._ctx.clear(0.0, 0.0, 0.0, 0.0)
+                program.vao.render(moderngl.TRIANGLE_STRIP)
 
-            # Read pixels
-            data = self._fbo.read(components=4)
-            img = Image.frombytes("RGBA", (self.width, self.height), data)
-            # Flip vertically (OpenGL origin is bottom-left)
-            img = img.transpose(Image.FLIP_TOP_BOTTOM)
+                # Read pixels
+                data = self._fbo.read(components=4)
+                img = Image.frombytes("RGBA", (self.width, self.height), data)
+                # Flip vertically (OpenGL origin is bottom-left)
+                img = img.transpose(Image.FLIP_TOP_BOTTOM)
 
-            return img
+                return img
 
-        except Exception as e:
-            logging.warning(f"[GPU Renderer] Render failed for {shader_name}: {e}")
-            return None
+            except Exception as e:
+                logging.warning(f"[GPU Renderer] Render failed for {shader_name}: {e}")
+                return None
 
     def cleanup(self) -> None:
         """Release GPU resources."""
@@ -480,9 +492,11 @@ def get_gpu_renderer(width: int, height: int) -> GPUShaderRenderer | None:
     if not MODERNGL_AVAILABLE:
         return None
 
-    if _gpu_renderer is None or _gpu_renderer.width != width or _gpu_renderer.height != height:
-        if _gpu_renderer:
-            _gpu_renderer.cleanup()
-        _gpu_renderer = GPUShaderRenderer(width, height)
+    # Serialize access to prevent race conditions during initialization
+    with _gpu_lock:
+        if _gpu_renderer is None or _gpu_renderer.width != width or _gpu_renderer.height != height:
+            if _gpu_renderer:
+                _gpu_renderer.cleanup()
+            _gpu_renderer = GPUShaderRenderer(width, height)
 
-    return _gpu_renderer if _gpu_renderer.available else None
+        return _gpu_renderer if _gpu_renderer.available else None

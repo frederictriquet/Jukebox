@@ -129,6 +129,14 @@ class VideoExportWorker(QThread):
             self.error.emit(f"Failed to initialize renderer: {e}")
             return
 
+        # Pre-render GPU effects before parallel workers start
+        # (OpenGL contexts are not thread-safe, so we cache GPU frames first)
+        if self._num_workers > 1:
+            self.status.emit("Pre-rendering GPU effects...")
+            gpu_frames = renderer.prerender_gpu()
+            if gpu_frames > 0:
+                logging.info(f"[Video Export Worker] Pre-rendered {gpu_frames} GPU frames")
+
         self.status.emit("Starting FFmpeg encoder...")
 
         # Initialize FFmpeg encoder
