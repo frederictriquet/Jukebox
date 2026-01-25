@@ -404,6 +404,47 @@ class ExportDialog(QDialog):
             row += 1
 
         layout.addWidget(intensity_group)
+
+        # Audio sensitivity group
+        sensitivity_group = QGroupBox("Audio Sensitivity")
+        sensitivity_layout = QGridLayout(sensitivity_group)
+        sensitivity_layout.setContentsMargins(12, 20, 12, 12)
+        sensitivity_layout.setVerticalSpacing(8)
+        sensitivity_layout.setColumnStretch(1, 1)
+        sensitivity_layout.setColumnMinimumWidth(0, 80)
+        sensitivity_layout.setColumnMinimumWidth(2, 40)
+
+        self.audio_sensitivity_sliders: dict[str, QSlider] = {}
+        self.audio_sensitivity_labels: dict[str, QLabel] = {}
+
+        bands = [
+            ("bass", "Bass"),
+            ("mid", "Mid"),
+            ("treble", "Treble"),
+        ]
+
+        for row, (band_id, band_name) in enumerate(bands):
+            name_label = QLabel(f"{band_name}:")
+            name_label.setFixedHeight(28)
+            slider = QSlider(Qt.Horizontal)
+            slider.setRange(0, 200)  # 0% to 200%
+            slider.setValue(100)  # Default 100%
+            slider.setMinimumWidth(150)
+            slider.setFixedHeight(28)
+            slider.setToolTip(f"Reactivity to {band_name.lower()} frequencies (0-200%)")
+            value_label = QLabel("100%")
+            value_label.setMinimumWidth(40)
+            value_label.setFixedHeight(28)
+            slider.valueChanged.connect(
+                lambda v, lbl=value_label: lbl.setText(f"{v}%")
+            )
+            sensitivity_layout.addWidget(name_label, row, 0)
+            sensitivity_layout.addWidget(slider, row, 1)
+            sensitivity_layout.addWidget(value_label, row, 2)
+            self.audio_sensitivity_sliders[band_id] = slider
+            self.audio_sensitivity_labels[band_id] = value_label
+
+        layout.addWidget(sensitivity_group)
         layout.addStretch()
 
         scroll.setWidget(content)
@@ -473,6 +514,17 @@ class ExportDialog(QDialog):
 
         return intensities
 
+    def _get_audio_sensitivity(self) -> dict[str, float]:
+        """Build audio sensitivity dictionary from UI sliders.
+
+        Returns:
+            Dictionary of band_name -> sensitivity (0.0-2.0).
+        """
+        return {
+            band_id: slider.value() / 100.0
+            for band_id, slider in self.audio_sensitivity_sliders.items()
+        }
+
     def _get_export_config(self) -> dict[str, Any]:
         """Get export configuration from UI.
 
@@ -516,6 +568,8 @@ class ExportDialog(QDialog):
             "waveform_cursor_color": self.context.config.video_exporter.waveform_cursor_color,
             # Effect intensities
             "effect_intensities": self._get_effect_intensities(),
+            # Audio sensitivity
+            "audio_sensitivity": self._get_audio_sensitivity(),
         }
 
     def _start_export(self) -> None:

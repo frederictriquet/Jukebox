@@ -413,6 +413,7 @@ class VJingLayer(BaseVisualLayer):
         intensity: float = 1.0,
         effect_intensities: dict[str, float] | None = None,
         color_palette: str = "neon",
+        audio_sensitivity: dict[str, float] | None = None,
         transitions_enabled: bool = True,
         transition_duration: float = 2.0,
         effect_cycle_duration: float = 8.0,
@@ -435,6 +436,7 @@ class VJingLayer(BaseVisualLayer):
             intensity: Default effect intensity (0.0 to 1.0).
             effect_intensities: Per-effect intensity overrides {effect_name: intensity}.
             color_palette: Name of color palette to use (neon, fire, ice, etc.).
+            audio_sensitivity: Per-band sensitivity multipliers {bass, mid, treble: 0.0-2.0}.
             transitions_enabled: Enable smooth transitions between effects.
             transition_duration: Duration of fade transition in seconds.
             effect_cycle_duration: How long each effect is prominently visible.
@@ -450,6 +452,13 @@ class VJingLayer(BaseVisualLayer):
         self.presets = presets or {}
         self.color_palette_name = color_palette
         self.color_palette = self.COLOR_PALETTES.get(color_palette, self.COLOR_PALETTES["neon"])
+        # Audio sensitivity multipliers (0.0 = no reaction, 1.0 = normal, 2.0 = double)
+        self.audio_sensitivity = {
+            "bass": 1.0,
+            "mid": 1.0,
+            "treble": 1.0,
+            **(audio_sensitivity or {}),
+        }
         self.transitions_enabled = transitions_enabled
         self.transition_duration = transition_duration
         self.effect_cycle_duration = effect_cycle_duration
@@ -932,12 +941,19 @@ class VJingLayer(BaseVisualLayer):
         fft = self.fft_data[safe_idx] if safe_idx < len(self.fft_data) else np.zeros(32)
         is_beat = frame_idx in self.beats
 
+        # Apply audio sensitivity multipliers (clamp to 0-1 range)
+        bass_sens = min(1.0, bass * self.audio_sensitivity["bass"])
+        mid_sens = min(1.0, mid * self.audio_sensitivity["mid"])
+        treble_sens = min(1.0, treble * self.audio_sensitivity["treble"])
+        # Energy is average of bands, recalculate with sensitivity
+        energy_sens = min(1.0, (bass_sens + mid_sens + treble_sens) / 3)
+
         # Context dict for effects
         ctx = {
-            "energy": energy,
-            "bass": bass,
-            "mid": mid,
-            "treble": treble,
+            "energy": energy_sens,
+            "bass": bass_sens,
+            "mid": mid_sens,
+            "treble": treble_sens,
             "fft": fft,
             "is_beat": is_beat,
         }

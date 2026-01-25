@@ -35,6 +35,7 @@ class FrameRenderer:
         use_gpu: bool = True,
         effect_intensities: dict[str, float] | None = None,
         color_palette: str = "neon",
+        audio_sensitivity: dict[str, float] | None = None,
     ) -> None:
         """Initialize frame renderer.
 
@@ -55,6 +56,7 @@ class FrameRenderer:
             use_gpu: Whether to enable GPU acceleration (disable for parallel rendering).
             effect_intensities: Per-effect intensity overrides {effect_name: intensity}.
             color_palette: Name of color palette for VJing effects.
+            audio_sensitivity: Per-band audio sensitivity {bass, mid, treble: 0.0-2.0}.
         """
         self.width = width
         self.height = height
@@ -71,6 +73,7 @@ class FrameRenderer:
         self.use_gpu = use_gpu
         self.effect_intensities = effect_intensities or {}
         self.color_palette = color_palette
+        self.audio_sensitivity = audio_sensitivity or {}
 
         # Initialize enabled layers
         self.layers: list[BaseVisualLayer] = []
@@ -170,6 +173,7 @@ class FrameRenderer:
                     use_gpu=self.use_gpu,
                     effect_intensities=self.effect_intensities,
                     color_palette=self.color_palette,
+                    audio_sensitivity=self.audio_sensitivity,
                 )
                 self.layers.append(layer)
                 logging.info("[Frame Renderer] VJing layer enabled")
