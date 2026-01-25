@@ -121,13 +121,13 @@ Cette roadmap définit le plan d'implémentation et d'amélioration des effets v
 | Transitions entre effets | ✅ | Fondu crossfade entre effets (configurable: duration, cycle) |
 | LFO modulables | ✅ | 6 LFOs (slow, medium, fast, triangle, saw, random) |
 
-### 8.4 Configuration avancée
+### 8.4 Configuration avancée ✅ COMPLÉTÉ
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Intensité par effet | ✅ | Slider d'intensité individuel |
-| Palette de couleurs | ⬜ | Palettes configurables par effet |
-| Sensibilité audio | ⬜ | Ajuster réactivité par bande |
-| Mode preview | ⬜ | Aperçu temps réel dans le dialog |
+| Intensité par effet | ✅ | Slider d'intensité individuel (global + 7 effets) |
+| Palette de couleurs | ✅ | 10 palettes (neon, fire, ice, nature, sunset, ocean, cosmic, retro, monochrome, rainbow) |
+| Sensibilité audio | ✅ | Sliders Bass/Mid/Treble (0-200%) |
+| Mode preview | ✅ | Preview temps réel avec Play/Pause et navigation |
 
 ---
 
@@ -182,6 +182,25 @@ DEFAULT_MAPPINGS = {
 ---
 
 ## Changelog
+
+### v1.14 (2026-01-25)
+- Ajout mode preview temps réel dans le dialog
+- Onglet "Preview" avec affichage des frames, slider de navigation, Play/Pause
+- Résolution réduite (max 480p) pour fluidité
+- Lecture en boucle, nettoyage automatique des ressources
+
+### v1.13 (2026-01-25)
+- Ajout sensibilité audio par bande de fréquence
+- Sliders Bass/Mid/Treble (0-200%) dans le dialog
+- Paramètre `audio_sensitivity` dans VJingLayer
+- Multiplicateurs appliqués aux valeurs dans le contexte
+
+### v1.12 (2026-01-25)
+- Ajout système de palettes de couleurs
+- 10 palettes prédéfinies: neon, fire, ice, nature, sunset, ocean, cosmic, retro, monochrome, rainbow
+- Sélecteur de palette dans le dialog (onglet Layers)
+- Méthodes helper: `_get_palette_color()`, `_get_random_palette_color()`, `_get_palette_colors()`
+- Effets mis à jour pour utiliser les palettes: aurora, neon, particles, lissajous, voronoi, explosion, kaleidoscope, wave, bass_warp, flow_field
 
 ### v1.11 (2026-01-25)
 - Ajout intensité par effet (sliders individuels dans le dialog)
