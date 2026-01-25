@@ -117,7 +117,7 @@ Cette roadmap définit le plan d'implémentation et d'amélioration des effets v
 |--------------|--------|-------------|
 | Présets d'effets | ✅ | Combinaisons pré-configurées (8 présets) |
 | Vrai bruit de Perlin | ✅ | Bibliothèque noise (pnoise2, snoise2) + fallback pseudo-noise |
-| Shaders GPU (optionnel) | ⬜ | Moderngl pour effets lourds |
+| Shaders GPU | ✅ | ModernGL (plasma, fractal, metaballs, wormhole, voronoi) |
 | Transitions entre effets | ✅ | Fondu crossfade entre effets (configurable: duration, cycle) |
 | LFO modulables | ✅ | 6 LFOs (slow, medium, fast, triangle, saw, random) |
 
@@ -182,6 +182,14 @@ DEFAULT_MAPPINGS = {
 ---
 
 ## Changelog
+
+### v1.9 (2026-01-25)
+- Ajout shaders GPU avec ModernGL pour effets lourds
+- Module `gpu_shaders.py` avec 5 shaders GLSL
+- Effets accélérés: plasma, fractal, metaballs, wormhole, voronoi
+- ~2x plus rapide que le rendu CPU (3ms vs 6ms/frame)
+- Fallback automatique CPU si GPU non disponible
+- Paramètre `use_gpu=True` dans VJingLayer
 
 ### v1.8 (2026-01-25)
 - Ajout bibliothèque `noise` pour vrai bruit de Perlin

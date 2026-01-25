@@ -23,6 +23,17 @@ except ImportError:
     NOISE_AVAILABLE = False
     logging.warning("[VJingLayer] noise library not installed, using pseudo-noise fallback")
 
+# Try to import GPU shaders
+try:
+    from plugins.video_exporter.layers.gpu_shaders import GPUShaderRenderer, get_gpu_renderer
+
+    GPU_SHADERS_AVAILABLE = True
+except ImportError:
+    GPU_SHADERS_AVAILABLE = False
+    GPUShaderRenderer = None  # type: ignore
+    get_gpu_renderer = None  # type: ignore
+    logging.warning("[VJingLayer] GPU shaders not available")
+
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
@@ -327,6 +338,7 @@ class VJingLayer(BaseVisualLayer):
         transitions_enabled: bool = True,
         transition_duration: float = 2.0,
         effect_cycle_duration: float = 8.0,
+        use_gpu: bool = True,
         **kwargs: Any,
     ) -> None:
         """Initialize VJing layer.
@@ -346,6 +358,7 @@ class VJingLayer(BaseVisualLayer):
             transitions_enabled: Enable smooth transitions between effects.
             transition_duration: Duration of fade transition in seconds.
             effect_cycle_duration: How long each effect is prominently visible.
+            use_gpu: Enable GPU-accelerated shaders when available.
             **kwargs: Additional parameters.
         """
         self.genre = genre
@@ -355,6 +368,9 @@ class VJingLayer(BaseVisualLayer):
         self.transitions_enabled = transitions_enabled
         self.transition_duration = transition_duration
         self.effect_cycle_duration = effect_cycle_duration
+        self.use_gpu = use_gpu
+        self._gpu_renderer: GPUShaderRenderer | None = None
+
         # Merge custom mappings with defaults (custom takes precedence)
         self.effect_mappings: dict[str, list[str]] = {
             **self.DEFAULT_MAPPINGS,
@@ -371,6 +387,9 @@ class VJingLayer(BaseVisualLayer):
 
         # Initialize LFOs for parameter modulation
         self._init_lfos()
+
+        # Store dimensions for GPU initialization (done in _precompute)
+        self._pending_gpu_init = use_gpu and GPU_SHADERS_AVAILABLE
 
         super().__init__(width, height, fps, audio, sr, duration, **kwargs)
 
@@ -406,6 +425,57 @@ class VJingLayer(BaseVisualLayer):
         }
 
         logging.debug(f"[VJingLayer] Initialized {len(self.lfos)} LFOs")
+
+    def _init_gpu_renderer(self) -> None:
+        """Initialize GPU shader renderer if available.
+
+        This is called during _precompute after dimensions are set.
+        """
+        if not GPU_SHADERS_AVAILABLE or get_gpu_renderer is None:
+            self._gpu_renderer = None
+            return
+
+        try:
+            self._gpu_renderer = get_gpu_renderer(self.width, self.height)
+            if self._gpu_renderer and self._gpu_renderer.available:
+                # Check which GPU-accelerated effects we'll use
+                gpu_effects = [e for e in self.active_effects if self._gpu_renderer.has_shader(e)]
+                if gpu_effects:
+                    logging.info(f"[VJingLayer] GPU acceleration enabled for: {gpu_effects}")
+                else:
+                    logging.debug("[VJingLayer] No active effects support GPU acceleration")
+            else:
+                logging.debug("[VJingLayer] GPU renderer not available")
+                self._gpu_renderer = None
+        except Exception as e:
+            logging.warning(f"[VJingLayer] Failed to initialize GPU renderer: {e}")
+            self._gpu_renderer = None
+
+    def _render_gpu_effect(
+        self, shader_name: str, time_pos: float, ctx: dict
+    ) -> Image.Image | None:
+        """Try to render an effect using GPU shader.
+
+        Args:
+            shader_name: Name of the shader (must match effect name).
+            time_pos: Time position in seconds.
+            ctx: Audio context dictionary.
+
+        Returns:
+            RGBA PIL Image if GPU rendering succeeded, None otherwise.
+        """
+        if not self._gpu_renderer or not self._gpu_renderer.has_shader(shader_name):
+            return None
+
+        return self._gpu_renderer.render(
+            shader_name,
+            time_pos,
+            energy=ctx.get("energy", 0.5),
+            bass=ctx.get("bass", 0.5),
+            mid=ctx.get("mid", 0.5),
+            treble=ctx.get("treble", 0.5),
+            intensity=self.intensity,
+        )
 
     def _determine_effects(self) -> list[str]:
         """Determine which effects to use based on preset or genre.
@@ -536,6 +606,10 @@ class VJingLayer(BaseVisualLayer):
             self._init_metaballs()
         if "smoke" in self.active_effects:
             self._init_smoke()
+
+        # Initialize GPU renderer if enabled
+        if self._pending_gpu_init:
+            self._init_gpu_renderer()
 
     def _detect_beats(self) -> None:
         """Simple beat detection based on energy peaks."""
@@ -1674,10 +1748,8 @@ class VJingLayer(BaseVisualLayer):
     ) -> None:
         """Render animated Julia set fractal.
 
-        The Julia set is computed with parameters modulated by audio:
-        - c parameter animated by time and bass
-        - Zoom level affected by energy
-        - Rotation based on time
+        The Julia set is computed with parameters modulated by audio.
+        Uses GPU acceleration when available.
 
         Args:
             img: Image to draw on.
@@ -1685,12 +1757,18 @@ class VJingLayer(BaseVisualLayer):
             time_pos: Time position in seconds.
             ctx: Audio context dict.
         """
+        # Try GPU rendering first
+        gpu_img = self._render_gpu_effect("fractal", time_pos, ctx)
+        if gpu_img:
+            img.paste(gpu_img, (0, 0), gpu_img)
+            return
+
+        # CPU fallback
         energy = ctx["energy"]
         bass = ctx["bass"]
         mid = ctx["mid"]
 
         # Julia set parameter c - animate it for morphing effect
-        # c moves in a circular path, modulated by audio
         c_radius = 0.7 + bass * 0.15
         c_angle = time_pos * 0.5 + mid * math.pi
         c_real = c_radius * math.cos(c_angle)
@@ -1720,46 +1798,29 @@ class VJingLayer(BaseVisualLayer):
         mask = np.ones(z.shape, dtype=bool)
 
         for i in range(max_iter):
-            # Julia iteration: z = z^2 + c
             z[mask] = z[mask] ** 2 + c
-
-            # Check for escape
             escaped = np.abs(z) > 4
             new_escaped = escaped & mask
             iterations[new_escaped] = i
             mask[escaped] = False
-
-            # Early exit if all escaped
             if not np.any(mask):
                 break
 
-        # Points that never escaped get max iterations
         iterations[mask] = max_iter
-
-        # Normalize iterations to 0-255 for color mapping
         normalized = (iterations * 255 // max_iter).astype(np.uint8)
-
-        # Apply color palette
         colored = self.fractal_palette[normalized]
 
-        # Apply intensity
         alpha_value = int(200 * self.intensity)
-
-        # Create RGBA image from colored array
         fractal_small = Image.fromarray(colored, mode="RGB")
-
-        # Upscale to full resolution with smooth interpolation
         fractal_full = fractal_small.resize(
             (self.width, self.height), Image.Resampling.BILINEAR
         )
 
-        # Convert to RGBA with alpha
         fractal_rgba = fractal_full.convert("RGBA")
         r, g, b, _ = fractal_rgba.split()
         alpha = Image.new("L", (self.width, self.height), alpha_value)
         fractal_rgba = Image.merge("RGBA", (r, g, b, alpha))
 
-        # Composite onto image
         img.paste(fractal_rgba, (0, 0), fractal_rgba)
 
     # ========================================================================
@@ -1871,6 +1932,7 @@ class VJingLayer(BaseVisualLayer):
         """Render animated plasma effect.
 
         Classic plasma using combined sine waves with audio modulation.
+        Uses GPU acceleration when available.
 
         Args:
             img: Image to draw on.
@@ -1878,6 +1940,13 @@ class VJingLayer(BaseVisualLayer):
             time_pos: Time position in seconds.
             ctx: Audio context dict.
         """
+        # Try GPU rendering first
+        gpu_img = self._render_gpu_effect("plasma", time_pos, ctx)
+        if gpu_img:
+            img.paste(gpu_img, (0, 0), gpu_img)
+            return
+
+        # CPU fallback
         energy = ctx["energy"]
         bass = ctx["bass"]
         mid = ctx["mid"]
@@ -1956,6 +2025,7 @@ class VJingLayer(BaseVisualLayer):
         """Render wormhole/tunnel vortex effect.
 
         Spiraling tunnel with depth illusion, pulled by bass.
+        Uses GPU acceleration when available.
 
         Args:
             img: Image to draw on.
@@ -1963,41 +2033,30 @@ class VJingLayer(BaseVisualLayer):
             time_pos: Time position in seconds.
             ctx: Audio context dict.
         """
+        # Try GPU rendering first
+        gpu_img = self._render_gpu_effect("wormhole", time_pos, ctx)
+        if gpu_img:
+            img.paste(gpu_img, (0, 0), gpu_img)
+            return
+
+        # CPU fallback
         energy = ctx["energy"]
         bass = ctx["bass"]
         mid = ctx["mid"]
         is_beat = ctx["is_beat"]
 
-        # Animation speed
         t = time_pos * 3
-
-        # Spiral twist amount (more twist with bass)
         twist = 3.0 + bass * 2.0
-
-        # Pull effect (zoom into center over time)
         pull = t * 2 + bass * 0.5
 
-        # Create tunnel pattern
-        # Radial distance creates tunnel depth
-        # Theta + radius*twist creates spiral
         spiral_angle = self.wormhole_theta + self.wormhole_r * twist - pull
-
-        # Create ring pattern
         ring_pattern = np.sin(self.wormhole_r * 15 - pull * 3 + mid * math.pi)
-
-        # Create spiral pattern
         spiral_pattern = np.sin(spiral_angle * 8 + energy * math.pi)
 
-        # Combine patterns
         combined = (ring_pattern + spiral_pattern) / 2
-
-        # Distance-based fade (darker in center, brighter at edges creates depth)
         depth_fade = np.clip(self.wormhole_r * 1.5, 0.1, 1.0)
-
-        # Normalize
         combined = (combined + 1) / 2 * depth_fade
 
-        # Create colors - purple/blue shifting based on time
         hue_shift = t * 0.5
         r = ((np.sin(combined * math.pi + hue_shift) + 1) / 2 * 100 + 50).astype(np.uint8)
         g = ((np.sin(combined * math.pi + hue_shift + 1) + 1) / 2 * 50).astype(np.uint8)
@@ -2005,29 +2064,23 @@ class VJingLayer(BaseVisualLayer):
             np.uint8
         )
 
-        # Beat pulse - flash brighter
         if is_beat:
             r = np.clip(r.astype(np.int16) + 80, 0, 255).astype(np.uint8)
             g = np.clip(g.astype(np.int16) + 60, 0, 255).astype(np.uint8)
             b = np.clip(b.astype(np.int16) + 60, 0, 255).astype(np.uint8)
 
-        # Stack to RGB
         rgb = np.stack([r, g, b], axis=-1)
-
-        # Create image and upscale
         wormhole_small = Image.fromarray(rgb, mode="RGB")
         wormhole_full = wormhole_small.resize(
             (self.width, self.height), Image.Resampling.BILINEAR
         )
 
-        # Convert to RGBA
         wormhole_rgba = wormhole_full.convert("RGBA")
         r_ch, g_ch, b_ch, _ = wormhole_rgba.split()
         alpha_value = int(200 * self.intensity)
         alpha = Image.new("L", (self.width, self.height), alpha_value)
         wormhole_rgba = Image.merge("RGBA", (r_ch, g_ch, b_ch, alpha))
 
-        # Composite
         img.paste(wormhole_rgba, (0, 0), wormhole_rgba)
 
     # ========================================================================
@@ -2293,6 +2346,7 @@ class VJingLayer(BaseVisualLayer):
         """Render animated Voronoi diagram.
 
         Cells colored by nearest point, points move with audio.
+        Uses GPU acceleration when available.
 
         Args:
             img: Image to draw on.
@@ -2300,6 +2354,13 @@ class VJingLayer(BaseVisualLayer):
             time_pos: Time position in seconds.
             ctx: Audio context dict.
         """
+        # Try GPU rendering first
+        gpu_img = self._render_gpu_effect("voronoi", time_pos, ctx)
+        if gpu_img:
+            img.paste(gpu_img, (0, 0), gpu_img)
+            return
+
+        # CPU fallback
         energy = ctx["energy"]
         bass = ctx["bass"]
         is_beat = ctx["is_beat"]
@@ -2310,7 +2371,6 @@ class VJingLayer(BaseVisualLayer):
             point["x"] += point["vx"] * speed_mult
             point["y"] += point["vy"] * speed_mult
 
-            # Bounce off edges
             if point["x"] < 0 or point["x"] >= self.width:
                 point["vx"] *= -1
                 point["x"] = max(0, min(self.width - 1, point["x"]))
@@ -2318,7 +2378,6 @@ class VJingLayer(BaseVisualLayer):
                 point["vy"] *= -1
                 point["y"] = max(0, min(self.height - 1, point["y"]))
 
-            # Beat impulse
             if is_beat:
                 point["vx"] += (random.random() - 0.5) * bass * 4
                 point["vy"] += (random.random() - 0.5) * bass * 4
@@ -2328,12 +2387,10 @@ class VJingLayer(BaseVisualLayer):
         small_w = self.width // scale
         small_h = self.height // scale
 
-        # Create coordinate grids
         y_coords, x_coords = np.ogrid[:small_h, :small_w]
         x_coords = x_coords * scale
         y_coords = y_coords * scale
 
-        # Find nearest point for each pixel
         min_dist = np.full((small_h, small_w), np.inf)
         nearest = np.zeros((small_h, small_w), dtype=np.int32)
 
@@ -2343,40 +2400,32 @@ class VJingLayer(BaseVisualLayer):
             min_dist[mask] = dist[mask]
             nearest[mask] = i
 
-        # Create color image
         rgb = np.zeros((small_h, small_w, 3), dtype=np.uint8)
         for i, point in enumerate(self.voronoi_points):
             mask = nearest == i
-            # Modulate color by distance from center of cell
             for c in range(3):
                 rgb[mask, c] = point["color"][c]
 
-        # Add edge detection (darker at cell boundaries)
-        # Simple gradient magnitude
         edge_x = np.abs(np.diff(nearest.astype(np.float32), axis=1, prepend=nearest[:, :1]))
         edge_y = np.abs(np.diff(nearest.astype(np.float32), axis=0, prepend=nearest[:1, :]))
         edges = np.clip((edge_x + edge_y) * 50, 0, 100).astype(np.uint8)
 
-        # Darken edges
         for c in range(3):
             rgb[:, :, c] = np.clip(rgb[:, :, c].astype(np.int16) - edges, 0, 255).astype(
                 np.uint8
             )
 
-        # Create image and upscale
         voronoi_small = Image.fromarray(rgb, mode="RGB")
         voronoi_full = voronoi_small.resize(
             (self.width, self.height), Image.Resampling.NEAREST
         )
 
-        # Convert to RGBA
         voronoi_rgba = voronoi_full.convert("RGBA")
         r_ch, g_ch, b_ch, _ = voronoi_rgba.split()
         alpha_value = int(180 * self.intensity)
         alpha = Image.new("L", (self.width, self.height), alpha_value)
         voronoi_rgba = Image.merge("RGBA", (r_ch, g_ch, b_ch, alpha))
 
-        # Composite
         img.paste(voronoi_rgba, (0, 0), voronoi_rgba)
 
     # ========================================================================
@@ -2409,7 +2458,7 @@ class VJingLayer(BaseVisualLayer):
         """Render metaballs (blob/liquid effect).
 
         Balls that merge smoothly when close together using field function.
-        Movement and size react to audio.
+        Uses GPU acceleration when available.
 
         Args:
             img: Image to draw on.
@@ -2417,6 +2466,13 @@ class VJingLayer(BaseVisualLayer):
             time_pos: Time position in seconds.
             ctx: Audio context dict.
         """
+        # Try GPU rendering first
+        gpu_img = self._render_gpu_effect("metaballs", time_pos, ctx)
+        if gpu_img:
+            img.paste(gpu_img, (0, 0), gpu_img)
+            return
+
+        # CPU fallback
         energy = ctx["energy"]
         bass = ctx["bass"]
         is_beat = ctx["is_beat"]
@@ -2427,7 +2483,6 @@ class VJingLayer(BaseVisualLayer):
             ball["x"] += ball["vx"] * speed_mult
             ball["y"] += ball["vy"] * speed_mult
 
-            # Bounce off edges
             if ball["x"] < 0 or ball["x"] >= self.width:
                 ball["vx"] *= -1
                 ball["x"] = max(0, min(self.width - 1, ball["x"]))
@@ -2435,7 +2490,6 @@ class VJingLayer(BaseVisualLayer):
                 ball["vy"] *= -1
                 ball["y"] = max(0, min(self.height - 1, ball["y"]))
 
-            # Beat impulse
             if is_beat:
                 ball["vx"] += (random.random() - 0.5) * bass * 6
                 ball["vy"] += (random.random() - 0.5) * bass * 6
@@ -2444,52 +2498,34 @@ class VJingLayer(BaseVisualLayer):
         field = np.zeros((self.metaball_h, self.metaball_w), dtype=np.float32)
 
         for ball in self.metaballs:
-            # Radius modulated by bass
             radius = ball["radius"] * (1 + bass * 0.5)
-            # Distance from ball center
             dx = self.metaball_x - ball["x"]
             dy = self.metaball_y - ball["y"]
-            dist_sq = dx * dx + dy * dy + 1  # +1 to avoid division by zero
-            # Add contribution (inverse square falloff)
+            dist_sq = dx * dx + dy * dy + 1
             field += (radius * radius) / dist_sq
 
-        # Threshold for surface
         threshold = 1.0
-
-        # Create color based on field value
-        # Above threshold = inside blob
         inside = field > threshold
-
-        # Smooth gradient for glow effect
         glow = np.clip((field - threshold * 0.5) / threshold, 0, 1)
 
-        # Color cycling based on time
         hue_shift = time_pos * 0.5
         r = (np.sin(glow * math.pi + hue_shift) * 127 + 128).astype(np.uint8)
         g = (np.sin(glow * math.pi + hue_shift + 2) * 127 + 128).astype(np.uint8)
         b = (np.sin(glow * math.pi + hue_shift + 4) * 127 + 128).astype(np.uint8)
 
-        # Inside blob is brighter
         r[inside] = np.clip(r[inside].astype(np.int16) + 80, 0, 255).astype(np.uint8)
         g[inside] = np.clip(g[inside].astype(np.int16) + 80, 0, 255).astype(np.uint8)
         b[inside] = np.clip(b[inside].astype(np.int16) + 80, 0, 255).astype(np.uint8)
 
-        # Stack to RGB
         rgb = np.stack([r, g, b], axis=-1)
-
-        # Create alpha (more opaque inside)
         alpha_arr = (glow * 200 * self.intensity).astype(np.uint8)
-
-        # Stack to RGBA
         rgba = np.dstack([rgb, alpha_arr])
 
-        # Create image and upscale
         metaball_small = Image.fromarray(rgba, mode="RGBA")
         metaball_full = metaball_small.resize(
             (self.width, self.height), Image.Resampling.BILINEAR
         )
 
-        # Composite
         img.paste(metaball_full, (0, 0), metaball_full)
 
     # ========================================================================
