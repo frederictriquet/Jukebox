@@ -116,10 +116,10 @@ Cette roadmap définit le plan d'implémentation et d'amélioration des effets v
 | Amélioration | Status | Description |
 |--------------|--------|-------------|
 | Présets d'effets | ✅ | Combinaisons pré-configurées (8 présets) |
-| Vrai bruit de Perlin | ⬜ | Remplacer pseudo-noise par noise library |
+| Vrai bruit de Perlin | ✅ | Bibliothèque noise (pnoise2, snoise2) + fallback pseudo-noise |
 | Shaders GPU (optionnel) | ⬜ | Moderngl pour effets lourds |
-| Transitions entre effets | ⬜ | Fondu entre effets |
-| LFO modulables | ⬜ | Oscillateurs basse fréquence paramétrables |
+| Transitions entre effets | ✅ | Fondu crossfade entre effets (configurable: duration, cycle) |
+| LFO modulables | ✅ | 6 LFOs (slow, medium, fast, triangle, saw, random) |
 
 ### 8.4 Configuration avancée
 | Feature | Status | Description |
@@ -182,6 +182,19 @@ DEFAULT_MAPPINGS = {
 ---
 
 ## Changelog
+
+### v1.8 (2026-01-25)
+- Ajout bibliothèque `noise` pour vrai bruit de Perlin
+- Fonctions utilitaires: `perlin2d`, `simplex2d`, `fbm2d`, `turbulence2d`
+- Fallback pseudo-noise si bibliothèque non disponible
+- Ajout système LFO modulables (6 oscillateurs)
+- Classes `LFO` et `LFOWaveform` (sine, triangle, sawtooth, square, random)
+- Effets mis à jour: flow_field, smoke, fire, aurora, tunnel, spiral
+
+### v1.7 (2026-01-25)
+- Ajout transitions crossfade entre effets
+- Paramètres: `transition_duration` (2s), `effect_cycle_duration` (8s)
+- Correction bug alpha compositing dans `_render_with_transitions`
 
 ### v1.6 (2026-01-25)
 - Ajout système de présets d'effets VJing

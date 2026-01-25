@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import math
 import random
+from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -12,8 +14,226 @@ from PIL import Image, ImageDraw
 
 from plugins.video_exporter.layers.base import BaseVisualLayer
 
+# Try to import noise library, fallback to pseudo-noise if not available
+try:
+    from noise import pnoise2, snoise2
+
+    NOISE_AVAILABLE = True
+except ImportError:
+    NOISE_AVAILABLE = False
+    logging.warning("[VJingLayer] noise library not installed, using pseudo-noise fallback")
+
 if TYPE_CHECKING:
     from numpy.typing import NDArray
+
+
+# =============================================================================
+# LFO (Low Frequency Oscillator) System
+# =============================================================================
+
+
+class LFOWaveform(Enum):
+    """Available LFO waveforms."""
+
+    SINE = "sine"
+    TRIANGLE = "triangle"
+    SAWTOOTH = "sawtooth"
+    SQUARE = "square"
+    RANDOM = "random"
+
+
+@dataclass
+class LFO:
+    """Low Frequency Oscillator for modulating effect parameters.
+
+    Attributes:
+        frequency: Oscillation frequency in Hz.
+        amplitude: Output amplitude (0.0 to 1.0).
+        phase: Initial phase offset (0.0 to 1.0).
+        waveform: Type of waveform.
+        offset: DC offset added to output.
+    """
+
+    frequency: float = 0.5
+    amplitude: float = 1.0
+    phase: float = 0.0
+    waveform: LFOWaveform = LFOWaveform.SINE
+    offset: float = 0.0
+    _random_value: float = 0.0
+    _last_random_time: float = -1.0
+
+    def value(self, time_pos: float) -> float:
+        """Get LFO value at given time.
+
+        Args:
+            time_pos: Time position in seconds.
+
+        Returns:
+            LFO value in range [offset - amplitude, offset + amplitude].
+        """
+        # Calculate phase position (0 to 1)
+        t = (time_pos * self.frequency + self.phase) % 1.0
+
+        if self.waveform == LFOWaveform.SINE:
+            v = math.sin(t * 2 * math.pi)
+        elif self.waveform == LFOWaveform.TRIANGLE:
+            v = 4 * abs(t - 0.5) - 1
+        elif self.waveform == LFOWaveform.SAWTOOTH:
+            v = 2 * t - 1
+        elif self.waveform == LFOWaveform.SQUARE:
+            v = 1.0 if t < 0.5 else -1.0
+        elif self.waveform == LFOWaveform.RANDOM:
+            # Sample-and-hold random
+            period = 1.0 / self.frequency if self.frequency > 0 else 1.0
+            current_period = int(time_pos / period)
+            if current_period != int(self._last_random_time / period):
+                self._random_value = random.uniform(-1, 1)
+                self._last_random_time = time_pos
+            v = self._random_value
+        else:
+            v = 0.0
+
+        return self.offset + v * self.amplitude
+
+    def value_normalized(self, time_pos: float) -> float:
+        """Get LFO value normalized to 0-1 range.
+
+        Args:
+            time_pos: Time position in seconds.
+
+        Returns:
+            LFO value in range [0, 1].
+        """
+        if self.amplitude > 0:
+            return (self.value(time_pos) + self.amplitude) / (2 * self.amplitude)
+        return 0.5
+
+
+# =============================================================================
+# Perlin Noise Utilities
+# =============================================================================
+
+
+def perlin2d(x: float, y: float, octaves: int = 1, persistence: float = 0.5) -> float:
+    """Get 2D Perlin noise value.
+
+    Args:
+        x: X coordinate.
+        y: Y coordinate.
+        octaves: Number of noise octaves (detail levels).
+        persistence: Amplitude decay per octave.
+
+    Returns:
+        Noise value in range [-1, 1].
+    """
+    if NOISE_AVAILABLE:
+        return pnoise2(x, y, octaves=octaves, persistence=persistence)
+    else:
+        # Fallback pseudo-noise
+        return _pseudo_perlin2d(x, y, octaves, persistence)
+
+
+def simplex2d(x: float, y: float, octaves: int = 1, persistence: float = 0.5) -> float:
+    """Get 2D Simplex noise value (faster than Perlin).
+
+    Args:
+        x: X coordinate.
+        y: Y coordinate.
+        octaves: Number of noise octaves.
+        persistence: Amplitude decay per octave.
+
+    Returns:
+        Noise value in range [-1, 1].
+    """
+    if NOISE_AVAILABLE:
+        return snoise2(x, y, octaves=octaves, persistence=persistence)
+    else:
+        return _pseudo_perlin2d(x, y, octaves, persistence)
+
+
+def _pseudo_perlin2d(x: float, y: float, octaves: int = 1, persistence: float = 0.5) -> float:
+    """Fallback pseudo-Perlin noise using sine functions.
+
+    Args:
+        x: X coordinate.
+        y: Y coordinate.
+        octaves: Number of noise octaves.
+        persistence: Amplitude decay per octave.
+
+    Returns:
+        Noise value in range approximately [-1, 1].
+    """
+    total = 0.0
+    amplitude = 1.0
+    max_value = 0.0
+
+    for i in range(octaves):
+        freq = 2**i
+        # Multi-frequency sine combination
+        total += amplitude * (
+            math.sin(x * freq * 1.7 + y * freq * 2.3)
+            * math.cos(y * freq * 1.3 - x * freq * 0.7)
+            * 0.5
+            + math.sin((x + y) * freq * 0.9) * 0.5
+        )
+        max_value += amplitude
+        amplitude *= persistence
+
+    return total / max_value if max_value > 0 else 0.0
+
+
+def fbm2d(
+    x: float, y: float, octaves: int = 4, lacunarity: float = 2.0, gain: float = 0.5
+) -> float:
+    """Fractal Brownian Motion noise (layered Perlin).
+
+    Args:
+        x: X coordinate.
+        y: Y coordinate.
+        octaves: Number of noise layers.
+        lacunarity: Frequency multiplier per octave.
+        gain: Amplitude multiplier per octave.
+
+    Returns:
+        FBM noise value.
+    """
+    total = 0.0
+    amplitude = 1.0
+    frequency = 1.0
+    max_value = 0.0
+
+    for _ in range(octaves):
+        total += perlin2d(x * frequency, y * frequency) * amplitude
+        max_value += amplitude
+        amplitude *= gain
+        frequency *= lacunarity
+
+    return total / max_value if max_value > 0 else 0.0
+
+
+def turbulence2d(x: float, y: float, octaves: int = 4) -> float:
+    """Turbulence noise (absolute value of FBM).
+
+    Args:
+        x: X coordinate.
+        y: Y coordinate.
+        octaves: Number of noise layers.
+
+    Returns:
+        Turbulence value in range [0, 1].
+    """
+    total = 0.0
+    amplitude = 1.0
+    frequency = 1.0
+    max_value = 0.0
+
+    for _ in range(octaves):
+        total += abs(perlin2d(x * frequency, y * frequency)) * amplitude
+        max_value += amplitude
+        amplitude *= 0.5
+        frequency *= 2.0
+
+    return total / max_value if max_value > 0 else 0.0
 
 
 class VJingLayer(BaseVisualLayer):
@@ -104,6 +324,9 @@ class VJingLayer(BaseVisualLayer):
         preset: str = "",
         presets: dict[str, list[str]] | None = None,
         intensity: float = 0.7,
+        transitions_enabled: bool = True,
+        transition_duration: float = 2.0,
+        effect_cycle_duration: float = 8.0,
         **kwargs: Any,
     ) -> None:
         """Initialize VJing layer.
@@ -120,12 +343,18 @@ class VJingLayer(BaseVisualLayer):
             preset: Name of preset to use (overrides genre mapping).
             presets: Available presets {name: [effects]}.
             intensity: Effect intensity (0.0 to 1.0).
+            transitions_enabled: Enable smooth transitions between effects.
+            transition_duration: Duration of fade transition in seconds.
+            effect_cycle_duration: How long each effect is prominently visible.
             **kwargs: Additional parameters.
         """
         self.genre = genre
         self.intensity = intensity
         self.preset = preset
         self.presets = presets or {}
+        self.transitions_enabled = transitions_enabled
+        self.transition_duration = transition_duration
+        self.effect_cycle_duration = effect_cycle_duration
         # Merge custom mappings with defaults (custom takes precedence)
         self.effect_mappings: dict[str, list[str]] = {
             **self.DEFAULT_MAPPINGS,
@@ -140,7 +369,43 @@ class VJingLayer(BaseVisualLayer):
 
         logging.info(f"[VJingLayer] Active effects: {self.active_effects}")
 
+        # Initialize LFOs for parameter modulation
+        self._init_lfos()
+
         super().__init__(width, height, fps, audio, sr, duration, **kwargs)
+
+
+    def _init_lfos(self) -> None:
+        """Initialize LFO oscillators for parameter modulation.
+
+        Creates a set of LFOs with different frequencies and waveforms
+        that can be used to modulate effect parameters over time.
+        """
+        # Primary LFOs - slow modulation
+        self.lfo_slow = LFO(frequency=0.1, amplitude=1.0, waveform=LFOWaveform.SINE)
+        self.lfo_medium = LFO(frequency=0.3, amplitude=1.0, waveform=LFOWaveform.SINE)
+        self.lfo_fast = LFO(frequency=0.8, amplitude=1.0, waveform=LFOWaveform.SINE)
+
+        # Triangle LFOs - for linear sweeps
+        self.lfo_triangle = LFO(frequency=0.2, amplitude=1.0, waveform=LFOWaveform.TRIANGLE)
+
+        # Sawtooth - for ramp effects
+        self.lfo_saw = LFO(frequency=0.15, amplitude=1.0, waveform=LFOWaveform.SAWTOOTH)
+
+        # Random - for variation
+        self.lfo_random = LFO(frequency=0.5, amplitude=0.5, waveform=LFOWaveform.RANDOM)
+
+        # Collect all LFOs for easy iteration
+        self.lfos: dict[str, LFO] = {
+            "slow": self.lfo_slow,
+            "medium": self.lfo_medium,
+            "fast": self.lfo_fast,
+            "triangle": self.lfo_triangle,
+            "saw": self.lfo_saw,
+            "random": self.lfo_random,
+        }
+
+        logging.debug(f"[VJingLayer] Initialized {len(self.lfos)} LFOs")
 
     def _determine_effects(self) -> list[str]:
         """Determine which effects to use based on preset or genre.
@@ -404,12 +669,119 @@ class VJingLayer(BaseVisualLayer):
             "is_beat": is_beat,
         }
 
-        # Render all active effects (composited together)
-        for effect_name in self.active_effects:
-            effect_method = getattr(self, f"_render_{effect_name}", self._render_wave)
-            effect_method(img, frame_idx, time_pos, ctx)
+        # Render effects with transitions
+        if self.transitions_enabled and len(self.active_effects) > 1:
+            self._render_with_transitions(img, frame_idx, time_pos, ctx)
+        else:
+            # Render all active effects (composited together)
+            for effect_name in self.active_effects:
+                effect_method = getattr(self, f"_render_{effect_name}", self._render_wave)
+                effect_method(img, frame_idx, time_pos, ctx)
 
         return img
+
+    def _calculate_effect_alpha(self, effect_idx: int, time_pos: float) -> float:
+        """Calculate alpha multiplier for crossfade between effects.
+
+        At any time, one effect is "dominant" (the one whose window contains time_pos).
+        During the transition period at the end of each window, the dominant effect
+        fades out while the next effect fades in.
+
+        Args:
+            effect_idx: Index of the effect in active_effects.
+            time_pos: Current time position in seconds.
+
+        Returns:
+            Alpha multiplier (0.0 to 1.0).
+        """
+        num_effects = len(self.active_effects)
+        if num_effects <= 1:
+            return 1.0
+
+        cycle = self.effect_cycle_duration
+        total_cycle = cycle * num_effects
+        fade = self.transition_duration
+
+        t = time_pos % total_cycle
+
+        # Which effect is dominant (whose window contains t)?
+        dominant_idx = int(t / cycle) % num_effects
+        # Position within the dominant effect's window
+        pos_in_window = t % cycle
+
+        # Are we in the transition period (end of window)?
+        if pos_in_window >= cycle - fade:
+            # Transition period - crossfade between dominant and next
+            transition_progress = (pos_in_window - (cycle - fade)) / fade  # 0 to 1
+            next_idx = (dominant_idx + 1) % num_effects
+
+            if effect_idx == dominant_idx:
+                # Outgoing effect
+                return 1.0 - transition_progress
+            elif effect_idx == next_idx:
+                # Incoming effect
+                return transition_progress
+            else:
+                return 0.0
+        else:
+            # No transition - only dominant effect is visible
+            if effect_idx == dominant_idx:
+                return 1.0
+            else:
+                return 0.0
+
+    def _render_with_transitions(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render effects with smooth transitions between them.
+
+        Args:
+            img: Target image to render onto.
+            frame_idx: Frame index.
+            time_pos: Time position in seconds.
+            ctx: Audio context dictionary.
+        """
+        for idx, effect_name in enumerate(self.active_effects):
+            alpha = self._calculate_effect_alpha(idx, time_pos)
+
+            if alpha < 0.01:
+                continue  # Skip nearly invisible effects
+
+            # Create temporary image for this effect
+            effect_img = self.create_transparent_image()
+
+            # Render effect
+            effect_method = getattr(self, f"_render_{effect_name}", self._render_wave)
+            effect_method(effect_img, frame_idx, time_pos, ctx)
+
+            # Apply alpha to effect image
+            if alpha < 0.99:
+                # Reduce alpha of entire effect image
+                effect_data = np.array(effect_img)
+                effect_data[:, :, 3] = (effect_data[:, :, 3] * alpha).astype(np.uint8)
+                effect_img = Image.fromarray(effect_data, "RGBA")
+
+            # Composite onto main image using alpha_composite (not paste)
+            # paste with mask doesn't handle transparent backgrounds correctly
+            img_data = np.array(img)
+            effect_data = np.array(effect_img)
+            
+            # Manual alpha compositing: result = effect + img * (1 - effect_alpha)
+            effect_alpha = effect_data[:, :, 3:4].astype(np.float32) / 255.0
+            result = (
+                effect_data[:, :, :3].astype(np.float32) * effect_alpha
+                + img_data[:, :, :3].astype(np.float32) * (1 - effect_alpha)
+            ).astype(np.uint8)
+            result_alpha = np.clip(
+                effect_data[:, :, 3].astype(np.float32)
+                + img_data[:, :, 3].astype(np.float32) * (1 - effect_alpha[:, :, 0]),
+                0,
+                255,
+            ).astype(np.uint8)
+            
+            # Update img in place
+            combined = np.dstack([result, result_alpha])
+            img.paste(Image.fromarray(combined, "RGBA"))
 
     # ========================================================================
     # RHYTHM-SYNCHRONIZED EFFECTS
@@ -623,24 +995,25 @@ class VJingLayer(BaseVisualLayer):
     def _render_flow_field(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
-        """Render flow field effect (Perlin-like noise field)."""
+        """Render flow field effect using Perlin noise field."""
         draw = ImageDraw.Draw(img)
         energy = ctx["energy"]
         bass = ctx["bass"]
 
         # Flow field parameters
-        scale = 0.01  # Noise scale
+        scale = 0.008  # Noise scale (smaller = smoother)
+        time_scale = 0.3  # Time evolution speed
         speed = 2 + energy * 5
 
         for particle in self.flow_particles:
-            # Get flow direction from noise-like function
+            # Get flow direction from Perlin noise
             nx = particle["x"] * scale
             ny = particle["y"] * scale
-            # Simple pseudo-noise using sin
-            angle = (
-                math.sin(nx + time_pos) * math.cos(ny - time_pos * 0.5)
-                + math.sin(nx * 2 - time_pos * 0.3) * 0.5
-            ) * math.pi * 2
+            # Use FBM for more natural flow patterns
+            noise_val = fbm2d(
+                nx + time_pos * time_scale, ny + time_pos * time_scale * 0.7, octaves=3
+            )
+            angle = noise_val * math.pi * 2
 
             # Apply velocity
             particle["x"] += math.cos(angle) * speed
@@ -665,7 +1038,7 @@ class VJingLayer(BaseVisualLayer):
             x2 = x + int(math.cos(angle) * length)
             y2 = y + int(math.sin(angle) * length)
 
-            # Color based on position
+            # Color based on position and noise
             hue = (particle["x"] / self.width + particle["y"] / self.height) / 2
             r = int(100 + 155 * (1 - hue))
             g = int(150 + 105 * energy)
@@ -823,10 +1196,15 @@ class VJingLayer(BaseVisualLayer):
     def _render_tunnel(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
-        """Render infinite tunnel effect."""
+        """Render infinite tunnel effect with LFO modulation."""
         draw = ImageDraw.Draw(img)
         energy = ctx["energy"]
         center = (self.width // 2, self.height // 2)
+
+        # LFO modulation
+        rotation_mod = self.lfo_slow.value(time_pos) * 0.5  # Rotation wobble
+        scale_mod = 1.0 + self.lfo_medium.value(time_pos) * 0.2  # Size pulsing
+        hue_offset = self.lfo_triangle.value_normalized(time_pos)  # Color cycling
 
         # Tunnel parameters
         n_rings = 20
@@ -838,15 +1216,15 @@ class VJingLayer(BaseVisualLayer):
             if z < 0.1:
                 continue
 
-            # Size based on "depth"
-            scale = 1 / z
+            # Size based on "depth" with LFO modulation
+            scale = 1 / z * scale_mod
             radius = min(self.width, self.height) * 0.1 * scale
 
             if radius > max(self.width, self.height):
                 continue
 
-            # Rotation
-            rotation = time_pos * 0.5 + i * 0.1
+            # Rotation with LFO modulation
+            rotation = time_pos * 0.5 + i * 0.1 + rotation_mod
 
             # Draw polygon ring
             n_sides = 6
@@ -858,9 +1236,9 @@ class VJingLayer(BaseVisualLayer):
                 points.append((x, y))
             points.append(points[0])
 
-            # Color fades with depth
+            # Color fades with depth, modulated by LFO
             alpha = int(200 * (1 - z) * self.intensity)
-            hue = (i / n_rings + time_pos * 0.1) % 1.0
+            hue = (i / n_rings + hue_offset) % 1.0
             r = int(100 + 155 * (1 - hue))
             g = int(50 + 100 * energy)
             b = int(100 + 155 * hue)
@@ -870,30 +1248,35 @@ class VJingLayer(BaseVisualLayer):
     def _render_spiral(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
-        """Render animated spiral effect."""
+        """Render animated spiral effect with LFO modulation."""
         draw = ImageDraw.Draw(img)
         energy = ctx["energy"]
         center = (self.width // 2, self.height // 2)
         max_radius = min(self.width, self.height) * 0.45
 
+        # LFO modulation
+        rotation_speed = 2 + self.lfo_medium.value(time_pos) * 0.5  # Speed variation
+        scale_mod = 1.0 + self.lfo_slow.value(time_pos) * 0.15  # Breathing effect
+        color_shift = self.lfo_triangle.value_normalized(time_pos)  # Color shift
+
         # Draw spiral
         points = []
         n_points = 200
-        rotations = 4 + energy * 2
+        rotations = 4 + energy * 2 + self.lfo_fast.value(time_pos) * 0.5
 
         for i in range(n_points):
             progress = i / n_points
-            angle = progress * rotations * 2 * math.pi + time_pos * 2
-            radius = progress * max_radius
+            angle = progress * rotations * 2 * math.pi + time_pos * rotation_speed
+            radius = progress * max_radius * scale_mod
 
             x = center[0] + radius * math.cos(angle)
             y = center[1] + radius * math.sin(angle)
             points.append((x, y))
 
-        # Draw with gradient color
+        # Draw with gradient color, shifted by LFO
         if len(points) >= 2:
             for i in range(len(points) - 1):
-                progress = i / len(points)
+                progress = (i / len(points) + color_shift) % 1.0
                 r = int(255 * (1 - progress))
                 g = int(100 + 155 * energy)
                 b = int(255 * progress)
@@ -995,7 +1378,7 @@ class VJingLayer(BaseVisualLayer):
     def _render_fire(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
-        """Render fire/flame effect."""
+        """Render fire/flame effect with Perlin noise turbulence."""
         draw = ImageDraw.Draw(img)
         bass = ctx["bass"]
 
@@ -1015,10 +1398,14 @@ class VJingLayer(BaseVisualLayer):
 
             alpha = int(150 * (1 - progress) * self.intensity)
 
-            # Animated flame shape
+            # Animated flame shape using turbulence noise
             for x in range(0, self.width, 3):
-                noise = math.sin(x * 0.05 + time_pos * 8 + y * 0.1) * 15
-                noise += math.sin(x * 0.02 - time_pos * 5) * 10
+                # Use turbulence for more natural flame motion
+                noise = turbulence2d(
+                    x * 0.02 + time_pos * 2,
+                    y * 0.03 + time_pos * 3,
+                    octaves=3
+                ) * 30
                 flame_y = self.height - y + int(noise * (1 - progress))
 
                 if 0 <= flame_y < self.height:
@@ -1073,7 +1460,7 @@ class VJingLayer(BaseVisualLayer):
     def _render_aurora(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
-        """Render aurora borealis effect."""
+        """Render aurora borealis effect with Perlin noise."""
         draw = ImageDraw.Draw(img)
         energy = ctx["energy"]
         mid = ctx["mid"]
@@ -1087,11 +1474,20 @@ class VJingLayer(BaseVisualLayer):
             band_offset = band * 30
 
             for x in range(0, self.width, 5):
-                # Layered sine waves for organic movement
+                # Use FBM noise for organic aurora movement
+                noise_scale = 0.003
                 y = base_y + band_offset
-                y += math.sin(x * 0.01 + time_pos + band) * 50 * self.intensity
-                y += math.sin(x * 0.02 - time_pos * 0.5 + band * 0.5) * 30
-                y += math.sin(x * 0.005 + time_pos * 0.2) * 20 * energy
+                # Primary wave using Perlin
+                y += fbm2d(
+                    x * noise_scale + time_pos * 0.2,
+                    band * 0.5 + time_pos * 0.1,
+                    octaves=3
+                ) * 80 * self.intensity
+                # Secondary modulation
+                y += perlin2d(
+                    x * noise_scale * 2 + time_pos * 0.3,
+                    band * 0.3
+                ) * 30 * energy
                 points.append((x, y))
 
             # Aurora colors: green, blue, purple, pink
@@ -2132,7 +2528,7 @@ class VJingLayer(BaseVisualLayer):
     def _render_smoke(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
-        """Render smoke/mist effect.
+        """Render smoke/mist effect with Perlin turbulence.
 
         Particles rise and dissipate with turbulent motion.
         Spawn rate and movement react to audio.
@@ -2164,9 +2560,16 @@ class VJingLayer(BaseVisualLayer):
         # Update and render particles
         new_particles = []
         for p in self.smoke_particles:
-            # Turbulence using sin waves
-            turb_x = math.sin(time_pos * 2 + p["turbulence_offset"]) * 0.5
-            turb_y = math.sin(time_pos * 3 + p["turbulence_offset"] * 1.5) * 0.3
+            # Turbulence using Perlin noise for more natural motion
+            noise_scale = 0.005
+            turb_x = perlin2d(
+                p["x"] * noise_scale + time_pos * 0.5,
+                p["y"] * noise_scale + p["turbulence_offset"],
+            ) * 1.5
+            turb_y = perlin2d(
+                p["x"] * noise_scale + p["turbulence_offset"],
+                p["y"] * noise_scale + time_pos * 0.3,
+            ) * 0.8
 
             # Update position
             p["x"] += p["vx"] + turb_x + (random.random() - 0.5) * energy

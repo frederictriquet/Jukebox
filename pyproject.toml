@@ -31,6 +31,7 @@ ml-xgboost = [
 video = [
     "Pillow>=10.0.0",
     "opencv-python>=4.8.0",  # Optional, for video background layer
+    "noise>=1.2.2",  # Perlin/Simplex noise for VJing effects
 ]
 dev = [
     "pytest>=7.4.0",
