@@ -329,7 +329,8 @@ class ExportDialog(QDialog):
             },
             "video_clips_folder": self.video_folder_edit.text(),
             "vjing_mappings": {
-                m.letter: m.effect for m in self.context.config.video_exporter.vjing_mappings
+                m.letter: m.get_effects()
+                for m in self.context.config.video_exporter.vjing_mappings
             },
             # Waveform layer settings
             "waveform_height_ratio": self.context.config.video_exporter.waveform_height_ratio,

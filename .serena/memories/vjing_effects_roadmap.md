@@ -106,10 +106,10 @@ Cette roadmap définit le plan d'implémentation et d'amélioration des effets v
 ### 8.2 Effets supplémentaires (Priorité Moyenne)
 | Effet | Status | Description | Complexité |
 |-------|--------|-------------|------------|
+| `starfield` | ✅ | Champ d'étoiles 3D avec perspective | Faible |
+| `lightning` | ✅ | Éclairs ramifiés sur beats | Moyenne |
+| `voronoi` | ✅ | Diagramme de Voronoï animé | Moyenne |
 | `metaballs` | ⬜ | Métaballs fluides | Élevée |
-| `voronoi` | ⬜ | Diagramme de Voronoï animé | Moyenne |
-| `starfield` | ⬜ | Champ d'étoiles en mouvement | Faible |
-| `lightning` | ⬜ | Éclairs ramifiés | Moyenne |
 | `smoke` | ⬜ | Simulation de fumée | Élevée |
 
 ### 8.3 Améliorations techniques
@@ -147,7 +147,7 @@ DEFAULT_MAPPINGS = {
     "A": "wave",         # A Cappella - soft
     "W": "plasma",       # Weed - chill, psychedelic
     "B": "glitch",       # Banger - intense
-    "F": "matrix",       # Fun - playful, geeky
+    "F": "particles",    # Fun - playful, festive
     "R": "vinyl",        # Retro - vintage
     "L": "lissajous",    # Loop - repetitive, hypnotic
     "U": "wormhole",     # Unclassable - weird, experimental
@@ -183,12 +183,22 @@ DEFAULT_MAPPINGS = {
 
 ## Changelog
 
+### v1.4 (2026-01-25)
+- Support multi-effets par genre (ex: `effects: ["fractal", "tunnel"]`)
+- Format config.yaml modifié: `effect` → `effects` (liste)
+- Rétrocompatibilité avec ancien format via `get_effects()`
+
+### v1.3 (2026-01-25)
+- Ajout effet `starfield` (champ d'étoiles 3D avec perspective et motion trails)
+- Ajout effet `lightning` (éclairs ramifiés récursifs sur beats)
+- Ajout effet `voronoi` (diagramme de Voronoï animé avec détection de bords)
+- Total: 29 effets disponibles
+
 ### v1.2 (2026-01-25)
-- Ajout effet `matrix` (pluie de caractères katakana style Matrix)
 - Ajout effet `radar` (balayage radar avec blips sur beats)
 - Ajout effet `plasma` (plasma ondulant multi-couleurs)
 - Ajout effet `wormhole` (tunnel spirale avec effet de profondeur)
-- Total: 27 effets disponibles
+- Suppression effet `matrix` (à la demande)
 
 ### v1.1 (2026-01-25)
 - Ajout effet `fractal` (Julia set animé)

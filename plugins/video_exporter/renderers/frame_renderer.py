@@ -28,7 +28,7 @@ class FrameRenderer:
         layers_config: dict[str, bool],
         track_metadata: dict[str, Any],
         video_clips_folder: str = "",
-        vjing_mappings: dict[str, str] | None = None,
+        vjing_mappings: dict[str, list[str]] | None = None,
         waveform_config: dict[str, Any] | None = None,
     ) -> None:
         """Initialize frame renderer.
@@ -43,7 +43,7 @@ class FrameRenderer:
             layers_config: Dictionary of layer_name -> enabled.
             track_metadata: Track metadata dictionary.
             video_clips_folder: Path to folder with video clips for background.
-            vjing_mappings: Genre letter to effect mapping.
+            vjing_mappings: Genre letter to effects list mapping.
             waveform_config: Waveform layer configuration (height_ratio, colors).
         """
         self.width = width

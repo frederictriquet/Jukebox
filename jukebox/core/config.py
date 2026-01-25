@@ -147,7 +147,18 @@ class VJingEffectMappingConfig(BaseModel):
     """Configuration for VJing effect mapping by genre letter."""
 
     letter: str
-    effect: str  # strobe, glitch, fire, vinyl, neon, particles, wave
+    effects: list[str] = []  # List of effects for this genre letter
+
+    # Support legacy single effect format
+    effect: str | None = None  # Deprecated: use effects instead
+
+    def get_effects(self) -> list[str]:
+        """Get effects list, supporting both old and new format."""
+        if self.effects:
+            return self.effects
+        if self.effect:
+            return [self.effect]
+        return []
 
 
 class VideoExporterConfig(BaseModel):

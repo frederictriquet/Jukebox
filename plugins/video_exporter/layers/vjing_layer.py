@@ -26,33 +26,35 @@ class VJingLayer(BaseVisualLayer):
     - Spectrum: fft_bars, fft_rings, bass_warp
     - Particles: particles, flow_field, explosion
     - Geometric: kaleidoscope, lissajous, tunnel, spiral, fractal, wormhole
-    - Post-processing: chromatic, glitch, pixelate, feedback
+    - Post-processing: chromatic, pixelate, feedback
     - Nature: fire, water, aurora, plasma
     - Classic: wave, neon, vinyl
-    - Cyber: radar
+    - Cyber: radar, voronoi
+    - Space: starfield, lightning
     """
 
     z_index = 4
 
     # Default effect mappings (based on genre_editor codes)
     # Valid genres: D, C, P, T, H, G, I, A, W, B, F, R, L, U, O, N
-    DEFAULT_MAPPINGS = {
-        "D": "aurora",  # Deep - chill, ambient
-        "C": "kaleidoscope",  # Classic - elegant
-        "P": "strobe",  # Power - energetic
-        "T": "fractal",  # Trance - hypnotic, psychedelic
-        "H": "fire",  # House - groovy, warm
-        "G": "flow_field",  # Garden - natural
-        "I": "neon",  # Ibiza - club, colorful
-        "A": "wave",  # A Cappella - soft
-        "W": "plasma",  # Weed - chill, psychedelic
-        "B": "glitch",  # Banger - intense
-        "F": "particles",  # Fun - playful, festive
-        "R": "vinyl",  # Retro - vintage
-        "L": "lissajous",  # Loop - repetitive, hypnotic
-        "U": "wormhole",  # Unclassable - weird, experimental
-        "O": "flow_field",  # Organic - natural
-        "N": "wave",  # Namaste - zen, calm
+    # Each genre maps to a list of effects (all rendered together)
+    DEFAULT_MAPPINGS: dict[str, list[str]] = {
+        "D": ["aurora"],  # Deep - chill, ambient
+        "C": ["kaleidoscope"],  # Classic - elegant
+        "P": ["strobe"],  # Power - energetic
+        "T": ["fractal"],  # Trance - hypnotic, psychedelic
+        "H": ["fire"],  # House - groovy, warm
+        "G": ["flow_field"],  # Garden - natural
+        "I": ["neon"],  # Ibiza - club, colorful
+        "A": ["wave"],  # A Cappella - soft
+        "W": ["plasma"],  # Weed - chill, psychedelic
+        "B": ["explosion"],  # Banger - intense
+        "F": ["particles"],  # Fun - playful, festive
+        "R": ["vinyl"],  # Retro - vintage
+        "L": ["lissajous"],  # Loop - repetitive, hypnotic
+        "U": ["wormhole"],  # Unclassable - weird, experimental
+        "O": ["flow_field"],  # Organic - natural
+        "N": ["wave"],  # Namaste - zen, calm
     }
 
     # All available effects
@@ -70,7 +72,6 @@ class VJingLayer(BaseVisualLayer):
         "tunnel",
         "spiral",
         "chromatic",
-        "glitch",
         "pixelate",
         "feedback",
         "fire",
@@ -83,6 +84,9 @@ class VJingLayer(BaseVisualLayer):
         "radar",
         "plasma",
         "wormhole",
+        "starfield",
+        "lightning",
+        "voronoi",
     ]
 
     def __init__(
@@ -94,7 +98,7 @@ class VJingLayer(BaseVisualLayer):
         sr: int,
         duration: float,
         genre: str = "",
-        effect_mappings: dict[str, str] | None = None,
+        effect_mappings: dict[str, list[str]] | None = None,
         intensity: float = 0.7,
         **kwargs: Any,
     ) -> None:
@@ -107,15 +111,18 @@ class VJingLayer(BaseVisualLayer):
             audio: Audio samples.
             sr: Sample rate.
             duration: Duration in seconds.
-            genre: Genre string (each letter can trigger an effect).
-            effect_mappings: Custom letter to effect mappings.
+            genre: Genre string (each letter can trigger effects).
+            effect_mappings: Custom letter to effects list mappings.
             intensity: Effect intensity (0.0 to 1.0).
             **kwargs: Additional parameters.
         """
         self.genre = genre
         self.intensity = intensity
         # Merge custom mappings with defaults (custom takes precedence)
-        self.effect_mappings = {**self.DEFAULT_MAPPINGS, **(effect_mappings or {})}
+        self.effect_mappings: dict[str, list[str]] = {
+            **self.DEFAULT_MAPPINGS,
+            **(effect_mappings or {}),
+        }
 
         logging.info(f"[VJingLayer] Initializing with genre='{genre}'")
         logging.debug(f"[VJingLayer] Effect mappings: {self.effect_mappings}")
@@ -142,10 +149,11 @@ class VJingLayer(BaseVisualLayer):
         # Check each letter in the genre against mappings
         for letter in self.genre.upper():
             if letter in self.effect_mappings:
-                effect = self.effect_mappings[letter]
-                if effect not in seen:
-                    effects.append(effect)
-                    seen.add(effect)
+                effect_list = self.effect_mappings[letter]
+                for effect in effect_list:
+                    if effect not in seen:
+                        effects.append(effect)
+                        seen.add(effect)
 
         return effects if effects else ["wave"]
 
@@ -237,6 +245,10 @@ class VJingLayer(BaseVisualLayer):
             self._init_plasma()
         if "wormhole" in self.active_effects:
             self._init_wormhole()
+        if "starfield" in self.active_effects:
+            self._init_starfield()
+        if "voronoi" in self.active_effects:
+            self._init_voronoi()
 
     def _detect_beats(self) -> None:
         """Simple beat detection based on energy peaks."""
@@ -896,39 +908,6 @@ class VJingLayer(BaseVisualLayer):
         # Update image
         result = Image.fromarray(data, "RGBA")
         img.paste(result, (0, 0))
-
-    def _render_glitch(
-        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
-    ) -> None:
-        """Render glitch effect."""
-        draw = ImageDraw.Draw(img)
-        energy = ctx["energy"]
-        treble = ctx["treble"]
-
-        # Glitch intensity based on high frequencies
-        n_lines = int(15 * treble * self.intensity)
-
-        for _ in range(n_lines):
-            y = random.randint(0, self.height)
-            height = random.randint(2, 20)
-            offset = random.randint(-50, 50)
-
-            # Random color channel separation
-            colors = [(255, 0, 0, 120), (0, 255, 0, 120), (0, 0, 255, 120)]
-            color = random.choice(colors)
-
-            draw.rectangle([offset, y, self.width + offset, y + height], fill=color)
-
-        # Add some digital noise on high energy
-        if energy > 0.7:
-            for _ in range(int(50 * energy)):
-                x = random.randint(0, self.width - 5)
-                y = random.randint(0, self.height - 5)
-                size = random.randint(2, 8)
-                draw.rectangle(
-                    [x, y, x + size, y + size],
-                    fill=(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255), 150),
-                )
 
     def _render_pixelate(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
@@ -1632,3 +1611,352 @@ class VJingLayer(BaseVisualLayer):
 
         # Composite
         img.paste(wormhole_rgba, (0, 0), wormhole_rgba)
+
+    # ========================================================================
+    # STARFIELD EFFECT
+    # ========================================================================
+
+    def _init_starfield(self) -> None:
+        """Initialize starfield with 3D star positions."""
+        self.num_stars = 300
+        self.stars: list[dict[str, float]] = []
+        for _ in range(self.num_stars):
+            self._spawn_star()
+
+    def _spawn_star(self, z: float | None = None) -> None:
+        """Spawn a new star at random position.
+
+        Args:
+            z: Optional z depth (if None, random deep position).
+        """
+        self.stars.append({
+            "x": (random.random() - 0.5) * 2,  # -1 to 1
+            "y": (random.random() - 0.5) * 2,  # -1 to 1
+            "z": z if z is not None else random.random() * 2 + 0.5,  # depth
+            "brightness": random.random() * 0.5 + 0.5,
+        })
+
+    def _render_starfield(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render 3D starfield flying through space.
+
+        Stars move towards camera, speed affected by energy.
+        Brightness pulses on beats.
+
+        Args:
+            img: Image to draw on.
+            frame_idx: Frame index.
+            time_pos: Time position in seconds.
+            ctx: Audio context dict.
+        """
+        draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
+        is_beat = ctx["is_beat"]
+        bass = ctx["bass"]
+
+        cx, cy = self.width // 2, self.height // 2
+
+        # Speed based on energy
+        speed = 0.02 + energy * 0.04
+
+        new_stars = []
+        for star in self.stars:
+            # Move star towards camera
+            star["z"] -= speed
+
+            # Reset if passed camera
+            if star["z"] <= 0.01:
+                self._spawn_star(z=2.0 + random.random())
+                continue
+
+            # Project to 2D (perspective)
+            px = int(cx + (star["x"] / star["z"]) * cx)
+            py = int(cy + (star["y"] / star["z"]) * cy)
+
+            # Check bounds
+            if 0 <= px < self.width and 0 <= py < self.height:
+                # Size based on depth (closer = bigger)
+                size = max(1, int(3 / star["z"]))
+
+                # Brightness based on depth and beat
+                base_brightness = int((1 - star["z"] / 2.5) * 255 * star["brightness"])
+                if is_beat:
+                    base_brightness = min(255, base_brightness + 100)
+
+                # Color - slight blue tint, whiter when closer
+                blue_tint = int(star["z"] * 50)
+                r = max(0, min(255, base_brightness - blue_tint // 2))
+                g = max(0, min(255, base_brightness - blue_tint // 3))
+                b = max(0, min(255, base_brightness + blue_tint))
+                alpha = int(min(255, base_brightness) * self.intensity)
+
+                # Draw star
+                if size <= 1:
+                    draw.point((px, py), fill=(r, g, b, alpha))
+                else:
+                    draw.ellipse(
+                        [px - size, py - size, px + size, py + size],
+                        fill=(r, g, b, alpha),
+                    )
+
+                # Motion trail for fast stars (close ones)
+                if star["z"] < 0.5 and bass > 0.5:
+                    trail_length = int((1 - star["z"]) * 20 * bass)
+                    trail_x = int(cx + (star["x"] / (star["z"] + speed * 3)) * cx)
+                    trail_y = int(cy + (star["y"] / (star["z"] + speed * 3)) * cy)
+                    draw.line(
+                        [(px, py), (trail_x, trail_y)],
+                        fill=(r, g, b, alpha // 2),
+                        width=max(1, size - 1),
+                    )
+
+            new_stars.append(star)
+
+        self.stars = new_stars
+
+        # Spawn new stars to maintain count
+        while len(self.stars) < self.num_stars:
+            self._spawn_star(z=2.0 + random.random())
+
+    # ========================================================================
+    # LIGHTNING EFFECT
+    # ========================================================================
+
+    def _render_lightning(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render lightning bolts on beats.
+
+        Branching lightning from top to bottom or random points.
+        Triggered by beats, intensity by bass.
+
+        Args:
+            img: Image to draw on.
+            frame_idx: Frame index.
+            time_pos: Time position in seconds.
+            ctx: Audio context dict.
+        """
+        draw = ImageDraw.Draw(img)
+        is_beat = ctx["is_beat"]
+        bass = ctx["bass"]
+        energy = ctx["energy"]
+
+        # Only draw lightning on beats or high energy
+        if not is_beat and energy < 0.7:
+            return
+
+        # Number of bolts based on energy
+        num_bolts = 1 if is_beat else 0
+        if energy > 0.8:
+            num_bolts += 1
+
+        for _ in range(num_bolts):
+            # Start point (top area)
+            start_x = random.randint(self.width // 4, 3 * self.width // 4)
+            start_y = random.randint(0, self.height // 4)
+
+            # End point (bottom area)
+            end_x = start_x + random.randint(-self.width // 3, self.width // 3)
+            end_y = random.randint(3 * self.height // 4, self.height)
+
+            # Generate lightning path
+            self._draw_lightning_bolt(draw, start_x, start_y, end_x, end_y, bass, depth=0)
+
+    def _draw_lightning_bolt(
+        self,
+        draw: ImageDraw.ImageDraw,
+        x1: int,
+        y1: int,
+        x2: int,
+        y2: int,
+        intensity: float,
+        depth: int,
+    ) -> None:
+        """Recursively draw a branching lightning bolt.
+
+        Args:
+            draw: ImageDraw object.
+            x1, y1: Start point.
+            x2, y2: End point.
+            intensity: Bolt intensity (affects brightness and branching).
+            depth: Recursion depth.
+        """
+        if depth > 5:
+            return
+
+        # Calculate distance
+        dx = x2 - x1
+        dy = y2 - y1
+        dist = math.sqrt(dx * dx + dy * dy)
+
+        if dist < 10:
+            return
+
+        # Number of segments
+        num_segments = max(3, int(dist / 30))
+
+        # Build path with random offsets
+        points = [(x1, y1)]
+        for i in range(1, num_segments):
+            t = i / num_segments
+            # Base position
+            px = x1 + dx * t
+            py = y1 + dy * t
+            # Add perpendicular offset
+            offset = (random.random() - 0.5) * dist * 0.3 / (depth + 1)
+            # Perpendicular direction
+            perp_x = -dy / dist
+            perp_y = dx / dist
+            px += perp_x * offset
+            py += perp_y * offset
+            points.append((int(px), int(py)))
+        points.append((x2, y2))
+
+        # Draw main bolt
+        brightness = int(255 * intensity * (1 - depth * 0.15))
+        alpha = int(min(255, brightness + 50) * self.intensity)
+        width = max(1, 4 - depth)
+
+        # Core (white/blue)
+        for i in range(len(points) - 1):
+            draw.line(
+                [points[i], points[i + 1]],
+                fill=(200, 220, 255, alpha),
+                width=width,
+            )
+
+        # Glow (wider, dimmer)
+        if depth < 2:
+            glow_alpha = alpha // 3
+            for i in range(len(points) - 1):
+                draw.line(
+                    [points[i], points[i + 1]],
+                    fill=(100, 150, 255, glow_alpha),
+                    width=width + 4,
+                )
+
+        # Branching
+        if depth < 3 and random.random() < 0.4 * intensity:
+            # Pick a random point to branch from
+            branch_idx = random.randint(1, len(points) - 2)
+            bx, by = points[branch_idx]
+            # Branch direction (angled from main)
+            angle = math.atan2(dy, dx) + (random.random() - 0.5) * math.pi / 2
+            branch_len = dist * (0.3 + random.random() * 0.3) / (depth + 1)
+            bex = int(bx + math.cos(angle) * branch_len)
+            bey = int(by + math.sin(angle) * branch_len)
+            self._draw_lightning_bolt(draw, bx, by, bex, bey, intensity * 0.7, depth + 1)
+
+    # ========================================================================
+    # VORONOI EFFECT
+    # ========================================================================
+
+    def _init_voronoi(self) -> None:
+        """Initialize Voronoi diagram points."""
+        self.voronoi_num_points = 20
+        self.voronoi_points: list[dict[str, Any]] = []
+        for _ in range(self.voronoi_num_points):
+            self.voronoi_points.append({
+                "x": random.random() * self.width,
+                "y": random.random() * self.height,
+                "vx": (random.random() - 0.5) * 2,
+                "vy": (random.random() - 0.5) * 2,
+                "color": (
+                    random.randint(50, 255),
+                    random.randint(50, 255),
+                    random.randint(50, 255),
+                ),
+            })
+
+    def _render_voronoi(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render animated Voronoi diagram.
+
+        Cells colored by nearest point, points move with audio.
+
+        Args:
+            img: Image to draw on.
+            frame_idx: Frame index.
+            time_pos: Time position in seconds.
+            ctx: Audio context dict.
+        """
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        is_beat = ctx["is_beat"]
+
+        # Update point positions
+        speed_mult = 1 + energy * 3
+        for point in self.voronoi_points:
+            point["x"] += point["vx"] * speed_mult
+            point["y"] += point["vy"] * speed_mult
+
+            # Bounce off edges
+            if point["x"] < 0 or point["x"] >= self.width:
+                point["vx"] *= -1
+                point["x"] = max(0, min(self.width - 1, point["x"]))
+            if point["y"] < 0 or point["y"] >= self.height:
+                point["vy"] *= -1
+                point["y"] = max(0, min(self.height - 1, point["y"]))
+
+            # Beat impulse
+            if is_beat:
+                point["vx"] += (random.random() - 0.5) * bass * 4
+                point["vy"] += (random.random() - 0.5) * bass * 4
+
+        # Render at lower resolution for performance
+        scale = 4
+        small_w = self.width // scale
+        small_h = self.height // scale
+
+        # Create coordinate grids
+        y_coords, x_coords = np.ogrid[:small_h, :small_w]
+        x_coords = x_coords * scale
+        y_coords = y_coords * scale
+
+        # Find nearest point for each pixel
+        min_dist = np.full((small_h, small_w), np.inf)
+        nearest = np.zeros((small_h, small_w), dtype=np.int32)
+
+        for i, point in enumerate(self.voronoi_points):
+            dist = np.sqrt((x_coords - point["x"]) ** 2 + (y_coords - point["y"]) ** 2)
+            mask = dist < min_dist
+            min_dist[mask] = dist[mask]
+            nearest[mask] = i
+
+        # Create color image
+        rgb = np.zeros((small_h, small_w, 3), dtype=np.uint8)
+        for i, point in enumerate(self.voronoi_points):
+            mask = nearest == i
+            # Modulate color by distance from center of cell
+            for c in range(3):
+                rgb[mask, c] = point["color"][c]
+
+        # Add edge detection (darker at cell boundaries)
+        # Simple gradient magnitude
+        edge_x = np.abs(np.diff(nearest.astype(np.float32), axis=1, prepend=nearest[:, :1]))
+        edge_y = np.abs(np.diff(nearest.astype(np.float32), axis=0, prepend=nearest[:1, :]))
+        edges = np.clip((edge_x + edge_y) * 50, 0, 100).astype(np.uint8)
+
+        # Darken edges
+        for c in range(3):
+            rgb[:, :, c] = np.clip(rgb[:, :, c].astype(np.int16) - edges, 0, 255).astype(
+                np.uint8
+            )
+
+        # Create image and upscale
+        voronoi_small = Image.fromarray(rgb, mode="RGB")
+        voronoi_full = voronoi_small.resize(
+            (self.width, self.height), Image.Resampling.NEAREST
+        )
+
+        # Convert to RGBA
+        voronoi_rgba = voronoi_full.convert("RGBA")
+        r_ch, g_ch, b_ch, _ = voronoi_rgba.split()
+        alpha_value = int(180 * self.intensity)
+        alpha = Image.new("L", (self.width, self.height), alpha_value)
+        voronoi_rgba = Image.merge("RGBA", (r_ch, g_ch, b_ch, alpha))
+
+        # Composite
+        img.paste(voronoi_rgba, (0, 0), voronoi_rgba)
