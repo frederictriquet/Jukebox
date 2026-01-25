@@ -28,6 +28,10 @@ ml-xgboost = [
     "pandas>=2.0.0",
     "xgboost>=2.0.0",
 ]
+video = [
+    "Pillow>=10.0.0",
+    "opencv-python>=4.8.0",  # Optional, for video background layer
+]
 dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",

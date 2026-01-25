@@ -105,6 +105,14 @@ class Events:
             kwargs: message (str) - Message text
                     color (str, optional) - Hex color code (e.g., "#00FF00")
 
+    Loop Events:
+        LOOP_ACTIVATED: Loop section activated
+            kwargs: loop_start (float) - Start position in seconds
+                    loop_end (float) - End position in seconds
+                    filepath (Path) - Path of the current track
+        LOOP_DEACTIVATED: Loop section deactivated
+            kwargs: None
+
     Plugin Events:
         PLUGIN_SETTINGS_CHANGED: Plugin settings updated via conf_manager
             kwargs: None
@@ -141,10 +149,14 @@ class Events:
     POSITION_UPDATE = "position_update"  # kwargs: position (float)
     STATUS_MESSAGE = "status_message"  # kwargs: message (str), color (str, optional)
 
+    # Loop events
+    LOOP_ACTIVATED = "loop_activated"  # kwargs: loop_start, loop_end, filepath
+    LOOP_DEACTIVATED = "loop_deactivated"  # kwargs: None
+
     # Plugin events
     PLUGIN_SETTINGS_CHANGED = "plugin_settings_changed"  # kwargs: None
     WAVEFORM_COMPLETE = "waveform_complete"  # kwargs: track_id (int)
     AUDIO_ANALYSIS_COMPLETE = "audio_analysis_complete"  # kwargs: track_id (int)
 
     # Capability events (plugins declare their capabilities)
-    POSITION_SEEKING_PROVIDED = "position_seeking_provided"  # kwargs: None
+    POSITION_SEEKING_PROVIDED = "position_seeking_provided"  # kwargs: None  # kwargs: None

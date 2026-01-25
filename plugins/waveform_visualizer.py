@@ -45,6 +45,12 @@ class WaveformVisualizerPlugin:
         self.context.subscribe(Events.TRACKS_ADDED, self._on_tracks_added)
         self.context.subscribe(Events.WAVEFORM_CLEAR, self._on_waveform_clear)
 
+        # Subscribe to settings changes
+        self.context.subscribe(Events.PLUGIN_SETTINGS_CHANGED, self._on_settings_changed)
+
+        # Load settings from DB on startup
+        self._on_settings_changed()
+
         # Auto-start batch waveform generation at startup
         # Use a timer to defer until after UI is fully loaded
         from PySide6.QtCore import QTimer
@@ -297,6 +303,43 @@ class WaveformVisualizerPlugin:
             except (RuntimeError, TypeError):
                 pass
         # Don't set to None - keep it alive so orphan workers can finish
+
+    def _on_settings_changed(self) -> None:
+        """Reload config when settings change."""
+        logging.info("[Waveform] Settings changed, reloading config from database")
+
+        db = self.context.database
+        config = self.context.config.waveform
+
+        # Helper to get setting from DB
+        def get_setting(key: str) -> str | None:
+            result = db.conn.execute(
+                "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
+                ("waveform_visualizer", key),
+            ).fetchone()
+            return result["setting_value"] if result else None
+
+        # Reload chunk_duration
+        value = get_setting("chunk_duration")
+        if value is not None:
+            try:
+                config.chunk_duration = int(float(value))
+                logging.debug(f"[Waveform] chunk_duration: {config.chunk_duration}")
+            except ValueError:
+                logging.error(f"[Waveform] Invalid chunk_duration value: {value}")
+
+        # Reload height
+        value = get_setting("height")
+        if value is not None:
+            try:
+                new_height = int(float(value))
+                config.height = new_height
+                logging.debug(f"[Waveform] height: {config.height}")
+                # Update widget height if it exists
+                if self.waveform_widget:
+                    self.waveform_widget.setFixedHeight(new_height)
+            except ValueError:
+                logging.error(f"[Waveform] Invalid height value: {value}")
 
     def get_settings_schema(self) -> dict[str, Any]:
         """Return settings schema for configuration UI.

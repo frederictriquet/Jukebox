@@ -93,11 +93,27 @@ class PluginManager:
         self.current_mode: str | None = None
 
     def discover_plugins(self) -> list[str]:
-        """Discover available plugins."""
+        """Discover available plugins.
+
+        Supports both single-file plugins (*.py) and package plugins (directories with __init__.py).
+        """
         if not self.plugins_dir.exists():
             return []
 
-        return [f.stem for f in self.plugins_dir.glob("*.py") if not f.stem.startswith("_")]
+        plugins = []
+
+        # Find single-file plugins (*.py)
+        for f in self.plugins_dir.glob("*.py"):
+            if not f.stem.startswith("_"):
+                plugins.append(f.stem)
+
+        # Find package plugins (directories with __init__.py)
+        for d in self.plugins_dir.iterdir():
+            if d.is_dir() and not d.name.startswith("_") and (d / "__init__.py").exists():
+                if d.name not in plugins:  # Avoid duplicates
+                    plugins.append(d.name)
+
+        return plugins
 
     def load_plugin(self, plugin_name: str) -> bool:
         """Load a plugin."""

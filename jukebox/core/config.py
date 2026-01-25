@@ -142,6 +142,38 @@ class FileManagerConfig(BaseModel):
     trash_key: str = "Delete"
 
 
+
+class VJingEffectMappingConfig(BaseModel):
+    """Configuration for VJing effect mapping by genre letter."""
+
+    letter: str
+    effect: str  # strobe, glitch, fire, vinyl, neon, particles, wave
+
+
+class VideoExporterConfig(BaseModel):
+    """Video exporter configuration."""
+
+    default_resolution: str = "1080p"  # 1080p, 720p, square_1080, square_720, vertical
+    default_fps: int = Field(ge=15, le=60, default=30)
+    output_directory: str = "~/Videos/Jukebox"
+    video_clips_folder: str = ""
+    # Layer defaults
+    waveform_enabled: bool = True
+    text_enabled: bool = True
+    dynamics_enabled: bool = True
+    vjing_enabled: bool = False
+    video_background_enabled: bool = False
+    # VJing effect mappings
+    vjing_mappings: list[VJingEffectMappingConfig] = [
+        VJingEffectMappingConfig(letter="E", effect="strobe"),
+        VJingEffectMappingConfig(letter="T", effect="glitch"),
+        VJingEffectMappingConfig(letter="H", effect="fire"),
+        VJingEffectMappingConfig(letter="R", effect="vinyl"),
+        VJingEffectMappingConfig(letter="J", effect="neon"),
+        VJingEffectMappingConfig(letter="C", effect="particles"),
+        VJingEffectMappingConfig(letter="A", effect="wave"),
+    ]
+
 class PluginsConfig(BaseModel):
     """Plugins configuration."""
 
@@ -170,6 +202,7 @@ class JukeboxConfig(BaseModel):
     metadata_editor: MetadataEditorConfig = Field(default_factory=MetadataEditorConfig)
     genre_editor: GenreEditorConfig = Field(default_factory=GenreEditorConfig)
     file_manager: FileManagerConfig = Field(default_factory=FileManagerConfig)
+    video_exporter: VideoExporterConfig = Field(default_factory=VideoExporterConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     logging: LoggingConfig
 

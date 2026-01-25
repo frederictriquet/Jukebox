@@ -191,6 +191,21 @@ class GenreEditorConfigProtocol(Protocol):
     codes: list[Any]
 
 
+class VideoExporterConfigProtocol(Protocol):
+    """Protocol for video exporter configuration."""
+
+    default_resolution: str
+    default_fps: int
+    output_directory: str
+    video_clips_folder: str
+    waveform_enabled: bool
+    text_enabled: bool
+    dynamics_enabled: bool
+    vjing_enabled: bool
+    video_background_enabled: bool
+    vjing_mappings: list[Any]
+
+
 class ShortcutsConfigProtocol(Protocol):
     """Protocol for shortcuts configuration."""
 
@@ -210,6 +225,7 @@ class JukeboxConfigProtocol(Protocol):
     metadata_editor: MetadataEditorConfigProtocol
     genre_editor: GenreEditorConfigProtocol
     shortcuts: ShortcutsConfigProtocol
+    video_exporter: VideoExporterConfigProtocol
 
 
 # ============================================================================

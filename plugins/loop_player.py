@@ -158,12 +158,23 @@ class LoopPlayerPlugin:
                 f"[Loop Player] Loop activated: {self.loop_start:.1f}s - {self.loop_end:.1f}s"
             )
 
+            # Emit loop activated event
+            self.context.emit(
+                Events.LOOP_ACTIVATED,
+                loop_start=self.loop_start,
+                loop_end=self.loop_end,
+                filepath=player.current_file,
+            )
+
         else:
             # Deactivate loop
             self.loop_active = False
             self.position_timer.stop()
             self._hide_loop_region()
             logging.info("[Loop Player] Loop deactivated")
+
+            # Emit loop deactivated event
+            self.context.emit(Events.LOOP_DEACTIVATED)
 
         self._update_button_style()
 

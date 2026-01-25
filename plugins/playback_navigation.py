@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from jukebox.core.event_bus import Events
@@ -39,6 +40,12 @@ class PlaybackNavigationPlugin:
 
         # Subscribe to track finished event
         context.player.track_finished.connect(self._on_track_finished)
+
+        # Subscribe to settings changes
+        context.subscribe(Events.PLUGIN_SETTINGS_CHANGED, self._on_settings_changed)
+
+        # Load settings from DB on startup
+        self._on_settings_changed()
 
     def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register auto-play and random mode menu and buttons."""
@@ -257,6 +264,56 @@ class PlaybackNavigationPlugin:
     def shutdown(self) -> None:
         """Cleanup on application exit. No cleanup needed for this plugin."""
         ...
+
+    def _on_settings_changed(self) -> None:
+        """Reload config when settings change."""
+        logging.info("[Playback Navigation] Settings changed, reloading config from database")
+
+        db = self.context.database
+        config = self.context.config.playback_navigation
+
+        # Helper to get setting from DB
+        def get_setting(key: str) -> str | None:
+            result = db.conn.execute(
+                "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
+                ("playback_navigation", key),
+            ).fetchone()
+            return result["setting_value"] if result else None
+
+        # Reload seek_amount
+        value = get_setting("seek_amount")
+        if value is not None:
+            try:
+                config.seek_amount = int(float(value))
+                logging.debug(f"[Playback Navigation] seek_amount: {config.seek_amount}")
+            except ValueError:
+                logging.error(f"[Playback Navigation] Invalid seek_amount value: {value}")
+
+        # Reload rapid_press_threshold (stored in ms, config is in seconds)
+        value = get_setting("rapid_press_threshold")
+        if value is not None:
+            try:
+                config.rapid_press_threshold = int(float(value)) / 1000.0
+                logging.debug(
+                    f"[Playback Navigation] rapid_press_threshold: {config.rapid_press_threshold}"
+                )
+            except ValueError:
+                logging.error(
+                    f"[Playback Navigation] Invalid rapid_press_threshold value: {value}"
+                )
+
+        # Reload max_seek_multiplier
+        value = get_setting("max_seek_multiplier")
+        if value is not None:
+            try:
+                config.max_seek_multiplier = int(float(value))
+                logging.debug(
+                    f"[Playback Navigation] max_seek_multiplier: {config.max_seek_multiplier}"
+                )
+            except ValueError:
+                logging.error(
+                    f"[Playback Navigation] Invalid max_seek_multiplier value: {value}"
+                )
 
     def get_settings_schema(self) -> dict[str, Any]:
         """Return settings schema for configuration UI.
