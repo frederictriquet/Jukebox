@@ -103,14 +103,14 @@ Cette roadmap définit le plan d'implémentation et d'amélioration des effets v
 | `matrix` | ✅ | Pluie de caractères style Matrix | Faible |
 | `radar` | ✅ | Balayage radar circulaire avec blips | Faible |
 
-### 8.2 Effets supplémentaires (Priorité Moyenne)
+### 8.2 Effets supplémentaires (Priorité Moyenne) ✅ COMPLÉTÉ
 | Effet | Status | Description | Complexité |
 |-------|--------|-------------|------------|
 | `starfield` | ✅ | Champ d'étoiles 3D avec perspective | Faible |
 | `lightning` | ✅ | Éclairs ramifiés sur beats | Moyenne |
 | `voronoi` | ✅ | Diagramme de Voronoï animé | Moyenne |
-| `metaballs` | ⬜ | Métaballs fluides | Élevée |
-| `smoke` | ⬜ | Simulation de fumée | Élevée |
+| `metaballs` | ✅ | Métaballs fluides (blob effect) | Élevée |
+| `smoke` | ✅ | Simulation de fumée avec turbulence | Élevée |
 
 ### 8.3 Améliorations techniques
 | Amélioration | Status | Description |
@@ -182,6 +182,13 @@ DEFAULT_MAPPINGS = {
 ---
 
 ## Changelog
+
+### v1.5 (2026-01-25)
+- Ajout effet `metaballs` (blobs fluides qui fusionnent, field function)
+- Ajout effet `smoke` (fumée avec particules et turbulence)
+- Suppression effet `glitch` (à la demande)
+- Total: 30 effets disponibles
+- Phase 8.2 complétée
 
 ### v1.4 (2026-01-25)
 - Support multi-effets par genre (ex: `effects: ["fractal", "tunnel"]`)

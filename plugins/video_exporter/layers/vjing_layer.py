@@ -24,8 +24,8 @@ class VJingLayer(BaseVisualLayer):
     Available effects:
     - Rhythm: pulse, strobe
     - Spectrum: fft_bars, fft_rings, bass_warp
-    - Particles: particles, flow_field, explosion
-    - Geometric: kaleidoscope, lissajous, tunnel, spiral, fractal, wormhole
+    - Particles: particles, flow_field, explosion, smoke
+    - Geometric: kaleidoscope, lissajous, tunnel, spiral, fractal, wormhole, metaballs
     - Post-processing: chromatic, pixelate, feedback
     - Nature: fire, water, aurora, plasma
     - Classic: wave, neon, vinyl
@@ -87,6 +87,8 @@ class VJingLayer(BaseVisualLayer):
         "starfield",
         "lightning",
         "voronoi",
+        "metaballs",
+        "smoke",
     ]
 
     def __init__(
@@ -249,6 +251,10 @@ class VJingLayer(BaseVisualLayer):
             self._init_starfield()
         if "voronoi" in self.active_effects:
             self._init_voronoi()
+        if "metaballs" in self.active_effects:
+            self._init_metaballs()
+        if "smoke" in self.active_effects:
+            self._init_smoke()
 
     def _detect_beats(self) -> None:
         """Simple beat detection based on energy peaks."""
@@ -1960,3 +1966,224 @@ class VJingLayer(BaseVisualLayer):
 
         # Composite
         img.paste(voronoi_rgba, (0, 0), voronoi_rgba)
+
+    # ========================================================================
+    # METABALLS EFFECT
+    # ========================================================================
+
+    def _init_metaballs(self) -> None:
+        """Initialize metaballs with positions and velocities."""
+        self.metaball_count = 6
+        self.metaballs: list[dict[str, float]] = []
+        for _ in range(self.metaball_count):
+            self.metaballs.append({
+                "x": random.random() * self.width,
+                "y": random.random() * self.height,
+                "vx": (random.random() - 0.5) * 4,
+                "vy": (random.random() - 0.5) * 4,
+                "radius": random.random() * 80 + 60,
+            })
+        # Pre-compute coordinate grid at lower resolution
+        self.metaball_scale = 4
+        self.metaball_w = self.width // self.metaball_scale
+        self.metaball_h = self.height // self.metaball_scale
+        y_coords = np.arange(self.metaball_h) * self.metaball_scale
+        x_coords = np.arange(self.metaball_w) * self.metaball_scale
+        self.metaball_x, self.metaball_y = np.meshgrid(x_coords, y_coords)
+
+    def _render_metaballs(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render metaballs (blob/liquid effect).
+
+        Balls that merge smoothly when close together using field function.
+        Movement and size react to audio.
+
+        Args:
+            img: Image to draw on.
+            frame_idx: Frame index.
+            time_pos: Time position in seconds.
+            ctx: Audio context dict.
+        """
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        is_beat = ctx["is_beat"]
+
+        # Update metaball positions
+        speed_mult = 1 + energy * 2
+        for ball in self.metaballs:
+            ball["x"] += ball["vx"] * speed_mult
+            ball["y"] += ball["vy"] * speed_mult
+
+            # Bounce off edges
+            if ball["x"] < 0 or ball["x"] >= self.width:
+                ball["vx"] *= -1
+                ball["x"] = max(0, min(self.width - 1, ball["x"]))
+            if ball["y"] < 0 or ball["y"] >= self.height:
+                ball["vy"] *= -1
+                ball["y"] = max(0, min(self.height - 1, ball["y"]))
+
+            # Beat impulse
+            if is_beat:
+                ball["vx"] += (random.random() - 0.5) * bass * 6
+                ball["vy"] += (random.random() - 0.5) * bass * 6
+
+        # Compute metaball field
+        field = np.zeros((self.metaball_h, self.metaball_w), dtype=np.float32)
+
+        for ball in self.metaballs:
+            # Radius modulated by bass
+            radius = ball["radius"] * (1 + bass * 0.5)
+            # Distance from ball center
+            dx = self.metaball_x - ball["x"]
+            dy = self.metaball_y - ball["y"]
+            dist_sq = dx * dx + dy * dy + 1  # +1 to avoid division by zero
+            # Add contribution (inverse square falloff)
+            field += (radius * radius) / dist_sq
+
+        # Threshold for surface
+        threshold = 1.0
+
+        # Create color based on field value
+        # Above threshold = inside blob
+        inside = field > threshold
+
+        # Smooth gradient for glow effect
+        glow = np.clip((field - threshold * 0.5) / threshold, 0, 1)
+
+        # Color cycling based on time
+        hue_shift = time_pos * 0.5
+        r = (np.sin(glow * math.pi + hue_shift) * 127 + 128).astype(np.uint8)
+        g = (np.sin(glow * math.pi + hue_shift + 2) * 127 + 128).astype(np.uint8)
+        b = (np.sin(glow * math.pi + hue_shift + 4) * 127 + 128).astype(np.uint8)
+
+        # Inside blob is brighter
+        r[inside] = np.clip(r[inside].astype(np.int16) + 80, 0, 255).astype(np.uint8)
+        g[inside] = np.clip(g[inside].astype(np.int16) + 80, 0, 255).astype(np.uint8)
+        b[inside] = np.clip(b[inside].astype(np.int16) + 80, 0, 255).astype(np.uint8)
+
+        # Stack to RGB
+        rgb = np.stack([r, g, b], axis=-1)
+
+        # Create alpha (more opaque inside)
+        alpha_arr = (glow * 200 * self.intensity).astype(np.uint8)
+
+        # Stack to RGBA
+        rgba = np.dstack([rgb, alpha_arr])
+
+        # Create image and upscale
+        metaball_small = Image.fromarray(rgba, mode="RGBA")
+        metaball_full = metaball_small.resize(
+            (self.width, self.height), Image.Resampling.BILINEAR
+        )
+
+        # Composite
+        img.paste(metaball_full, (0, 0), metaball_full)
+
+    # ========================================================================
+    # SMOKE EFFECT
+    # ========================================================================
+
+    def _init_smoke(self) -> None:
+        """Initialize smoke particle system."""
+        self.smoke_particles: list[dict[str, float]] = []
+        self.max_smoke_particles = 150
+        # Smoke rises from bottom
+        self.smoke_spawn_y = self.height
+
+    def _spawn_smoke_particle(self, x: float | None = None, energy: float = 0.5) -> None:
+        """Spawn a smoke particle.
+
+        Args:
+            x: X position (random if None).
+            energy: Affects initial velocity.
+        """
+        if len(self.smoke_particles) >= self.max_smoke_particles:
+            return
+
+        self.smoke_particles.append({
+            "x": x if x is not None else random.random() * self.width,
+            "y": self.smoke_spawn_y,
+            "vx": (random.random() - 0.5) * 2,
+            "vy": -random.random() * 3 - 1,  # Rises up
+            "size": random.random() * 30 + 20,
+            "life": 1.0,
+            "decay": random.random() * 0.01 + 0.005,
+            "alpha": random.random() * 0.3 + 0.2,
+            "turbulence_offset": random.random() * 100,
+        })
+
+    def _render_smoke(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render smoke/mist effect.
+
+        Particles rise and dissipate with turbulent motion.
+        Spawn rate and movement react to audio.
+
+        Args:
+            img: Image to draw on.
+            frame_idx: Frame index.
+            time_pos: Time position in seconds.
+            ctx: Audio context dict.
+        """
+        draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        is_beat = ctx["is_beat"]
+
+        # Spawn new particles based on energy
+        spawn_rate = int(3 + energy * 8)
+        for _ in range(spawn_rate):
+            # Spawn across bottom, more in center
+            x = self.width / 2 + (random.random() - 0.5) * self.width * 0.6
+            self._spawn_smoke_particle(x, energy)
+
+        # Extra burst on beat
+        if is_beat:
+            for _ in range(5):
+                x = self.width / 2 + (random.random() - 0.5) * self.width * 0.4
+                self._spawn_smoke_particle(x, bass)
+
+        # Update and render particles
+        new_particles = []
+        for p in self.smoke_particles:
+            # Turbulence using sin waves
+            turb_x = math.sin(time_pos * 2 + p["turbulence_offset"]) * 0.5
+            turb_y = math.sin(time_pos * 3 + p["turbulence_offset"] * 1.5) * 0.3
+
+            # Update position
+            p["x"] += p["vx"] + turb_x + (random.random() - 0.5) * energy
+            p["y"] += p["vy"] + turb_y
+            p["vy"] *= 0.99  # Slow down rising
+
+            # Grow as it rises
+            p["size"] += 0.3
+
+            # Decay
+            p["life"] -= p["decay"]
+
+            # Remove dead particles
+            if p["life"] <= 0 or p["y"] < -p["size"]:
+                continue
+
+            # Calculate alpha based on life
+            alpha = int(p["alpha"] * p["life"] * 255 * self.intensity)
+            if alpha < 5:
+                continue
+
+            # Smoke color (gray with slight variation)
+            gray = int(180 + p["turbulence_offset"] % 40)
+            color = (gray, gray, gray, alpha)
+
+            # Draw as ellipse (wider than tall for smoke look)
+            size = p["size"]
+            x, y = p["x"], p["y"]
+            draw.ellipse(
+                [x - size, y - size * 0.6, x + size, y + size * 0.6],
+                fill=color,
+            )
+
+            new_particles.append(p)
+
+        self.smoke_particles = new_particles

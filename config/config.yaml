@@ -143,7 +143,7 @@ video_exporter:
   waveform_cursor_color: "#FFFFFF"
   vjing_mappings:
     - letter: "D"
-      effects: ["aurora"]
+      effects: ["aurora", "metaballs"]
     - letter: "C"
       effects: ["kaleidoscope"]
     - letter: "P"
@@ -151,15 +151,15 @@ video_exporter:
     - letter: "T"
       effects: ["fractal", "tunnel"]
     - letter: "H"
-      effects: ["fire"]
+      effects: ["fire", "smoke"]
     - letter: "G"
-      effects: ["flow_field"]
+      effects: ["flow_field", "smoke"]
     - letter: "I"
       effects: ["neon", "strobe"]
     - letter: "A"
       effects: ["wave"]
     - letter: "W"
-      effects: ["plasma", "aurora"]
+      effects: ["plasma", "smoke"]
     - letter: "B"
       effects: ["explosion", "strobe"]
     - letter: "F"
@@ -167,13 +167,13 @@ video_exporter:
     - letter: "R"
       effects: ["vinyl"]
     - letter: "L"
-      effects: ["lissajous"]
+      effects: ["lissajous", "metaballs"]
     - letter: "U"
       effects: ["wormhole", "voronoi"]
     - letter: "O"
-      effects: ["flow_field"]
+      effects: ["flow_field", "metaballs"]
     - letter: "N"
-      effects: ["wave"]
+      effects: ["wave", "smoke"]
 
 plugins:
   enabled:
