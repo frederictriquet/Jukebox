@@ -48,6 +48,252 @@ RESOLUTION_PRESETS: dict[str, tuple[int, int]] = {
 }
 
 
+class EffectPreviewDialog(QDialog):
+    """Dialog for previewing a single VJing effect."""
+
+    def __init__(
+        self,
+        parent: QWidget | None,
+        effect_id: str,
+        effect_name: str,
+        filepath: Path,
+        loop_start: float,
+        loop_end: float,
+        intensity: float,
+        color_palette: str,
+        audio_sensitivity: dict[str, float],
+        track_metadata: dict[str, Any],
+    ) -> None:
+        """Initialize effect preview dialog.
+
+        Args:
+            parent: Parent widget.
+            effect_id: Effect identifier.
+            effect_name: Display name of the effect.
+            filepath: Path to the audio file.
+            loop_start: Loop start position in seconds.
+            loop_end: Loop end position in seconds.
+            intensity: Effect intensity (0.0-1.0).
+            color_palette: Color palette name.
+            audio_sensitivity: Audio sensitivity settings.
+            track_metadata: Track metadata dictionary.
+        """
+        super().__init__(parent)
+        self.effect_id = effect_id
+        self.effect_name = effect_name
+        self.filepath = filepath
+        self.loop_start = loop_start
+        self.loop_end = loop_end
+        self.intensity = intensity
+        self.color_palette = color_palette
+        self.audio_sensitivity = audio_sensitivity
+        self.track_metadata = track_metadata
+
+        # Preview state
+        self._vjing_layer = None
+        self._audio = None
+        self._sr = 22050
+        self._fps = 30
+        self._playing = False
+        self._frame = 0
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._update_frame)
+
+        self.setWindowTitle(f"Preview: {effect_name}")
+        self.setMinimumSize(400, 350)
+
+        self._setup_ui()
+        self._load_effect()
+
+    def _setup_ui(self) -> None:
+        """Set up the dialog UI."""
+        self.setStyleSheet("""
+            QDialog { background: #2b2b2b; }
+            QLabel { color: #ffffff; }
+            QPushButton {
+                background: #3c3c3c;
+                color: #ffffff;
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 6px 12px;
+            }
+            QPushButton:hover { background: #4a4a4a; }
+            QPushButton:pressed { background: #0078d4; }
+        """)
+
+        layout = QVBoxLayout(self)
+
+        # Preview display
+        self.preview_label = QLabel()
+        self.preview_label.setMinimumSize(320, 180)
+        self.preview_label.setStyleSheet("background: #000; border: 1px solid #555;")
+        self.preview_label.setAlignment(Qt.AlignCenter)
+        self.preview_label.setText("Loading...")
+        layout.addWidget(self.preview_label, alignment=Qt.AlignCenter)
+
+        # Time slider
+        time_layout = QHBoxLayout()
+        self.time_label = QLabel("0.0s")
+        self.time_label.setMinimumWidth(40)
+        self.time_slider = QSlider(Qt.Horizontal)
+        self.time_slider.setRange(0, 100)
+        self.time_slider.setValue(0)
+        self.time_slider.valueChanged.connect(self._on_time_changed)
+        self.duration_label = QLabel("0.0s")
+        self.duration_label.setMinimumWidth(40)
+        time_layout.addWidget(self.time_label)
+        time_layout.addWidget(self.time_slider)
+        time_layout.addWidget(self.duration_label)
+        layout.addLayout(time_layout)
+
+        # Control buttons
+        controls_layout = QHBoxLayout()
+        self.play_btn = QPushButton("Play")
+        self.play_btn.clicked.connect(self._toggle_playback)
+        controls_layout.addWidget(self.play_btn)
+        controls_layout.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.close)
+        controls_layout.addWidget(close_btn)
+        layout.addLayout(controls_layout)
+
+    def _load_effect(self) -> None:
+        """Load audio and initialize the effect renderer."""
+        try:
+            import librosa
+            from plugins.video_exporter.layers.vjing_layer import VJingLayer
+        except ImportError as e:
+            self.preview_label.setText(f"Error: {e}")
+            return
+
+        duration = self.loop_end - self.loop_start
+        fps = 30  # Fixed FPS for preview
+        width, height = 320, 180  # Small preview size
+
+        try:
+            # Load audio
+            self._audio, self._sr = librosa.load(
+                str(self.filepath),
+                sr=22050,
+                offset=self.loop_start,
+                duration=duration,
+                mono=True,
+            )
+
+            # Create VJingLayer with only this effect active
+            # We use a custom preset that only has this effect
+            # NOTE: use_gpu=False to ensure palette colors are applied (GPU shaders have hardcoded colors)
+            self._vjing_layer = VJingLayer(
+                width=width,
+                height=height,
+                fps=fps,
+                audio=self._audio,
+                sr=self._sr,
+                duration=duration,
+                genre="",  # No genre mapping
+                preset="_single_effect",  # Custom preset name
+                presets={"_single_effect": [self.effect_id]},  # Only this effect
+                intensity=self.intensity,
+                color_palette=self.color_palette,
+                audio_sensitivity=self.audio_sensitivity,
+                use_gpu=True,  # GPU shaders now support dynamic palettes
+            )
+
+            # Update UI
+            total_frames = int(duration * fps)
+            self.time_slider.setRange(0, max(1, total_frames - 1))
+            self.time_slider.setValue(0)
+            self.duration_label.setText(f"{duration:.1f}s")
+            self._frame = 0
+            self._fps = fps
+
+            # Render first frame
+            self._refresh_frame()
+
+        except Exception as e:
+            logging.exception(f"[Effect Preview] Failed to load effect {self.effect_id}")
+            self.preview_label.setText(f"Error: {e}")
+
+    def _on_time_changed(self, value: int) -> None:
+        """Handle time slider change."""
+        if self._vjing_layer is None:
+            return
+
+        self._frame = value
+        time_pos = value / self._fps
+        self.time_label.setText(f"{time_pos:.1f}s")
+
+        if not self._playing:
+            self._refresh_frame()
+
+    def _toggle_playback(self) -> None:
+        """Toggle preview playback."""
+        if self._playing:
+            self._timer.stop()
+            self._playing = False
+            self.play_btn.setText("Play")
+        else:
+            interval = int(1000 / self._fps)
+            self._timer.start(interval)
+            self._playing = True
+            self.play_btn.setText("Pause")
+
+    def _update_frame(self) -> None:
+        """Update frame (called by timer)."""
+        if self._vjing_layer is None:
+            return
+
+        self._frame += 1
+        max_frame = self.time_slider.maximum()
+        if self._frame > max_frame:
+            self._frame = 0
+
+        self.time_slider.blockSignals(True)
+        self.time_slider.setValue(self._frame)
+        self.time_slider.blockSignals(False)
+
+        time_pos = self._frame / self._fps
+        self.time_label.setText(f"{time_pos:.1f}s")
+
+        self._refresh_frame()
+
+    def _refresh_frame(self) -> None:
+        """Render and display the current frame."""
+        if self._vjing_layer is None:
+            return
+
+        try:
+            time_pos = self._frame / self._fps
+
+            # Render frame from VJingLayer
+            img = self._vjing_layer.render(self._frame, time_pos)
+
+            # Convert PIL Image to QPixmap
+            # First convert to RGB numpy array
+            rgb = img.convert("RGB")
+            frame = np.array(rgb, dtype=np.uint8)
+
+            height, width, channels = frame.shape
+            bytes_per_line = channels * width
+            qimage = QImage(
+                frame.data, width, height, bytes_per_line, QImage.Format_RGB888
+            )
+            pixmap = QPixmap.fromImage(qimage)
+
+            self.preview_label.setPixmap(pixmap)
+
+        except Exception as e:
+            logging.warning(f"[Effect Preview] Render failed: {e}")
+
+    def closeEvent(self, event: Any) -> None:
+        """Clean up resources when dialog is closed."""
+        if self._timer.isActive():
+            self._timer.stop()
+        self._vjing_layer = None
+        self._audio = None
+        super().closeEvent(event)
+
+
 class ExportDialog(QDialog):
     """Dialog for configuring and initiating video export."""
 
@@ -393,6 +639,8 @@ class ExportDialog(QDialog):
             ("smoke", "Smoke"),
         ]
 
+        intensity_layout.setColumnMinimumWidth(3, 32)  # Preview button column
+
         for effect_id, effect_name in gpu_effects:
             name_label = QLabel(f"{effect_name}:")
             name_label.setFixedHeight(28)
@@ -408,9 +656,17 @@ class ExportDialog(QDialog):
             slider.valueChanged.connect(
                 lambda v, lbl=value_label: lbl.setText(f"{v}%")
             )
+            # Preview button
+            preview_btn = QPushButton("👁")
+            preview_btn.setFixedSize(28, 28)
+            preview_btn.setToolTip(f"Preview {effect_name} effect")
+            preview_btn.clicked.connect(
+                lambda checked, eid=effect_id, ename=effect_name: self._preview_single_effect(eid, ename)
+            )
             intensity_layout.addWidget(name_label, row, 0)
             intensity_layout.addWidget(slider, row, 1)
             intensity_layout.addWidget(value_label, row, 2)
+            intensity_layout.addWidget(preview_btn, row, 3)
             self.effect_intensity_sliders[effect_id] = slider
             self.effect_intensity_labels[effect_id] = value_label
             row += 1
@@ -624,7 +880,7 @@ class ExportDialog(QDialog):
                     for p in self.context.config.video_exporter.vjing_presets
                 },
                 waveform_config=waveform_config,
-                use_gpu=True,
+                use_gpu=True,  # GPU shaders now support dynamic palettes
                 effect_intensities=self._get_effect_intensities(),
                 color_palette=self.color_palette_combo.currentData(),
                 audio_sensitivity=self._get_audio_sensitivity(),
@@ -733,6 +989,33 @@ class ExportDialog(QDialog):
 
         except Exception as e:
             logging.warning(f"[Export Dialog] Preview render failed: {e}")
+
+    def _preview_single_effect(self, effect_id: str, effect_name: str) -> None:
+        """Open a preview dialog for a single effect.
+
+        Args:
+            effect_id: Effect identifier (e.g., "fractal", "plasma").
+            effect_name: Display name of the effect.
+        """
+        # Get current settings
+        intensity = self.effect_intensity_sliders[effect_id].value() / 100.0
+        color_palette = self.color_palette_combo.currentData()
+        audio_sensitivity = self._get_audio_sensitivity()
+
+        # Create and show the effect preview dialog
+        dialog = EffectPreviewDialog(
+            parent=self,
+            effect_id=effect_id,
+            effect_name=effect_name,
+            filepath=self.filepath,
+            loop_start=self.loop_start,
+            loop_end=self.loop_end,
+            intensity=intensity,
+            color_palette=color_palette,
+            audio_sensitivity=audio_sensitivity,
+            track_metadata=self.track_metadata,
+        )
+        dialog.exec()
 
     def _get_effect_intensities(self) -> dict[str, float]:
         """Build effect intensities dictionary from UI sliders.

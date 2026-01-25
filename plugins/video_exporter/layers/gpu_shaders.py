@@ -2,6 +2,8 @@
 
 This module provides GPU-accelerated rendering for computationally expensive
 visual effects like plasma, fractals, and metaballs.
+
+Palettes are passed dynamically as uniforms, allowing customizable colors.
 """
 
 from __future__ import annotations
@@ -47,7 +49,31 @@ void main() {
 }
 """
 
-# Plasma shader
+# Common palette functions (included in all fragment shaders)
+PALETTE_FUNCTIONS = """
+// Palette colors (5 colors, normalized 0-1)
+uniform vec3 palette[5];
+
+// Get interpolated color from palette based on position (0-1)
+vec3 getPaletteColor(float t) {
+    t = fract(t);  // Wrap to 0-1
+    float pos = t * 4.0;  // 5 colors = 4 segments
+    int idx = int(pos);
+    float blend = fract(pos);
+
+    // Interpolate between adjacent colors
+    vec3 c1 = palette[idx];
+    vec3 c2 = palette[min(idx + 1, 4)];
+    return mix(c1, c2, blend);
+}
+
+// Get palette color with time-based cycling
+vec3 getPaletteColorCycled(float t, float timeOffset) {
+    return getPaletteColor(t + timeOffset);
+}
+"""
+
+# Plasma shader with palette support
 PLASMA_SHADER = """
 #version 330 core
 
@@ -60,6 +86,8 @@ uniform float bass;
 uniform float mid;
 uniform vec2 resolution;
 uniform float intensity;
+
+""" + PALETTE_FUNCTIONS + """
 
 void main() {
     vec2 p = uv * 4.0 - 2.0;
@@ -74,17 +102,14 @@ void main() {
     float plasma = (v1 + v2 + v3 + v4) / 4.0;
     plasma = (plasma + 1.0) / 2.0;
 
-    // RGB color cycling
-    vec3 color;
-    color.r = (sin(plasma * 6.28318 + t) + 1.0) / 2.0;
-    color.g = (sin(plasma * 6.28318 + t + 2.094) + 1.0) / 2.0;
-    color.b = (sin(plasma * 6.28318 + t + 4.188) + 1.0) / 2.0;
+    // Get color from palette with time cycling
+    vec3 color = getPaletteColorCycled(plasma, time * 0.1);
 
     fragColor = vec4(color, intensity);
 }
 """
 
-# Fractal (Julia set) shader
+# Fractal (Julia set) shader with palette support
 FRACTAL_SHADER = """
 #version 330 core
 
@@ -97,11 +122,7 @@ uniform float bass;
 uniform vec2 resolution;
 uniform float intensity;
 
-vec3 hsv2rgb(vec3 c) {
-    vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
-    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
-}
+""" + PALETTE_FUNCTIONS + """
 
 void main() {
     vec2 c = vec2(
@@ -125,14 +146,14 @@ void main() {
         fragColor = vec4(0.0, 0.0, 0.0, intensity);
     } else {
         float t = float(iter) / float(maxIter);
-        float hue = fract(t * 3.0 + time * 0.1);
-        vec3 color = hsv2rgb(vec3(hue, 0.8, 0.9));
+        // Get color from palette based on iteration count
+        vec3 color = getPaletteColorCycled(t * 3.0, time * 0.1);
         fragColor = vec4(color, intensity * (0.5 + t * 0.5));
     }
 }
 """
 
-# Metaballs shader
+# Metaballs shader with palette support
 METABALLS_SHADER = """
 #version 330 core
 
@@ -144,6 +165,8 @@ uniform float energy;
 uniform float bass;
 uniform vec2 resolution;
 uniform float intensity;
+
+""" + PALETTE_FUNCTIONS + """
 
 void main() {
     vec2 p = uv;
@@ -170,10 +193,10 @@ void main() {
         float t = (field - threshold) / 2.0;
         t = clamp(t, 0.0, 1.0);
 
-        // Gradient coloring
-        vec3 color1 = vec3(0.1, 0.3, 0.8);
-        vec3 color2 = vec3(0.8, 0.2, 0.5);
-        vec3 color = mix(color1, color2, sin(time * 0.5 + field * 0.5) * 0.5 + 0.5);
+        // Get gradient color from palette
+        vec3 color = getPaletteColorCycled(field * 0.2, time * 0.1);
+        // Brighten inside
+        color = mix(color, vec3(1.0), t * 0.3);
 
         fragColor = vec4(color, intensity * t);
     } else {
@@ -182,7 +205,7 @@ void main() {
 }
 """
 
-# Wormhole shader
+# Wormhole shader with palette support
 WORMHOLE_SHADER = """
 #version 330 core
 
@@ -194,6 +217,8 @@ uniform float energy;
 uniform float bass;
 uniform vec2 resolution;
 uniform float intensity;
+
+""" + PALETTE_FUNCTIONS + """
 
 void main() {
     vec2 center = vec2(0.5);
@@ -212,11 +237,9 @@ void main() {
     float depth = 1.0 / (dist + 0.1);
     depth = clamp(depth * 0.3, 0.0, 1.0);
 
-    // Color based on angle and depth
-    vec3 color;
-    color.r = sin(spiral + time) * 0.5 + 0.5;
-    color.g = sin(spiral + time + 2.094) * 0.5 + 0.5;
-    color.b = sin(spiral + time + 4.188) * 0.5 + 0.5;
+    // Get color from palette based on spiral position
+    float colorPos = (spiral / 6.28318 + 0.5);
+    vec3 color = getPaletteColorCycled(colorPos, time * 0.1);
 
     color *= bands * depth;
     color *= 1.0 + bass * 0.5;
@@ -226,7 +249,7 @@ void main() {
 }
 """
 
-# Voronoi shader
+# Voronoi shader with palette support
 VORONOI_SHADER = """
 #version 330 core
 
@@ -238,6 +261,8 @@ uniform float energy;
 uniform float bass;
 uniform vec2 resolution;
 uniform float intensity;
+
+""" + PALETTE_FUNCTIONS + """
 
 vec2 hash2(vec2 p) {
     p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
@@ -270,12 +295,9 @@ void main() {
         }
     }
 
-    // Color based on cell
-    vec3 color = vec3(
-        0.5 + 0.5 * sin(minPoint.x * 6.283 + time),
-        0.5 + 0.5 * sin(minPoint.y * 6.283 + time + 2.0),
-        0.5 + 0.5 * sin((minPoint.x + minPoint.y) * 3.14 + time)
-    );
+    // Get color from palette based on cell position
+    float colorPos = minPoint.x + minPoint.y * 0.5;
+    vec3 color = getPaletteColorCycled(colorPos, time * 0.1);
 
     // Edge detection
     float edge = smoothstep(0.0, 0.1, minDist);
@@ -296,7 +318,7 @@ class GPUShaderRenderer:
     """GPU-accelerated shader renderer using ModernGL.
 
     This class manages an OpenGL context and compiles/runs fragment shaders
-    for various visual effects.
+    for various visual effects. Palette colors are passed as uniforms.
     """
 
     def __init__(self, width: int, height: int) -> None:
@@ -410,6 +432,7 @@ class GPUShaderRenderer:
         mid: float = 0.5,
         treble: float = 0.5,
         intensity: float = 0.7,
+        palette: list[tuple[int, int, int]] | None = None,
     ) -> Image.Image | None:
         """Render a shader effect.
 
@@ -421,12 +444,32 @@ class GPUShaderRenderer:
             mid: Mid energy (0-1).
             treble: Treble energy (0-1).
             intensity: Effect intensity (0-1).
+            palette: List of 5 RGB tuples (0-255) for colors. Defaults to neon palette.
 
         Returns:
             RGBA PIL Image or None if rendering failed.
         """
         if not self.available or shader_name not in self._programs:
             return None
+
+        # Default neon palette if none provided
+        if palette is None:
+            palette = [
+                (255, 0, 128),    # Hot pink
+                (0, 255, 255),    # Cyan
+                (255, 255, 0),    # Yellow
+                (128, 0, 255),    # Purple
+                (0, 255, 128),    # Spring green
+            ]
+
+        # Normalize palette colors to 0-1 range for shader
+        palette_normalized = [
+            (c[0] / 255.0, c[1] / 255.0, c[2] / 255.0)
+            for c in palette[:5]  # Take first 5 colors
+        ]
+        # Pad to 5 colors if needed
+        while len(palette_normalized) < 5:
+            palette_normalized.append(palette_normalized[-1] if palette_normalized else (1.0, 1.0, 1.0))
 
         # Serialize GPU access - OpenGL contexts are NOT thread-safe
         with _gpu_lock:
@@ -446,6 +489,10 @@ class GPUShaderRenderer:
                     program["resolution"].value = (float(self.width), float(self.height))
                 if "intensity" in program:
                     program["intensity"].value = intensity
+
+                # Set palette colors (write entire array at once)
+                if "palette" in program:
+                    program["palette"].value = palette_normalized
 
                 # Render to framebuffer
                 self._fbo.use()

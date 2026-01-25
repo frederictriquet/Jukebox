@@ -634,6 +634,7 @@ class VJingLayer(BaseVisualLayer):
                     mid=ctx["mid"],
                     treble=ctx["treble"],
                     intensity=effect_intensity,
+                    palette=self.color_palette,
                 )
                 if img is not None:
                     frame_cache[effect_name] = img
@@ -685,6 +686,7 @@ class VJingLayer(BaseVisualLayer):
             mid=ctx.get("mid", 0.5),
             treble=ctx.get("treble", 0.5),
             intensity=self._current_intensity,
+            palette=self.color_palette,
         )
 
     def _determine_effects(self) -> list[str]:
@@ -1090,6 +1092,10 @@ class VJingLayer(BaseVisualLayer):
         draw = ImageDraw.Draw(img)
         center = (self.width // 2, self.height // 2)
 
+        # Get palette colors
+        colors = self.color_palette
+        primary_color = colors[0]
+
         # Pulse circle that expands from center
         frames_since_beat = 0
         for b in reversed(self.beats):
@@ -1103,13 +1109,17 @@ class VJingLayer(BaseVisualLayer):
         alpha = int(150 * decay * self._current_intensity)
 
         if radius > 5:
-            # Draw expanding ring
+            # Draw expanding ring using palette color
             for thickness in range(3):
                 r = radius + thickness * 5
                 a = max(0, alpha - thickness * 40)
+                # Brighten the color for the pulse
+                pr = min(255, primary_color[0] + (255 - primary_color[0]) // 2)
+                pg = min(255, primary_color[1] + (255 - primary_color[1]) // 2)
+                pb = min(255, primary_color[2] + (255 - primary_color[2]) // 2)
                 draw.ellipse(
                     [center[0] - r, center[1] - r, center[0] + r, center[1] + r],
-                    outline=(255, 255, 255, a),
+                    outline=(pr, pg, pb, a),
                     width=3,
                 )
 
@@ -1126,7 +1136,13 @@ class VJingLayer(BaseVisualLayer):
             strobe_rate = 2 if energy > 0.7 else 3 if energy > 0.5 else 4
             if frame_idx % strobe_rate < strobe_rate // 2 + 1:
                 alpha = min(255, int(300 * energy * self._current_intensity))
-                flash = Image.new("RGBA", (self.width, self.height), (255, 255, 255, alpha))
+                # Use bright version of first palette color for strobe
+                color = self.color_palette[0]
+                # Brighten the color for strobe effect
+                r = min(255, color[0] + (255 - color[0]) // 2)
+                g = min(255, color[1] + (255 - color[1]) // 2)
+                b = min(255, color[2] + (255 - color[2]) // 2)
+                flash = Image.new("RGBA", (self.width, self.height), (r, g, b, alpha))
                 img.paste(flash, (0, 0), flash)
 
     # ========================================================================
@@ -1144,15 +1160,25 @@ class VJingLayer(BaseVisualLayer):
         bar_width = self.width // n_bars
         max_height = self.height * 0.6
 
+        # Get palette colors
+        colors = self.color_palette
+        n_colors = len(colors)
+
         for i, amplitude in enumerate(fft):
             x = i * bar_width
             height = int(amplitude * max_height * self._current_intensity)
 
-            # Color gradient based on frequency
-            hue = i / n_bars
-            r = int(255 * (1 - hue))
-            g = int(255 * abs(0.5 - hue) * 2)
-            b = int(255 * hue)
+            # Color gradient based on frequency using palette
+            color_pos = i / n_bars * n_colors
+            idx1 = int(color_pos) % n_colors
+            idx2 = (idx1 + 1) % n_colors
+            blend = color_pos - int(color_pos)
+
+            c1 = colors[idx1]
+            c2 = colors[idx2]
+            r = int(c1[0] + (c2[0] - c1[0]) * blend)
+            g = int(c1[1] + (c2[1] - c1[1]) * blend)
+            b = int(c1[2] + (c2[2] - c1[2]) * blend)
             alpha = int(180 * self._current_intensity)
 
             # Draw bar from bottom
@@ -1168,6 +1194,10 @@ class VJingLayer(BaseVisualLayer):
         center = (self.width // 2, self.height // 2)
         max_radius = min(self.width, self.height) // 2
 
+        # Get palette colors
+        colors = self.color_palette
+        n_colors = len(colors)
+
         n_rings = min(16, len(fft))
         for i in range(n_rings):
             amplitude = fft[i * len(fft) // n_rings]
@@ -1179,12 +1209,18 @@ class VJingLayer(BaseVisualLayer):
             # Rotate over time
             rotation = time_pos * (1 + i * 0.1)
 
-            # Color based on frequency
-            hue = i / n_rings
-            r = int(255 * (1 - hue) * amplitude)
-            g = int(100 + 155 * amplitude)
-            b = int(255 * hue * amplitude)
-            alpha = int(120 * self.intensity * (0.5 + amplitude * 0.5))
+            # Color based on frequency using palette
+            color_pos = i / n_rings * n_colors
+            idx1 = int(color_pos) % n_colors
+            idx2 = (idx1 + 1) % n_colors
+            blend = color_pos - int(color_pos)
+
+            c1 = colors[idx1]
+            c2 = colors[idx2]
+            r = int((c1[0] + (c2[0] - c1[0]) * blend) * amplitude)
+            g = int((c1[1] + (c2[1] - c1[1]) * blend) * amplitude)
+            b = int((c1[2] + (c2[2] - c1[2]) * blend) * amplitude)
+            alpha = int(120 * self._current_intensity * (0.5 + amplitude * 0.5))
 
             # Draw arc
             n_points = 60
@@ -1498,7 +1534,11 @@ class VJingLayer(BaseVisualLayer):
         # LFO modulation
         rotation_mod = self.lfo_slow.value(time_pos) * 0.5  # Rotation wobble
         scale_mod = 1.0 + self.lfo_medium.value(time_pos) * 0.2  # Size pulsing
-        hue_offset = self.lfo_triangle.value_normalized(time_pos)  # Color cycling
+        color_offset = self.lfo_triangle.value_normalized(time_pos)  # Color cycling
+
+        # Get palette colors
+        colors = self.color_palette
+        n_colors = len(colors)
 
         # Tunnel parameters
         n_rings = 20
@@ -1530,12 +1570,23 @@ class VJingLayer(BaseVisualLayer):
                 points.append((x, y))
             points.append(points[0])
 
-            # Color fades with depth, modulated by LFO
+            # Color from palette based on ring depth with cycling
             alpha = int(200 * (1 - z) * self._current_intensity)
-            hue = (i / n_rings + hue_offset) % 1.0
-            r = int(100 + 155 * (1 - hue))
-            g = int(50 + 100 * energy)
-            b = int(100 + 155 * hue)
+            color_pos = (i / n_rings + color_offset) * n_colors
+            idx1 = int(color_pos) % n_colors
+            idx2 = (idx1 + 1) % n_colors
+            blend = color_pos - int(color_pos)
+
+            c1 = colors[idx1]
+            c2 = colors[idx2]
+            r = int(c1[0] + (c2[0] - c1[0]) * blend)
+            g = int(c1[1] + (c2[1] - c1[1]) * blend)
+            b = int(c1[2] + (c2[2] - c1[2]) * blend)
+
+            # Brighten based on energy
+            r = min(255, int(r * (1 + energy * 0.3)))
+            g = min(255, int(g * (1 + energy * 0.3)))
+            b = min(255, int(b * (1 + energy * 0.3)))
 
             draw.line(points, fill=(r, g, b, alpha), width=2)
 
@@ -1553,6 +1604,10 @@ class VJingLayer(BaseVisualLayer):
         scale_mod = 1.0 + self.lfo_slow.value(time_pos) * 0.15  # Breathing effect
         color_shift = self.lfo_triangle.value_normalized(time_pos)  # Color shift
 
+        # Get palette colors
+        colors = self.color_palette
+        n_colors = len(colors)
+
         # Draw spiral
         points = []
         n_points = 200
@@ -1567,13 +1622,26 @@ class VJingLayer(BaseVisualLayer):
             y = center[1] + radius * math.sin(angle)
             points.append((x, y))
 
-        # Draw with gradient color, shifted by LFO
+        # Draw with gradient color from palette, shifted by LFO
         if len(points) >= 2:
             for i in range(len(points) - 1):
-                progress = (i / len(points) + color_shift) % 1.0
-                r = int(255 * (1 - progress))
-                g = int(100 + 155 * energy)
-                b = int(255 * progress)
+                # Map progress to palette position with color shift
+                color_pos = (i / len(points) + color_shift) * n_colors
+                idx1 = int(color_pos) % n_colors
+                idx2 = (idx1 + 1) % n_colors
+                blend = color_pos - int(color_pos)
+
+                c1 = colors[idx1]
+                c2 = colors[idx2]
+                r = int(c1[0] + (c2[0] - c1[0]) * blend)
+                g = int(c1[1] + (c2[1] - c1[1]) * blend)
+                b = int(c1[2] + (c2[2] - c1[2]) * blend)
+
+                # Brighten based on energy
+                r = min(255, int(r * (1 + energy * 0.3)))
+                g = min(255, int(g * (1 + energy * 0.3)))
+                b = min(255, int(b * (1 + energy * 0.3)))
+
                 alpha = int(180 * self._current_intensity)
                 draw.line([points[i], points[i + 1]], fill=(r, g, b, alpha), width=2)
 
@@ -1679,16 +1747,25 @@ class VJingLayer(BaseVisualLayer):
         # Fire height based on bass
         fire_height = int(self.height * 0.4 * (0.5 + bass * 0.5) * self._current_intensity)
 
+        # Get colors from palette for fire gradient
+        colors = self.color_palette
+        n_colors = len(colors)
+
         for y in range(fire_height):
             progress = y / max(fire_height, 1)
 
-            # Color gradient: yellow -> orange -> red -> transparent
-            if progress < 0.3:
-                r, g, b = 255, int(255 - progress * 200), int(100 * (1 - progress * 3))
-            elif progress < 0.6:
-                r, g, b = 255, int(180 - (progress - 0.3) * 400), 0
-            else:
-                r, g, b = int(255 - (progress - 0.6) * 400), 0, 0
+            # Color gradient through palette colors based on height
+            # Use reversed palette (bottom = first color, top = last color)
+            palette_pos = progress * (n_colors - 1)
+            idx1 = min(int(palette_pos), n_colors - 1)
+            idx2 = min(idx1 + 1, n_colors - 1)
+            blend = palette_pos - idx1
+
+            c1 = colors[idx1]
+            c2 = colors[idx2]
+            r = int(c1[0] + (c2[0] - c1[0]) * blend)
+            g = int(c1[1] + (c2[1] - c1[1]) * blend)
+            b = int(c1[2] + (c2[2] - c1[2]) * blend)
 
             alpha = int(150 * (1 - progress) * self._current_intensity)
 
@@ -1713,6 +1790,9 @@ class VJingLayer(BaseVisualLayer):
         is_beat = ctx["is_beat"]
         energy = ctx["energy"]
 
+        # Get palette colors
+        colors = self.color_palette
+
         # Add new ripple on beat
         if is_beat:
             self.ripples.append(
@@ -1721,6 +1801,7 @@ class VJingLayer(BaseVisualLayer):
                     "y": random.randint(self.height // 4, 3 * self.height // 4),
                     "radius": 0.0,
                     "life": 60.0,
+                    "color_idx": random.randint(0, len(colors) - 1),
                 }
             )
 
@@ -1732,6 +1813,9 @@ class VJingLayer(BaseVisualLayer):
 
             if ripple["life"] > 0:
                 new_ripples.append(ripple)
+
+                # Get ripple color from palette
+                color = colors[ripple.get("color_idx", 0) % len(colors)]
 
                 # Draw concentric circles
                 alpha = int(100 * (ripple["life"] / 60) * self._current_intensity)
@@ -1745,7 +1829,7 @@ class VJingLayer(BaseVisualLayer):
                                 ripple["x"] + r,
                                 ripple["y"] + r,
                             ],
-                            outline=(100, 150, 255, alpha // (i + 1)),
+                            outline=(color[0], color[1], color[2], alpha // (i + 1)),
                             width=2,
                         )
 
@@ -1920,35 +2004,34 @@ class VJingLayer(BaseVisualLayer):
         self.fractal_palette = self._create_fractal_palette()
 
     def _create_fractal_palette(self) -> NDArray:
-        """Create a color palette for fractal coloring.
+        """Create a color palette for fractal coloring based on current palette.
+
+        Creates a 256-color gradient interpolating between the colors in
+        self.color_palette.
 
         Returns:
             Array of shape (256, 3) with RGB colors.
         """
         palette = np.zeros((256, 3), dtype=np.uint8)
+        colors = self.color_palette
+        n_colors = len(colors)
 
+        # Create smooth gradient through all palette colors
         for i in range(256):
-            t = i / 255.0
+            # Map i to position in color cycle
+            t = i / 255.0 * n_colors
+            idx1 = int(t) % n_colors
+            idx2 = (idx1 + 1) % n_colors
+            blend = t - int(t)  # Fractional part for interpolation
 
-            if t < 0.16:
-                # Black to dark blue
-                palette[i] = [0, 0, int(t * 6 * 128)]
-            elif t < 0.42:
-                # Dark blue to blue-cyan
-                p = (t - 0.16) / 0.26
-                palette[i] = [0, int(p * 200), 128 + int(p * 127)]
-            elif t < 0.6425:
-                # Blue-cyan to yellow
-                p = (t - 0.42) / 0.2225
-                palette[i] = [int(p * 255), 200 + int(p * 55), int(255 * (1 - p))]
-            elif t < 0.8575:
-                # Yellow to orange-red
-                p = (t - 0.6425) / 0.215
-                palette[i] = [255, int(255 - p * 200), 0]
-            else:
-                # Orange-red to white
-                p = (t - 0.8575) / 0.1425
-                palette[i] = [255, int(55 + p * 200), int(p * 255)]
+            # Linear interpolation between two adjacent colors
+            c1 = colors[idx1]
+            c2 = colors[idx2]
+            palette[i] = [
+                int(c1[0] + (c2[0] - c1[0]) * blend),
+                int(c1[1] + (c2[1] - c1[1]) * blend),
+                int(c1[2] + (c2[2] - c1[2]) * blend),
+            ]
 
         return palette
 
@@ -2057,23 +2140,32 @@ class VJingLayer(BaseVisualLayer):
         cx, cy = self.width // 2, self.height // 2
         max_radius = min(self.width, self.height) // 2 - 20
 
+        # Get palette colors
+        colors = self.color_palette
+        primary_color = colors[0]  # Main radar color
+        secondary_color = colors[1 % len(colors)]  # Grid/dim color
+        blip_color = colors[2 % len(colors)]  # Blip color
+
         # Sweep angle - rotates over time, speed affected by energy
         sweep_speed = 1.0 + energy * 0.5
         angle = time_pos * sweep_speed * 2
 
-        # Draw concentric circles (grid)
+        # Draw concentric circles (grid) with dim palette color
+        dim_r = secondary_color[0] // 4
+        dim_g = secondary_color[1] // 4
+        dim_b = secondary_color[2] // 4
         for r_ratio in [0.25, 0.5, 0.75, 1.0]:
             r = int(max_radius * r_ratio)
             draw.ellipse(
                 [cx - r, cy - r, cx + r, cy + r],
-                outline=(0, 100, 0, int(60 * self._current_intensity)),
+                outline=(dim_r, dim_g, dim_b, int(60 * self._current_intensity)),
                 width=1,
             )
 
         # Draw cross lines
         alpha = int(60 * self._current_intensity)
-        draw.line([(cx - max_radius, cy), (cx + max_radius, cy)], fill=(0, 100, 0, alpha))
-        draw.line([(cx, cy - max_radius), (cx, cy + max_radius)], fill=(0, 100, 0, alpha))
+        draw.line([(cx - max_radius, cy), (cx + max_radius, cy)], fill=(dim_r, dim_g, dim_b, alpha))
+        draw.line([(cx, cy - max_radius), (cx, cy + max_radius)], fill=(dim_r, dim_g, dim_b, alpha))
 
         # Draw sweep beam with trail
         num_trail = 30
@@ -2083,13 +2175,18 @@ class VJingLayer(BaseVisualLayer):
             x_end = cx + int(math.cos(trail_angle) * max_radius)
             y_end = cy + int(math.sin(trail_angle) * max_radius)
 
-            # Brighter green for main beam
+            # Bright color for main beam, fading for trail
+            fade = 1.0 - i / num_trail
             if i < 3:
-                color = (100, 255, 100, trail_alpha)
+                r = min(255, int(primary_color[0] * 0.5 + 128))
+                g = min(255, int(primary_color[1] * 0.5 + 128))
+                b = min(255, int(primary_color[2] * 0.5 + 128))
             else:
-                color = (0, int(200 * (1 - i / num_trail)), 0, trail_alpha)
+                r = int(primary_color[0] * fade)
+                g = int(primary_color[1] * fade)
+                b = int(primary_color[2] * fade)
 
-            draw.line([(cx, cy), (x_end, y_end)], fill=color, width=2 if i < 5 else 1)
+            draw.line([(cx, cy), (x_end, y_end)], fill=(r, g, b, trail_alpha), width=2 if i < 5 else 1)
 
         # Draw blips on beats
         if is_beat:
@@ -2114,12 +2211,13 @@ class VJingLayer(BaseVisualLayer):
                     by = cy + int(math.sin(blip["angle"]) * blip["distance"])
                     alpha = int((blip["life"] / 30) * 255 * self._current_intensity)
                     size = int(blip["size"])
+                    # Use blip color from palette
                     draw.ellipse(
                         [bx - size, by - size, bx + size, by + size],
-                        fill=(100, 255, 100, alpha),
+                        fill=(blip_color[0], blip_color[1], blip_color[2], alpha),
                     )
                     new_blips.append(blip)
-            self.radar_blips = new_blips[:50]  # Limit blips
+            self.radar_blips = new_blips[:50]  # Limit blips  # Limit blips
 
     # ========================================================================
     # PLASMA EFFECT
@@ -2182,15 +2280,31 @@ class VJingLayer(BaseVisualLayer):
         # Normalize to 0-1
         plasma = (plasma + 1.0) / 2.0
 
-        # Create RGB from plasma value
-        # Use cycling colors based on time
-        r = ((np.sin(plasma * math.pi * 2 + t) + 1) / 2 * 255).astype(np.uint8)
-        g = ((np.sin(plasma * math.pi * 2 + t + 2 * math.pi / 3) + 1) / 2 * 255).astype(
-            np.uint8
-        )
-        b = ((np.sin(plasma * math.pi * 2 + t + 4 * math.pi / 3) + 1) / 2 * 255).astype(
-            np.uint8
-        )
+        # Create RGB from palette colors
+        colors = self.color_palette
+        n_colors = len(colors)
+
+        # Map plasma value to palette position with time-based cycling
+        palette_pos = (plasma * n_colors + t) % n_colors
+        idx1 = palette_pos.astype(int) % n_colors
+        idx2 = (idx1 + 1) % n_colors
+        blend = palette_pos - palette_pos.astype(int)
+
+        # Vectorized color interpolation
+        r = np.zeros_like(plasma, dtype=np.uint8)
+        g = np.zeros_like(plasma, dtype=np.uint8)
+        b = np.zeros_like(plasma, dtype=np.uint8)
+
+        for i in range(n_colors):
+            mask1 = idx1 == i
+            mask2 = idx2 == i
+            c = colors[i]
+            r[mask1] += (c[0] * (1 - blend[mask1])).astype(np.uint8)
+            g[mask1] += (c[1] * (1 - blend[mask1])).astype(np.uint8)
+            b[mask1] += (c[2] * (1 - blend[mask1])).astype(np.uint8)
+            r[mask2] += (c[0] * blend[mask2]).astype(np.uint8)
+            g[mask2] += (c[1] * blend[mask2]).astype(np.uint8)
+            b[mask2] += (c[2] * blend[mask2]).astype(np.uint8)
 
         # Stack to RGB
         rgb = np.stack([r, g, b], axis=-1)
@@ -2266,12 +2380,31 @@ class VJingLayer(BaseVisualLayer):
         depth_fade = np.clip(self.wormhole_r * 1.5, 0.1, 1.0)
         combined = (combined + 1) / 2 * depth_fade
 
-        hue_shift = t * 0.5
-        r = ((np.sin(combined * math.pi + hue_shift) + 1) / 2 * 100 + 50).astype(np.uint8)
-        g = ((np.sin(combined * math.pi + hue_shift + 1) + 1) / 2 * 50).astype(np.uint8)
-        b = ((np.sin(combined * math.pi + hue_shift + 2) + 1) / 2 * 200 + 55).astype(
-            np.uint8
-        )
+        # Use palette colors
+        colors = self.color_palette
+        n_colors = len(colors)
+
+        # Map combined value to palette position with time-based cycling
+        palette_pos = (combined * n_colors + t * 0.5) % n_colors
+        idx1 = palette_pos.astype(int) % n_colors
+        idx2 = (idx1 + 1) % n_colors
+        blend = palette_pos - palette_pos.astype(int)
+
+        # Vectorized color interpolation
+        r = np.zeros_like(combined, dtype=np.uint8)
+        g = np.zeros_like(combined, dtype=np.uint8)
+        b = np.zeros_like(combined, dtype=np.uint8)
+
+        for i in range(n_colors):
+            mask1 = idx1 == i
+            mask2 = idx2 == i
+            c = colors[i]
+            r[mask1] += (c[0] * (1 - blend[mask1])).astype(np.uint8)
+            g[mask1] += (c[1] * (1 - blend[mask1])).astype(np.uint8)
+            b[mask1] += (c[2] * (1 - blend[mask1])).astype(np.uint8)
+            r[mask2] += (c[0] * blend[mask2]).astype(np.uint8)
+            g[mask2] += (c[1] * blend[mask2]).astype(np.uint8)
+            b[mask2] += (c[2] * blend[mask2]).astype(np.uint8)
 
         if is_beat:
             r = np.clip(r.astype(np.int16) + 80, 0, 255).astype(np.uint8)
@@ -2314,6 +2447,7 @@ class VJingLayer(BaseVisualLayer):
             "y": (random.random() - 0.5) * 2,  # -1 to 1
             "z": z if z is not None else random.random() * 2 + 0.5,  # depth
             "brightness": random.random() * 0.5 + 0.5,
+            "color_idx": random.randint(0, len(self.color_palette) - 1),
         })
 
     def _render_starfield(
@@ -2336,6 +2470,10 @@ class VJingLayer(BaseVisualLayer):
         bass = ctx["bass"]
 
         cx, cy = self.width // 2, self.height // 2
+
+        # Get palette colors
+        colors = self.color_palette
+        n_colors = len(colors)
 
         # Speed based on energy
         speed = 0.02 + energy * 0.04
@@ -2360,16 +2498,23 @@ class VJingLayer(BaseVisualLayer):
                 size = max(1, int(3 / star["z"]))
 
                 # Brightness based on depth and beat
-                base_brightness = int((1 - star["z"] / 2.5) * 255 * star["brightness"])
+                base_brightness = (1 - star["z"] / 2.5) * star["brightness"]
                 if is_beat:
-                    base_brightness = min(255, base_brightness + 100)
+                    base_brightness = min(1.0, base_brightness + 0.4)
 
-                # Color - slight blue tint, whiter when closer
-                blue_tint = int(star["z"] * 50)
-                r = max(0, min(255, base_brightness - blue_tint // 2))
-                g = max(0, min(255, base_brightness - blue_tint // 3))
-                b = max(0, min(255, base_brightness + blue_tint))
-                alpha = int(min(255, base_brightness) * self._current_intensity)
+                # Get color from palette based on star index
+                color_idx = star.get("color_idx", 0) % n_colors
+                base_color = colors[color_idx]
+
+                # Blend toward white when closer (brighter)
+                white_blend = base_brightness * 0.5
+                r = int(base_color[0] * (1 - white_blend) + 255 * white_blend * base_brightness)
+                g = int(base_color[1] * (1 - white_blend) + 255 * white_blend * base_brightness)
+                b = int(base_color[2] * (1 - white_blend) + 255 * white_blend * base_brightness)
+                r = max(0, min(255, r))
+                g = max(0, min(255, g))
+                b = max(0, min(255, b))
+                alpha = int(min(255, base_brightness * 255) * self._current_intensity)
 
                 # Draw star
                 if size <= 1:
@@ -2473,6 +2618,11 @@ class VJingLayer(BaseVisualLayer):
         if dist < 10:
             return
 
+        # Get palette colors
+        colors = self.color_palette
+        primary_color = colors[0]
+        secondary_color = colors[1 % len(colors)]
+
         # Number of segments
         num_segments = max(3, int(dist / 30))
 
@@ -2494,25 +2644,31 @@ class VJingLayer(BaseVisualLayer):
         points.append((x2, y2))
 
         # Draw main bolt
-        brightness = int(255 * intensity * (1 - depth * 0.15))
-        alpha = int(min(255, brightness + 50) * self._current_intensity)
+        brightness = intensity * (1 - depth * 0.15)
+        alpha = int(min(255, 200 + 55 * brightness) * self._current_intensity)
         width = max(1, 4 - depth)
 
-        # Core (white/blue)
+        # Core (bright version of primary color)
+        core_r = min(255, int(primary_color[0] * 0.5 + 128 * brightness))
+        core_g = min(255, int(primary_color[1] * 0.5 + 128 * brightness))
+        core_b = min(255, int(primary_color[2] * 0.5 + 128 * brightness))
         for i in range(len(points) - 1):
             draw.line(
                 [points[i], points[i + 1]],
-                fill=(200, 220, 255, alpha),
+                fill=(core_r, core_g, core_b, alpha),
                 width=width,
             )
 
-        # Glow (wider, dimmer)
+        # Glow (wider, dimmer, secondary color)
         if depth < 2:
             glow_alpha = alpha // 3
+            glow_r = int(secondary_color[0] * 0.7)
+            glow_g = int(secondary_color[1] * 0.7)
+            glow_b = int(secondary_color[2] * 0.7)
             for i in range(len(points) - 1):
                 draw.line(
                     [points[i], points[i + 1]],
-                    fill=(100, 150, 255, glow_alpha),
+                    fill=(glow_r, glow_g, glow_b, glow_alpha),
                     width=width + 4,
                 )
 
@@ -2713,11 +2869,33 @@ class VJingLayer(BaseVisualLayer):
         inside = field > threshold
         glow = np.clip((field - threshold * 0.5) / threshold, 0, 1)
 
-        hue_shift = time_pos * 0.5
-        r = (np.sin(glow * math.pi + hue_shift) * 127 + 128).astype(np.uint8)
-        g = (np.sin(glow * math.pi + hue_shift + 2) * 127 + 128).astype(np.uint8)
-        b = (np.sin(glow * math.pi + hue_shift + 4) * 127 + 128).astype(np.uint8)
+        # Use palette colors
+        colors = self.color_palette
+        n_colors = len(colors)
 
+        # Map glow value to palette position with time-based cycling
+        palette_pos = (glow * n_colors + time_pos * 0.5) % n_colors
+        idx1 = palette_pos.astype(int) % n_colors
+        idx2 = (idx1 + 1) % n_colors
+        blend = palette_pos - palette_pos.astype(int)
+
+        # Vectorized color interpolation
+        r = np.zeros_like(glow, dtype=np.uint8)
+        g = np.zeros_like(glow, dtype=np.uint8)
+        b = np.zeros_like(glow, dtype=np.uint8)
+
+        for i in range(n_colors):
+            mask1 = idx1 == i
+            mask2 = idx2 == i
+            c = colors[i]
+            r[mask1] += (c[0] * (1 - blend[mask1])).astype(np.uint8)
+            g[mask1] += (c[1] * (1 - blend[mask1])).astype(np.uint8)
+            b[mask1] += (c[2] * (1 - blend[mask1])).astype(np.uint8)
+            r[mask2] += (c[0] * blend[mask2]).astype(np.uint8)
+            g[mask2] += (c[1] * blend[mask2]).astype(np.uint8)
+            b[mask2] += (c[2] * blend[mask2]).astype(np.uint8)
+
+        # Brighten inside areas
         r[inside] = np.clip(r[inside].astype(np.int16) + 80, 0, 255).astype(np.uint8)
         g[inside] = np.clip(g[inside].astype(np.int16) + 80, 0, 255).astype(np.uint8)
         b[inside] = np.clip(b[inside].astype(np.int16) + 80, 0, 255).astype(np.uint8)
@@ -2764,6 +2942,7 @@ class VJingLayer(BaseVisualLayer):
             "decay": random.random() * 0.01 + 0.005,
             "alpha": random.random() * 0.3 + 0.2,
             "turbulence_offset": random.random() * 100,
+            "color_idx": random.randint(0, len(self.color_palette) - 1),
         })
 
     def _render_smoke(
@@ -2797,6 +2976,9 @@ class VJingLayer(BaseVisualLayer):
             for _ in range(5):
                 x = self.width / 2 + (random.random() - 0.5) * self.width * 0.4
                 self._spawn_smoke_particle(x, bass)
+
+        # Get palette colors
+        colors = self.color_palette
 
         # Update and render particles
         new_particles = []
@@ -2832,9 +3014,15 @@ class VJingLayer(BaseVisualLayer):
             if alpha < 5:
                 continue
 
-            # Smoke color (gray with slight variation)
-            gray = int(180 + p["turbulence_offset"] % 40)
-            color = (gray, gray, gray, alpha)
+            # Use palette color based on particle index with desaturation for smoke
+            base_color = colors[p.get("color_idx", 0) % len(colors)]
+            # Desaturate: blend toward gray for smoke effect
+            gray = (base_color[0] + base_color[1] + base_color[2]) // 3
+            desaturate = 0.6  # 60% toward gray
+            r = int(base_color[0] * (1 - desaturate) + gray * desaturate)
+            g = int(base_color[1] * (1 - desaturate) + gray * desaturate)
+            b = int(base_color[2] * (1 - desaturate) + gray * desaturate)
+            color = (r, g, b, alpha)
 
             # Draw as ellipse (wider than tall for smoke look)
             size = p["size"]

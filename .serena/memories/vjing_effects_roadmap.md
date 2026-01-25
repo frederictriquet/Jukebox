@@ -169,9 +169,19 @@ DEFAULT_MAPPINGS = {
 - **is_beat** : Booléen, vrai sur les beats détectés
 
 ### Fichiers concernés
-- `plugins/video_exporter/layers/vjing_layer.py` : Tous les effets
+- `plugins/video_exporter/layers/vjing_layer.py` : Tous les effets (30+)
+- `plugins/video_exporter/layers/gpu_shaders.py` : Shaders GPU ModernGL (5 shaders)
+- `plugins/video_exporter/renderers/frame_renderer.py` : Compositeur de frames
+- `plugins/video_exporter/export_dialog.py` : Dialog d'export + EffectPreviewDialog
+- `plugins/video_exporter/export_worker.py` : Worker d'export parallélisé
 - `plugins/video_exporter/plugin.py` : Configuration et settings
-- `config/config.yaml` : Mappings VJing
+- `config/config.yaml` : Mappings VJing, presets
+
+### Système de preview
+- **Preview globale** (onglet Preview) : Tous les layers activés, résolution max 480p
+- **Preview par effet** (bouton 👁) : Effet seul via `EffectPreviewDialog`, 320x180 @ 30fps
+- Les previews utilisent : palette de couleurs, intensité, sensibilité audio, boucle audio courante
+- VJingLayer supporte preset `_single_effect` pour isoler un effet
 
 ### Performance
 - Pré-calcul des données audio dans `_precompute()`
@@ -182,6 +192,48 @@ DEFAULT_MAPPINGS = {
 ---
 
 ## Changelog
+
+### v1.17 (2026-01-25)
+- Support palettes dynamiques dans les shaders GPU
+- Modification complète de `gpu_shaders.py` :
+  - Ajout `PALETTE_FUNCTIONS` GLSL avec `getPaletteColor()` et `getPaletteColorCycled()`
+  - Uniform `vec3 palette[5]` dans tous les shaders
+  - Interpolation des couleurs entre les 5 couleurs de palette
+  - Cycling temporel pour animation des couleurs
+- 5 shaders GPU mis à jour : plasma, fractal, metaballs, wormhole, voronoi
+- Méthode `render()` accepte maintenant paramètre `palette: list[tuple[int, int, int]]`
+- Normalisation automatique RGB (0-255) → vec3 (0.0-1.0) pour GLSL
+- `VJingLayer._render_gpu_effect()` passe la palette configurée
+- `VJingLayer.prerender_gpu_frames()` passe la palette configurée
+- Les previews individuelles et full preview utilisent GPU + palettes correctement
+
+### v1.16 (2026-01-25)
+- Fix: Toutes les previews d'effets utilisent maintenant la palette de couleurs configurée
+- Effets corrigés pour utiliser `self.color_palette` :
+  - `_create_fractal_palette` : génère un dégradé 256 couleurs à partir de la palette
+  - `_render_plasma` : interpolation couleurs de la palette
+  - `_render_wormhole` : interpolation couleurs de la palette
+  - `_render_fire` : dégradé à travers les couleurs de la palette
+  - `_render_metaballs` : interpolation couleurs de la palette
+  - `_render_smoke` : couleurs de la palette désaturées
+  - `_render_tunnel` : couleurs de la palette avec cycling
+  - `_render_spiral` : couleurs de la palette avec cycling
+  - `_render_radar` : couleurs primaire, secondaire et blip depuis la palette
+  - `_render_water` : couleurs de la palette pour les ripples
+  - `_draw_lightning_bolt` : couleurs core et glow depuis la palette
+  - `_render_strobe` : flash coloré basé sur la palette
+  - `_render_pulse` : anneaux colorés basés sur la palette
+  - `_render_starfield` : étoiles colorées depuis la palette
+  - `_render_fft_bars` : barres colorées selon la palette
+  - `_render_fft_rings` : anneaux colorés selon la palette
+- Ajout `color_idx` aux particules : `_spawn_star`, `_spawn_smoke_particle`
+- Fix bug: `self.intensity` → `self._current_intensity` dans `_render_fft_rings`
+
+### v1.15 (2026-01-25)
+- Ajout preview individuelle par effet (bouton 👁 à côté de chaque slider)
+- Classe `EffectPreviewDialog` dans export_dialog.py
+- Preview utilise l'effet seul avec palette, intensité et sensibilité audio configurées
+- Résolution 320x180 @ 30fps pour fluidité
 
 ### v1.14 (2026-01-25)
 - Ajout mode preview temps réel dans le dialog
