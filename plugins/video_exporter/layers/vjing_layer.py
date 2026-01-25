@@ -70,7 +70,8 @@ class VJingLayer(BaseVisualLayer):
         """
         self.genre = genre
         self.intensity = intensity
-        self.effect_mappings = effect_mappings or self.DEFAULT_MAPPINGS
+        # Merge custom mappings with defaults (custom takes precedence)
+        self.effect_mappings = {**self.DEFAULT_MAPPINGS, **(effect_mappings or {})}
 
         # Determine which effects to use based on genre (can be multiple)
         self.active_effects = self._determine_effects()
@@ -169,19 +170,16 @@ class VJingLayer(BaseVisualLayer):
     def _render_strobe(
         self, img: Image.Image, frame_idx: int, time_pos: float, energy: float
     ) -> None:
-        """Render strobe effect.
-
-        Args:
-            img: Image to draw on.
-            frame_idx: Frame index.
-            time_pos: Time position.
-            energy: Current energy level.
-        """
-        # Strobe flashes on beat
-        if energy > 0.6 and frame_idx % 4 < 2:
-            alpha = int(150 * energy * self.intensity)
-            flash = Image.new("RGBA", (self.width, self.height), (255, 255, 255, alpha))
-            img.paste(flash, (0, 0), flash)
+        """Render strobe effect."""
+        # Strobe flashes on energy peaks
+        if energy > 0.3:
+            # Strobe frequency increases with energy
+            strobe_rate = 2 if energy > 0.7 else 3 if energy > 0.5 else 4
+            if frame_idx % strobe_rate < strobe_rate // 2 + 1:
+                # Strong alpha for powerful flash (up to 255)
+                alpha = min(255, int(300 * energy * self.intensity))
+                flash = Image.new("RGBA", (self.width, self.height), (255, 255, 255, alpha))
+                img.paste(flash, (0, 0), flash)
 
     def _render_glitch(
         self, img: Image.Image, frame_idx: int, time_pos: float, energy: float
