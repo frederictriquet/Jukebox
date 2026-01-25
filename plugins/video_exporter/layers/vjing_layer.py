@@ -19,27 +19,62 @@ class VJingLayer(BaseVisualLayer):
     """VJing visual effects based on genre letters.
 
     Supports multiple effects when genre contains multiple letters.
+
+    Available effects:
+    - Rhythm: pulse, strobe
+    - Spectrum: fft_bars, fft_rings, bass_warp
+    - Particles: particles, flow_field, explosion
+    - Geometric: kaleidoscope, lissajous, tunnel, spiral
+    - Post-processing: chromatic, glitch, pixelate, feedback
+    - Nature: fire, water, aurora
+    - Classic: wave, neon, vinyl
     """
 
     z_index = 4
 
     # Default effect mappings (based on genre_editor codes)
     DEFAULT_MAPPINGS = {
-        "D": "wave",  # Deep - chill, ambient
-        "C": "particles",  # Classic - elegant
+        "D": "aurora",  # Deep - chill, ambient
+        "C": "kaleidoscope",  # Classic - elegant
         "P": "strobe",  # Power - energetic
-        "T": "neon",  # Trance - hypnotic
+        "T": "tunnel",  # Trance - hypnotic
         "H": "fire",  # House - groovy, warm
-        "G": "particles",  # Garden - natural
+        "G": "flow_field",  # Garden - natural
         "I": "neon",  # Ibiza - club, colorful
         "A": "wave",  # A Cappella - soft
-        "W": "wave",  # Weed - chill, relaxing
+        "W": "aurora",  # Weed - chill, relaxing
         "B": "glitch",  # Banger - intense
         "R": "vinyl",  # Retro - vintage
-        "L": "wave",  # Loop - repetitive
-        "O": "particles",  # Organic - natural
+        "L": "lissajous",  # Loop - repetitive
+        "O": "flow_field",  # Organic - natural
         "N": "wave",  # Namaste - zen, calm
     }
+
+    # All available effects
+    AVAILABLE_EFFECTS = [
+        "pulse",
+        "strobe",
+        "fft_bars",
+        "fft_rings",
+        "bass_warp",
+        "particles",
+        "flow_field",
+        "explosion",
+        "kaleidoscope",
+        "lissajous",
+        "tunnel",
+        "spiral",
+        "chromatic",
+        "glitch",
+        "pixelate",
+        "feedback",
+        "fire",
+        "water",
+        "aurora",
+        "wave",
+        "neon",
+        "vinyl",
+    ]
 
     def __init__(
         self,
@@ -102,28 +137,138 @@ class VJingLayer(BaseVisualLayer):
 
     def _precompute(self) -> None:
         """Pre-compute effect-specific data."""
-        # Compute energy envelope for reactive effects
         samples_per_frame = len(self.audio) / self.total_frames
+
+        # Compute energy envelope for reactive effects
         self.energy = []
+        self.bass_energy = []
+        self.mid_energy = []
+        self.treble_energy = []
+
+        # Try to use scipy for frequency band separation
+        try:
+            from scipy import signal
+
+            nyquist = self.sr / 2
+
+            # Design filters
+            bass_b, bass_a = signal.butter(4, [20 / nyquist, 250 / nyquist], btype="band")
+            mid_b, mid_a = signal.butter(
+                4, [250 / nyquist, min(4000 / nyquist, 0.99)], btype="band"
+            )
+            treble_b, treble_a = signal.butter(4, min(4000 / nyquist, 0.99), btype="high")
+
+            # Filter audio
+            bass_audio = signal.filtfilt(bass_b, bass_a, self.audio)
+            mid_audio = signal.filtfilt(mid_b, mid_a, self.audio)
+            treble_audio = signal.filtfilt(treble_b, treble_a, self.audio)
+
+            self._has_frequency_bands = True
+        except ImportError:
+            bass_audio = mid_audio = treble_audio = self.audio
+            self._has_frequency_bands = False
+
+        # Compute per-frame energy
+        for frame_idx in range(self.total_frames):
+            start = int(frame_idx * samples_per_frame)
+            end = int((frame_idx + 1) * samples_per_frame)
+
+            chunk = self.audio[start:end]
+            bass_chunk = bass_audio[start:end]
+            mid_chunk = mid_audio[start:end]
+            treble_chunk = treble_audio[start:end]
+
+            self.energy.append(np.sqrt(np.mean(chunk**2)) if len(chunk) > 0 else 0.0)
+            self.bass_energy.append(
+                np.sqrt(np.mean(bass_chunk**2)) if len(bass_chunk) > 0 else 0.0
+            )
+            self.mid_energy.append(
+                np.sqrt(np.mean(mid_chunk**2)) if len(mid_chunk) > 0 else 0.0
+            )
+            self.treble_energy.append(
+                np.sqrt(np.mean(treble_chunk**2)) if len(treble_chunk) > 0 else 0.0
+            )
+
+        # Normalize
+        def normalize(arr: list) -> NDArray:
+            arr = np.array(arr)
+            max_val = np.max(arr) if np.max(arr) > 0 else 1.0
+            return arr / max_val
+
+        self.energy = normalize(self.energy)
+        self.bass_energy = normalize(self.bass_energy)
+        self.mid_energy = normalize(self.mid_energy)
+        self.treble_energy = normalize(self.treble_energy)
+
+        # Beat detection (simple onset detection)
+        self._detect_beats()
+
+        # Compute FFT data for spectrum effects
+        self._compute_fft_data()
+
+        # Effect-specific initialization
+        if "particles" in self.active_effects:
+            self._init_particles()
+        if "flow_field" in self.active_effects:
+            self._init_flow_field()
+        if "explosion" in self.active_effects:
+            self._init_explosion()
+        if "feedback" in self.active_effects:
+            self._init_feedback()
+        if "water" in self.active_effects:
+            self._init_water()
+
+    def _detect_beats(self) -> None:
+        """Simple beat detection based on energy peaks."""
+        self.beats = []
+        threshold = 0.5
+        min_interval = self.fps // 4  # Minimum frames between beats
+
+        last_beat = -min_interval
+        for i, e in enumerate(self.bass_energy):
+            if e > threshold and i - last_beat >= min_interval:
+                # Check if it's a local maximum
+                window = 3
+                start = max(0, i - window)
+                end = min(len(self.bass_energy), i + window + 1)
+                if e == max(self.bass_energy[start:end]):
+                    self.beats.append(i)
+                    last_beat = i
+
+    def _compute_fft_data(self) -> None:
+        """Pre-compute FFT data for each frame."""
+        self.fft_data = []
+        samples_per_frame = len(self.audio) / self.total_frames
+        n_bands = 32  # Number of frequency bands
 
         for frame_idx in range(self.total_frames):
             start = int(frame_idx * samples_per_frame)
             end = int((frame_idx + 1) * samples_per_frame)
             chunk = self.audio[start:end]
-            energy = np.sqrt(np.mean(chunk**2)) if len(chunk) > 0 else 0.0
-            self.energy.append(energy)
 
-        max_energy = max(self.energy) if max(self.energy) > 0 else 1.0
-        self.energy = np.array(self.energy) / max_energy
+            if len(chunk) > 0:
+                # Compute FFT
+                fft = np.abs(np.fft.rfft(chunk))
+                # Resample to n_bands
+                band_size = len(fft) // n_bands
+                bands = []
+                for i in range(n_bands):
+                    band_start = i * band_size
+                    band_end = (i + 1) * band_size
+                    bands.append(np.mean(fft[band_start:band_end]))
+                self.fft_data.append(np.array(bands))
+            else:
+                self.fft_data.append(np.zeros(n_bands))
 
-        # Effect-specific initialization for all active effects
-        if "particles" in self.active_effects:
-            self._init_particles()
+        # Normalize FFT data
+        max_fft = max(np.max(f) for f in self.fft_data) if self.fft_data else 1.0
+        if max_fft > 0:
+            self.fft_data = [f / max_fft for f in self.fft_data]
 
     def _init_particles(self) -> None:
         """Initialize particle system."""
-        self.particles: list[dict[str, float]] = []
-        self.max_particles = 50
+        self.particles: list[dict[str, Any]] = []
+        self.max_particles = 80
 
         for _ in range(self.max_particles):
             self._spawn_particle()
@@ -144,6 +289,36 @@ class VJingLayer(BaseVisualLayer):
             }
         )
 
+    def _init_flow_field(self) -> None:
+        """Initialize flow field (Perlin-like noise field)."""
+        self.flow_resolution = 20
+        self.flow_particles: list[dict[str, float]] = []
+        self.max_flow_particles = 200
+
+        # Initialize particles
+        for _ in range(self.max_flow_particles):
+            self.flow_particles.append(
+                {
+                    "x": random.random() * self.width,
+                    "y": random.random() * self.height,
+                    "life": random.random() * 50 + 50,
+                }
+            )
+
+    def _init_explosion(self) -> None:
+        """Initialize explosion particles."""
+        self.explosion_particles: list[dict[str, float]] = []
+        self.explosion_active = False
+        self.explosion_frame = 0
+
+    def _init_feedback(self) -> None:
+        """Initialize feedback buffer."""
+        self.feedback_buffer: Image.Image | None = None
+
+    def _init_water(self) -> None:
+        """Initialize water ripple state."""
+        self.ripples: list[dict[str, float]] = []
+
     def render(self, frame_idx: int, time_pos: float) -> Image.Image:
         """Render VJing effects for the current frame.
 
@@ -156,187 +331,215 @@ class VJingLayer(BaseVisualLayer):
         """
         img = self.create_transparent_image()
 
-        # Get current energy
-        safe_frame_idx = min(frame_idx, len(self.energy) - 1)
-        energy = self.energy[safe_frame_idx]
+        # Get current energy values
+        safe_idx = min(frame_idx, len(self.energy) - 1)
+        energy = self.energy[safe_idx]
+        bass = self.bass_energy[safe_idx]
+        mid = self.mid_energy[safe_idx]
+        treble = self.treble_energy[safe_idx]
+        fft = self.fft_data[safe_idx] if safe_idx < len(self.fft_data) else np.zeros(32)
+        is_beat = frame_idx in self.beats
+
+        # Context dict for effects
+        ctx = {
+            "energy": energy,
+            "bass": bass,
+            "mid": mid,
+            "treble": treble,
+            "fft": fft,
+            "is_beat": is_beat,
+        }
 
         # Render all active effects (composited together)
         for effect_name in self.active_effects:
             effect_method = getattr(self, f"_render_{effect_name}", self._render_wave)
-            effect_method(img, frame_idx, time_pos, energy)
+            effect_method(img, frame_idx, time_pos, ctx)
 
         return img
 
-    def _render_strobe(
-        self, img: Image.Image, frame_idx: int, time_pos: float, energy: float
+    # ========================================================================
+    # RHYTHM-SYNCHRONIZED EFFECTS
+    # ========================================================================
+
+    def _render_pulse(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
-        """Render strobe effect."""
-        # Strobe flashes on energy peaks
-        if energy > 0.3:
+        """Render beat pulse effect - luminosity/size variation on beats."""
+        if not ctx["is_beat"]:
+            return
+
+        draw = ImageDraw.Draw(img)
+        center = (self.width // 2, self.height // 2)
+
+        # Pulse circle that expands from center
+        frames_since_beat = 0
+        for b in reversed(self.beats):
+            if b <= frame_idx:
+                frames_since_beat = frame_idx - b
+                break
+
+        max_radius = min(self.width, self.height) // 2
+        decay = math.exp(-frames_since_beat / 10)
+        radius = int(max_radius * decay * self.intensity)
+        alpha = int(150 * decay * self.intensity)
+
+        if radius > 5:
+            # Draw expanding ring
+            for thickness in range(3):
+                r = radius + thickness * 5
+                a = max(0, alpha - thickness * 40)
+                draw.ellipse(
+                    [center[0] - r, center[1] - r, center[0] + r, center[1] + r],
+                    outline=(255, 255, 255, a),
+                    width=3,
+                )
+
+    def _render_strobe(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render intelligent strobe effect."""
+        energy = ctx["energy"]
+        treble = ctx["treble"]
+
+        # Strobe activates on high energy or treble
+        if energy > 0.3 or treble > 0.5:
             # Strobe frequency increases with energy
             strobe_rate = 2 if energy > 0.7 else 3 if energy > 0.5 else 4
             if frame_idx % strobe_rate < strobe_rate // 2 + 1:
-                # Strong alpha for powerful flash (up to 255)
                 alpha = min(255, int(300 * energy * self.intensity))
                 flash = Image.new("RGBA", (self.width, self.height), (255, 255, 255, alpha))
                 img.paste(flash, (0, 0), flash)
 
-    def _render_glitch(
-        self, img: Image.Image, frame_idx: int, time_pos: float, energy: float
+    # ========================================================================
+    # SPECTRUM-BASED EFFECTS
+    # ========================================================================
+
+    def _render_fft_bars(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
-        """Render glitch effect.
-
-        Args:
-            img: Image to draw on.
-            frame_idx: Frame index.
-            time_pos: Time position.
-            energy: Current energy level.
-        """
+        """Render FFT frequency bars."""
         draw = ImageDraw.Draw(img)
+        fft = ctx["fft"]
+        n_bars = len(fft)
 
-        # Draw glitch lines
-        n_lines = int(10 * energy * self.intensity)
-        for _ in range(n_lines):
-            y = random.randint(0, self.height)
-            height = random.randint(2, 20)
-            offset = random.randint(-50, 50)
+        bar_width = self.width // n_bars
+        max_height = self.height * 0.6
 
-            # Random color channel
-            colors = [(255, 0, 0, 100), (0, 255, 0, 100), (0, 0, 255, 100)]
-            color = random.choice(colors)
+        for i, amplitude in enumerate(fft):
+            x = i * bar_width
+            height = int(amplitude * max_height * self.intensity)
 
-            draw.rectangle([offset, y, self.width + offset, y + height], fill=color)
+            # Color gradient based on frequency
+            hue = i / n_bars
+            r = int(255 * (1 - hue))
+            g = int(255 * abs(0.5 - hue) * 2)
+            b = int(255 * hue)
+            alpha = int(180 * self.intensity)
 
-    def _render_fire(
-        self, img: Image.Image, frame_idx: int, time_pos: float, energy: float
+            # Draw bar from bottom
+            y = self.height - height
+            draw.rectangle([x, y, x + bar_width - 2, self.height], fill=(r, g, b, alpha))
+
+    def _render_fft_rings(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
-        """Render fire/heat effect.
-
-        Args:
-            img: Image to draw on.
-            frame_idx: Frame index.
-            time_pos: Time position.
-            energy: Current energy level.
-        """
+        """Render FFT as concentric rings."""
         draw = ImageDraw.Draw(img)
-
-        # Draw fire-like gradient at bottom
-        fire_height = int(self.height * 0.3 * energy * self.intensity)
-
-        for y in range(fire_height):
-            progress = y / max(fire_height, 1)
-            # Gradient from yellow to red to transparent
-            r = 255
-            g = int(255 * (1 - progress * 0.7))
-            b = 0
-            a = int(100 * (1 - progress))
-
-            # Add some noise
-            noise = int(math.sin(time_pos * 10 + y * 0.1) * 20)
-            wave_x = noise
-
-            draw.line(
-                [(wave_x, self.height - y), (self.width + wave_x, self.height - y)],
-                fill=(r, g, b, a),
-            )
-
-    def _render_vinyl(
-        self, img: Image.Image, frame_idx: int, time_pos: float, energy: float
-    ) -> None:
-        """Render vinyl/record effect.
-
-        Args:
-            img: Image to draw on.
-            frame_idx: Frame index.
-            time_pos: Time position.
-            energy: Current energy level.
-        """
-        draw = ImageDraw.Draw(img)
-
-        # Draw rotating circles like vinyl grooves
+        fft = ctx["fft"]
         center = (self.width // 2, self.height // 2)
-        max_radius = min(self.width, self.height) // 3
-        rotation = time_pos * 2 * math.pi  # One rotation per second
+        max_radius = min(self.width, self.height) // 2
 
-        n_grooves = 10
-        for i in range(n_grooves):
-            radius = max_radius * (i + 1) / n_grooves
-            alpha = int(50 * self.intensity)
+        n_rings = min(16, len(fft))
+        for i in range(n_rings):
+            amplitude = fft[i * len(fft) // n_rings]
+            base_radius = max_radius * (i + 1) / n_rings
 
-            # Draw partial arc
-            start_angle = rotation + i * 0.3
-            end_angle = start_angle + math.pi
+            # Modulate radius by amplitude
+            radius = int(base_radius * (0.8 + 0.4 * amplitude))
 
-            # Approximate arc with lines
-            for angle in np.linspace(start_angle, end_angle, 20):
+            # Rotate over time
+            rotation = time_pos * (1 + i * 0.1)
+
+            # Color based on frequency
+            hue = i / n_rings
+            r = int(255 * (1 - hue) * amplitude)
+            g = int(100 + 155 * amplitude)
+            b = int(255 * hue * amplitude)
+            alpha = int(120 * self.intensity * (0.5 + amplitude * 0.5))
+
+            # Draw arc
+            n_points = 60
+            points = []
+            arc_length = math.pi * (0.5 + amplitude * 0.5)
+            for j in range(n_points):
+                angle = rotation + (j / n_points) * arc_length
                 x = center[0] + radius * math.cos(angle)
                 y = center[1] + radius * math.sin(angle)
-                draw.ellipse([x - 1, y - 1, x + 1, y + 1], fill=(200, 200, 200, alpha))
+                points.append((x, y))
 
-    def _render_neon(
-        self, img: Image.Image, frame_idx: int, time_pos: float, energy: float
+            if len(points) >= 2:
+                draw.line(points, fill=(r, g, b, alpha), width=2)
+
+    def _render_bass_warp(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
-        """Render neon glow effect.
-
-        Args:
-            img: Image to draw on.
-            frame_idx: Frame index.
-            time_pos: Time position.
-            energy: Current energy level.
-        """
+        """Render bass-driven distortion/warp effect."""
         draw = ImageDraw.Draw(img)
+        bass = ctx["bass"]
 
-        # Draw neon shapes
-        colors = [
-            (255, 0, 255, 150),  # Magenta
-            (0, 255, 255, 150),  # Cyan
-            (255, 255, 0, 150),  # Yellow
-        ]
+        if bass < 0.2:
+            return
 
-        n_shapes = 3
+        center = (self.width // 2, self.height // 2)
+
+        # Draw warped concentric shapes
+        n_shapes = int(10 * bass * self.intensity)
         for i in range(n_shapes):
-            # Pulsating size
-            base_size = 100 + i * 50
-            pulse = math.sin(time_pos * 2 + i) * 20 * energy
-            size = int((base_size + pulse) * self.intensity)
+            progress = i / max(n_shapes, 1)
+            base_radius = 50 + progress * min(self.width, self.height) * 0.4
 
-            x = self.width // 2 + math.cos(time_pos + i * 2) * 100
-            y = self.height // 2 + math.sin(time_pos * 0.5 + i) * 50
+            # Warp amount based on bass
+            warp = bass * 30 * self.intensity
 
-            color = colors[i % len(colors)]
+            # Draw warped polygon
+            n_points = 6 + i % 3
+            points = []
+            for j in range(n_points):
+                angle = (j / n_points) * 2 * math.pi + time_pos
+                noise = math.sin(angle * 3 + time_pos * 5) * warp
+                r = base_radius + noise
+                x = center[0] + r * math.cos(angle)
+                y = center[1] + r * math.sin(angle)
+                points.append((x, y))
+            points.append(points[0])  # Close shape
 
-            # Draw glowing shape
-            for offset in range(3, 0, -1):
-                alpha = color[3] // offset
-                draw.ellipse(
-                    [
-                        x - size - offset * 5,
-                        y - size - offset * 5,
-                        x + size + offset * 5,
-                        y + size + offset * 5,
-                    ],
-                    outline=(*color[:3], alpha),
-                    width=2,
-                )
+            alpha = int(100 * (1 - progress) * self.intensity)
+            color = (int(255 * bass), 50, int(255 * (1 - bass)), alpha)
+            draw.line(points, fill=color, width=2)
+
+    # ========================================================================
+    # PARTICLE SYSTEMS
+    # ========================================================================
 
     def _render_particles(
-        self, img: Image.Image, frame_idx: int, time_pos: float, energy: float
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
-        """Render particle effect.
-
-        Args:
-            img: Image to draw on.
-            frame_idx: Frame index.
-            time_pos: Time position.
-            energy: Current energy level.
-        """
+        """Render rhythmic particle effect."""
         draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
+        is_beat = ctx["is_beat"]
+
+        # Spawn extra particles on beats
+        if is_beat and len(self.particles) < self.max_particles + 20:
+            for _ in range(5):
+                self._spawn_particle()
 
         # Update and draw particles
         for particle in self.particles:
-            # Update position
-            particle["x"] += particle["vx"] * (1 + energy * 2)
-            particle["y"] += particle["vy"] * (1 + energy * 2)
+            # Update position with energy-based speed
+            speed_mult = 1 + energy * 3
+            particle["x"] += particle["vx"] * speed_mult
+            particle["y"] += particle["vy"] * speed_mult
             particle["life"] -= 1
 
             # Wrap around
@@ -363,18 +566,547 @@ class VJingLayer(BaseVisualLayer):
             x, y = int(particle["x"]), int(particle["y"])
             draw.ellipse([x - size, y - size, x + size, y + size], fill=color)
 
-    def _render_wave(
-        self, img: Image.Image, frame_idx: int, time_pos: float, energy: float
+    def _render_flow_field(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
-        """Render wave effect (default).
-
-        Args:
-            img: Image to draw on.
-            frame_idx: Frame index.
-            time_pos: Time position.
-            energy: Current energy level.
-        """
+        """Render flow field effect (Perlin-like noise field)."""
         draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+
+        # Flow field parameters
+        scale = 0.01  # Noise scale
+        speed = 2 + energy * 5
+
+        for particle in self.flow_particles:
+            # Get flow direction from noise-like function
+            nx = particle["x"] * scale
+            ny = particle["y"] * scale
+            # Simple pseudo-noise using sin
+            angle = (
+                math.sin(nx + time_pos) * math.cos(ny - time_pos * 0.5)
+                + math.sin(nx * 2 - time_pos * 0.3) * 0.5
+            ) * math.pi * 2
+
+            # Apply velocity
+            particle["x"] += math.cos(angle) * speed
+            particle["y"] += math.sin(angle) * speed
+            particle["life"] -= 1
+
+            # Respawn if out of bounds or dead
+            if (
+                particle["x"] < 0
+                or particle["x"] > self.width
+                or particle["y"] < 0
+                or particle["y"] > self.height
+                or particle["life"] <= 0
+            ):
+                particle["x"] = random.random() * self.width
+                particle["y"] = random.random() * self.height
+                particle["life"] = random.random() * 50 + 50
+
+            # Draw particle as small line in flow direction
+            x, y = int(particle["x"]), int(particle["y"])
+            length = 5 + bass * 10
+            x2 = x + int(math.cos(angle) * length)
+            y2 = y + int(math.sin(angle) * length)
+
+            # Color based on position
+            hue = (particle["x"] / self.width + particle["y"] / self.height) / 2
+            r = int(100 + 155 * (1 - hue))
+            g = int(150 + 105 * energy)
+            b = int(100 + 155 * hue)
+            alpha = int(100 * self.intensity * (particle["life"] / 100))
+
+            draw.line([(x, y), (x2, y2)], fill=(r, g, b, alpha), width=1)
+
+    def _render_explosion(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render explosion/implosion effect on beats."""
+        draw = ImageDraw.Draw(img)
+        is_beat = ctx["is_beat"]
+        energy = ctx["energy"]
+        center = (self.width // 2, self.height // 2)
+
+        # Trigger explosion on strong beats
+        if is_beat and energy > 0.6 and not self.explosion_active:
+            self.explosion_active = True
+            self.explosion_frame = frame_idx
+            self.explosion_particles = []
+            # Spawn explosion particles
+            n_particles = 100
+            for _ in range(n_particles):
+                angle = random.random() * 2 * math.pi
+                speed = random.random() * 15 + 5
+                self.explosion_particles.append(
+                    {
+                        "x": float(center[0]),
+                        "y": float(center[1]),
+                        "vx": math.cos(angle) * speed,
+                        "vy": math.sin(angle) * speed,
+                        "size": random.random() * 5 + 2,
+                        "color": random.choice(
+                            [(255, 200, 50), (255, 100, 0), (255, 255, 100), (255, 150, 0)]
+                        ),
+                        "life": 40 + random.random() * 20,
+                    }
+                )
+
+        # Update and draw explosion particles
+        if self.explosion_active:
+            frames_since = frame_idx - self.explosion_frame
+            if frames_since > 60:
+                self.explosion_active = False
+                return
+
+            for p in self.explosion_particles:
+                # Update position with gravity
+                p["x"] += p["vx"]
+                p["y"] += p["vy"]
+                p["vy"] += 0.3  # Gravity
+                p["life"] -= 1
+
+                if p["life"] > 0:
+                    x, y = int(p["x"]), int(p["y"])
+                    size = int(p["size"] * (p["life"] / 60) * self.intensity)
+                    alpha = int(200 * (p["life"] / 60) * self.intensity)
+
+                    if 0 <= x < self.width and 0 <= y < self.height:
+                        draw.ellipse(
+                            [x - size, y - size, x + size, y + size],
+                            fill=(*p["color"], alpha),
+                        )
+
+    # ========================================================================
+    # GEOMETRIC EFFECTS
+    # ========================================================================
+
+    def _render_kaleidoscope(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render geometric kaleidoscope effect."""
+        draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
+        center = (self.width // 2, self.height // 2)
+
+        n_segments = 8
+        rotation = time_pos * 0.5
+
+        # Draw kaleidoscope pattern
+        for segment in range(n_segments):
+            base_angle = (segment / n_segments) * 2 * math.pi + rotation
+
+            # Draw shapes in each segment
+            n_shapes = 5
+            for i in range(n_shapes):
+                distance = 50 + i * 60 * self.intensity
+                size = 20 + energy * 30
+
+                # Position in segment
+                angle = base_angle + math.sin(time_pos + i) * 0.2
+                x = center[0] + distance * math.cos(angle)
+                y = center[1] + distance * math.sin(angle)
+
+                # Color varies by segment and shape
+                hue = (segment / n_segments + i * 0.1) % 1.0
+                r = int(255 * (1 - hue))
+                g = int(255 * abs(0.5 - hue) * 2)
+                b = int(255 * hue)
+                alpha = int(150 * self.intensity * (1 - i / n_shapes))
+
+                # Draw polygon
+                n_sides = 3 + i % 3
+                points = []
+                for j in range(n_sides):
+                    pa = angle + (j / n_sides) * 2 * math.pi
+                    px = x + size * math.cos(pa)
+                    py = y + size * math.sin(pa)
+                    points.append((px, py))
+                points.append(points[0])
+
+                draw.polygon(points, outline=(r, g, b, alpha))
+
+    def _render_lissajous(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render Lissajous curves."""
+        draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        center = (self.width // 2, self.height // 2)
+
+        # Lissajous parameters (modulated by audio)
+        a = 3 + int(bass * 4)
+        b = 4 + int(energy * 3)
+        delta = time_pos
+
+        # Draw multiple curves with different phases
+        n_curves = 3
+        for curve in range(n_curves):
+            points = []
+            phase_offset = curve * math.pi / n_curves
+
+            amplitude_x = (self.width * 0.35) * self.intensity
+            amplitude_y = (self.height * 0.35) * self.intensity
+
+            for t in np.linspace(0, 2 * math.pi, 200):
+                x = center[0] + amplitude_x * math.sin(a * t + delta + phase_offset)
+                y = center[1] + amplitude_y * math.sin(b * t)
+                points.append((x, y))
+
+            # Color per curve
+            colors = [
+                (255, 100, 100, 150),
+                (100, 255, 100, 150),
+                (100, 100, 255, 150),
+            ]
+            color = colors[curve % len(colors)]
+
+            if len(points) >= 2:
+                draw.line(points, fill=color, width=2)
+
+    def _render_tunnel(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render infinite tunnel effect."""
+        draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
+        center = (self.width // 2, self.height // 2)
+
+        # Tunnel parameters
+        n_rings = 20
+        speed = time_pos * 2
+
+        for i in range(n_rings):
+            # Ring distance (creates depth illusion)
+            z = (i / n_rings + speed) % 1.0
+            if z < 0.1:
+                continue
+
+            # Size based on "depth"
+            scale = 1 / z
+            radius = min(self.width, self.height) * 0.1 * scale
+
+            if radius > max(self.width, self.height):
+                continue
+
+            # Rotation
+            rotation = time_pos * 0.5 + i * 0.1
+
+            # Draw polygon ring
+            n_sides = 6
+            points = []
+            for j in range(n_sides):
+                angle = rotation + (j / n_sides) * 2 * math.pi
+                x = center[0] + radius * math.cos(angle)
+                y = center[1] + radius * math.sin(angle)
+                points.append((x, y))
+            points.append(points[0])
+
+            # Color fades with depth
+            alpha = int(200 * (1 - z) * self.intensity)
+            hue = (i / n_rings + time_pos * 0.1) % 1.0
+            r = int(100 + 155 * (1 - hue))
+            g = int(50 + 100 * energy)
+            b = int(100 + 155 * hue)
+
+            draw.line(points, fill=(r, g, b, alpha), width=2)
+
+    def _render_spiral(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render animated spiral effect."""
+        draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
+        center = (self.width // 2, self.height // 2)
+        max_radius = min(self.width, self.height) * 0.45
+
+        # Draw spiral
+        points = []
+        n_points = 200
+        rotations = 4 + energy * 2
+
+        for i in range(n_points):
+            progress = i / n_points
+            angle = progress * rotations * 2 * math.pi + time_pos * 2
+            radius = progress * max_radius
+
+            x = center[0] + radius * math.cos(angle)
+            y = center[1] + radius * math.sin(angle)
+            points.append((x, y))
+
+        # Draw with gradient color
+        if len(points) >= 2:
+            for i in range(len(points) - 1):
+                progress = i / len(points)
+                r = int(255 * (1 - progress))
+                g = int(100 + 155 * energy)
+                b = int(255 * progress)
+                alpha = int(180 * self.intensity)
+                draw.line([points[i], points[i + 1]], fill=(r, g, b, alpha), width=2)
+
+    # ========================================================================
+    # POST-PROCESSING EFFECTS
+    # ========================================================================
+
+    def _render_chromatic(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render chromatic aberration effect."""
+        bass = ctx["bass"]
+
+        # Offset amount based on bass
+        offset = int(5 + bass * 15 * self.intensity)
+
+        if offset < 2:
+            return
+
+        # Get image data
+        data = np.array(img)
+
+        # Separate and offset color channels
+        r_channel = np.roll(data[:, :, 0], offset, axis=1)
+        b_channel = np.roll(data[:, :, 2], -offset, axis=1)
+
+        # Recombine
+        data[:, :, 0] = r_channel
+        data[:, :, 2] = b_channel
+
+        # Update image
+        result = Image.fromarray(data, "RGBA")
+        img.paste(result, (0, 0))
+
+    def _render_glitch(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render glitch effect."""
+        draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
+        treble = ctx["treble"]
+
+        # Glitch intensity based on high frequencies
+        n_lines = int(15 * treble * self.intensity)
+
+        for _ in range(n_lines):
+            y = random.randint(0, self.height)
+            height = random.randint(2, 20)
+            offset = random.randint(-50, 50)
+
+            # Random color channel separation
+            colors = [(255, 0, 0, 120), (0, 255, 0, 120), (0, 0, 255, 120)]
+            color = random.choice(colors)
+
+            draw.rectangle([offset, y, self.width + offset, y + height], fill=color)
+
+        # Add some digital noise on high energy
+        if energy > 0.7:
+            for _ in range(int(50 * energy)):
+                x = random.randint(0, self.width - 5)
+                y = random.randint(0, self.height - 5)
+                size = random.randint(2, 8)
+                draw.rectangle(
+                    [x, y, x + size, y + size],
+                    fill=(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255), 150),
+                )
+
+    def _render_pixelate(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render pixelation/mosaic effect."""
+        bass = ctx["bass"]
+
+        # Pixel size based on bass
+        pixel_size = int(5 + bass * 20 * self.intensity)
+
+        if pixel_size < 3:
+            return
+
+        # Create pixelated overlay
+        small = img.resize(
+            (self.width // pixel_size, self.height // pixel_size), Image.Resampling.NEAREST
+        )
+        pixelated = small.resize((self.width, self.height), Image.Resampling.NEAREST)
+
+        # Blend with original based on energy
+        alpha = int(255 * bass * self.intensity)
+        mask = Image.new("L", (self.width, self.height), alpha)
+        img.paste(Image.composite(pixelated, img, mask), (0, 0))
+
+    def _render_feedback(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render feedback/trail effect."""
+        energy = ctx["energy"]
+
+        if self.feedback_buffer is None:
+            self.feedback_buffer = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
+
+        # Decay factor (higher = longer trails)
+        decay = 0.85 + energy * 0.1
+
+        # Rotate feedback slightly
+        angle = math.sin(time_pos) * 2
+
+        # Transform feedback buffer
+        rotated = self.feedback_buffer.rotate(
+            angle, center=(self.width // 2, self.height // 2), expand=False
+        )
+
+        # Apply decay
+        r, g, b, a = rotated.split()
+        a = a.point(lambda x: int(x * decay))
+        decayed = Image.merge("RGBA", (r, g, b, a))
+
+        # Composite: feedback behind current frame
+        result = Image.alpha_composite(decayed, img)
+
+        # Store for next frame
+        self.feedback_buffer = result.copy()
+
+        # Update img
+        img.paste(result, (0, 0))
+
+    # ========================================================================
+    # NATURE-INSPIRED EFFECTS
+    # ========================================================================
+
+    def _render_fire(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render fire/flame effect."""
+        draw = ImageDraw.Draw(img)
+        bass = ctx["bass"]
+
+        # Fire height based on bass
+        fire_height = int(self.height * 0.4 * (0.5 + bass * 0.5) * self.intensity)
+
+        for y in range(fire_height):
+            progress = y / max(fire_height, 1)
+
+            # Color gradient: yellow -> orange -> red -> transparent
+            if progress < 0.3:
+                r, g, b = 255, int(255 - progress * 200), int(100 * (1 - progress * 3))
+            elif progress < 0.6:
+                r, g, b = 255, int(180 - (progress - 0.3) * 400), 0
+            else:
+                r, g, b = int(255 - (progress - 0.6) * 400), 0, 0
+
+            alpha = int(150 * (1 - progress) * self.intensity)
+
+            # Animated flame shape
+            for x in range(0, self.width, 3):
+                noise = math.sin(x * 0.05 + time_pos * 8 + y * 0.1) * 15
+                noise += math.sin(x * 0.02 - time_pos * 5) * 10
+                flame_y = self.height - y + int(noise * (1 - progress))
+
+                if 0 <= flame_y < self.height:
+                    draw.point((x, flame_y), fill=(r, g, b, alpha))
+
+    def _render_water(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render water ripple effect."""
+        draw = ImageDraw.Draw(img)
+        is_beat = ctx["is_beat"]
+        energy = ctx["energy"]
+
+        # Add new ripple on beat
+        if is_beat:
+            self.ripples.append(
+                {
+                    "x": random.randint(self.width // 4, 3 * self.width // 4),
+                    "y": random.randint(self.height // 4, 3 * self.height // 4),
+                    "radius": 0.0,
+                    "life": 60.0,
+                }
+            )
+
+        # Update and draw ripples
+        new_ripples = []
+        for ripple in self.ripples:
+            ripple["radius"] += 5 + energy * 5
+            ripple["life"] -= 1
+
+            if ripple["life"] > 0:
+                new_ripples.append(ripple)
+
+                # Draw concentric circles
+                alpha = int(100 * (ripple["life"] / 60) * self.intensity)
+                for i in range(3):
+                    r = ripple["radius"] - i * 10
+                    if r > 0:
+                        draw.ellipse(
+                            [
+                                ripple["x"] - r,
+                                ripple["y"] - r,
+                                ripple["x"] + r,
+                                ripple["y"] + r,
+                            ],
+                            outline=(100, 150, 255, alpha // (i + 1)),
+                            width=2,
+                        )
+
+        self.ripples = new_ripples
+
+    def _render_aurora(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render aurora borealis effect."""
+        draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
+        mid = ctx["mid"]
+
+        # Aurora parameters
+        n_bands = 5
+        base_y = self.height * 0.3
+
+        for band in range(n_bands):
+            points = []
+            band_offset = band * 30
+
+            for x in range(0, self.width, 5):
+                # Layered sine waves for organic movement
+                y = base_y + band_offset
+                y += math.sin(x * 0.01 + time_pos + band) * 50 * self.intensity
+                y += math.sin(x * 0.02 - time_pos * 0.5 + band * 0.5) * 30
+                y += math.sin(x * 0.005 + time_pos * 0.2) * 20 * energy
+                points.append((x, y))
+
+            # Aurora colors: green, blue, purple, pink
+            colors = [
+                (100, 255, 150),  # Green
+                (50, 200, 255),  # Cyan
+                (150, 100, 255),  # Purple
+                (255, 100, 200),  # Pink
+                (100, 255, 200),  # Teal
+            ]
+            base_color = colors[band % len(colors)]
+
+            # Draw band with varying alpha
+            if len(points) >= 2:
+                alpha = int(80 * self.intensity * (0.5 + mid * 0.5))
+                color = (*base_color, alpha)
+                draw.line(points, fill=color, width=8 - band)
+
+                # Add glow
+                if band < 2:
+                    glow_alpha = alpha // 2
+                    glow_color = (*base_color, glow_alpha)
+                    # Offset points for glow
+                    glow_points = [(x, y - 5) for x, y in points]
+                    draw.line(glow_points, fill=glow_color, width=15)
+
+    # ========================================================================
+    # CLASSIC EFFECTS
+    # ========================================================================
+
+    def _render_wave(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render wave effect (default)."""
+        draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
 
         # Draw flowing waves
         n_waves = 5
@@ -392,3 +1124,73 @@ class VJingLayer(BaseVisualLayer):
                 alpha = int(100 * self.intensity / (i + 1))
                 color = (100, 200, 255, alpha)
                 draw.line(points, fill=color, width=2)
+
+    def _render_neon(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render neon glow effect."""
+        draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
+
+        # Draw neon shapes
+        colors = [
+            (255, 0, 255, 150),  # Magenta
+            (0, 255, 255, 150),  # Cyan
+            (255, 255, 0, 150),  # Yellow
+        ]
+
+        n_shapes = 3
+        for i in range(n_shapes):
+            # Pulsating size
+            base_size = 100 + i * 50
+            pulse = math.sin(time_pos * 2 + i) * 20 * energy
+            size = int((base_size + pulse) * self.intensity)
+
+            x = self.width // 2 + math.cos(time_pos + i * 2) * 100
+            y = self.height // 2 + math.sin(time_pos * 0.5 + i) * 50
+
+            color = colors[i % len(colors)]
+
+            # Draw glowing shape with multiple layers
+            for offset in range(3, 0, -1):
+                alpha = color[3] // offset
+                draw.ellipse(
+                    [
+                        x - size - offset * 5,
+                        y - size - offset * 5,
+                        x + size + offset * 5,
+                        y + size + offset * 5,
+                    ],
+                    outline=(*color[:3], alpha),
+                    width=2,
+                )
+
+    def _render_vinyl(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render vinyl/record effect."""
+        draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
+        center = (self.width // 2, self.height // 2)
+        max_radius = min(self.width, self.height) // 3
+        rotation = time_pos * 2 * math.pi * (0.5 + energy * 0.5)
+
+        n_grooves = 15
+        for i in range(n_grooves):
+            radius = max_radius * (i + 1) / n_grooves
+            alpha = int(60 * self.intensity)
+
+            # Draw partial arc that rotates
+            start_angle = rotation + i * 0.2
+            arc_length = math.pi * (0.8 + energy * 0.4)
+
+            # Draw arc as points
+            n_points = 30
+            for j in range(n_points):
+                angle = start_angle + (j / n_points) * arc_length
+                x = center[0] + radius * math.cos(angle)
+                y = center[1] + radius * math.sin(angle)
+
+                # Slight color variation
+                gray = 180 + int(20 * math.sin(angle * 5))
+                draw.ellipse([x - 1, y - 1, x + 1, y + 1], fill=(gray, gray, gray, alpha))
