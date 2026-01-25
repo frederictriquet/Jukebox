@@ -29,6 +29,8 @@ class FrameRenderer:
         track_metadata: dict[str, Any],
         video_clips_folder: str = "",
         vjing_mappings: dict[str, list[str]] | None = None,
+        vjing_preset: str = "",
+        vjing_presets: dict[str, list[str]] | None = None,
         waveform_config: dict[str, Any] | None = None,
     ) -> None:
         """Initialize frame renderer.
@@ -44,6 +46,8 @@ class FrameRenderer:
             track_metadata: Track metadata dictionary.
             video_clips_folder: Path to folder with video clips for background.
             vjing_mappings: Genre letter to effects list mapping.
+            vjing_preset: Name of preset to use (empty = use genre mapping).
+            vjing_presets: Available presets {name: [effects]}.
             waveform_config: Waveform layer configuration (height_ratio, colors).
         """
         self.width = width
@@ -55,6 +59,8 @@ class FrameRenderer:
         self.track_metadata = track_metadata
         self.video_clips_folder = video_clips_folder
         self.vjing_mappings = vjing_mappings or {}
+        self.vjing_preset = vjing_preset
+        self.vjing_presets = vjing_presets or {}
         self.waveform_config = waveform_config or {}
 
         # Initialize enabled layers
@@ -143,12 +149,15 @@ class FrameRenderer:
                 # Get genre from metadata
                 genre = self._get_metadata("genre", "")
                 logging.info(
-                    f"[Frame Renderer] VJing: genre='{genre}', mappings={self.vjing_mappings}"
+                    f"[Frame Renderer] VJing: genre='{genre}', "
+                    f"preset='{self.vjing_preset}', mappings={self.vjing_mappings}"
                 )
                 layer = VJingLayer(
                     **common_kwargs,
                     genre=genre,
                     effect_mappings=self.vjing_mappings,
+                    preset=self.vjing_preset,
+                    presets=self.vjing_presets,
                 )
                 self.layers.append(layer)
                 logging.info("[Frame Renderer] VJing layer enabled")

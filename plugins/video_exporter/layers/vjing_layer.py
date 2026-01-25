@@ -101,6 +101,8 @@ class VJingLayer(BaseVisualLayer):
         duration: float,
         genre: str = "",
         effect_mappings: dict[str, list[str]] | None = None,
+        preset: str = "",
+        presets: dict[str, list[str]] | None = None,
         intensity: float = 0.7,
         **kwargs: Any,
     ) -> None:
@@ -115,21 +117,25 @@ class VJingLayer(BaseVisualLayer):
             duration: Duration in seconds.
             genre: Genre string (each letter can trigger effects).
             effect_mappings: Custom letter to effects list mappings.
+            preset: Name of preset to use (overrides genre mapping).
+            presets: Available presets {name: [effects]}.
             intensity: Effect intensity (0.0 to 1.0).
             **kwargs: Additional parameters.
         """
         self.genre = genre
         self.intensity = intensity
+        self.preset = preset
+        self.presets = presets or {}
         # Merge custom mappings with defaults (custom takes precedence)
         self.effect_mappings: dict[str, list[str]] = {
             **self.DEFAULT_MAPPINGS,
             **(effect_mappings or {}),
         }
 
-        logging.info(f"[VJingLayer] Initializing with genre='{genre}'")
+        logging.info(f"[VJingLayer] Initializing with genre='{genre}', preset='{preset}'")
         logging.debug(f"[VJingLayer] Effect mappings: {self.effect_mappings}")
 
-        # Determine which effects to use based on genre (can be multiple)
+        # Determine which effects to use based on preset or genre
         self.active_effects = self._determine_effects()
 
         logging.info(f"[VJingLayer] Active effects: {self.active_effects}")
@@ -137,11 +143,21 @@ class VJingLayer(BaseVisualLayer):
         super().__init__(width, height, fps, audio, sr, duration, **kwargs)
 
     def _determine_effects(self) -> list[str]:
-        """Determine which effects to use based on genre.
+        """Determine which effects to use based on preset or genre.
+
+        If a preset is selected, use its effects directly.
+        Otherwise, determine effects from genre letters using mappings.
 
         Returns:
             List of effect names (unique).
         """
+        # If a preset is selected, use its effects
+        if self.preset and self.preset in self.presets:
+            effects = self.presets[self.preset]
+            logging.info(f"[VJingLayer] Using preset '{self.preset}': {effects}")
+            return effects
+
+        # Otherwise, use genre-based mapping
         if not self.genre:
             return ["wave"]  # Default effect
 

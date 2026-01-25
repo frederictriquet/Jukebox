@@ -115,9 +115,9 @@ Cette roadmap définit le plan d'implémentation et d'amélioration des effets v
 ### 8.3 Améliorations techniques
 | Amélioration | Status | Description |
 |--------------|--------|-------------|
+| Présets d'effets | ✅ | Combinaisons pré-configurées (8 présets) |
 | Vrai bruit de Perlin | ⬜ | Remplacer pseudo-noise par noise library |
 | Shaders GPU (optionnel) | ⬜ | Moderngl pour effets lourds |
-| Présets d'effets | ⬜ | Combinaisons pré-configurées |
 | Transitions entre effets | ⬜ | Fondu entre effets |
 | LFO modulables | ⬜ | Oscillateurs basse fréquence paramétrables |
 
@@ -182,6 +182,12 @@ DEFAULT_MAPPINGS = {
 ---
 
 ## Changelog
+
+### v1.6 (2026-01-25)
+- Ajout système de présets d'effets VJing
+- 8 présets disponibles: Chill, Energetic, Psychedelic, Nature, Retro, Space, Liquid, Geometric
+- Sélecteur de préset dans le dialog d'export
+- Les présets overrident les mappings de genre
 
 ### v1.5 (2026-01-25)
 - Ajout effet `metaballs` (blobs fluides qui fusionnent, field function)

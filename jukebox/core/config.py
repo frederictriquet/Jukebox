@@ -161,6 +161,14 @@ class VJingEffectMappingConfig(BaseModel):
         return []
 
 
+class VJingPresetConfig(BaseModel):
+    """Configuration for a VJing effects preset."""
+
+    name: str  # Display name
+    effects: list[str]  # List of effects in this preset
+    description: str = ""  # Optional description
+
+
 class VideoExporterConfig(BaseModel):
     """Video exporter configuration."""
 
@@ -190,6 +198,9 @@ class VideoExporterConfig(BaseModel):
         VJingEffectMappingConfig(letter="C", effect="particles"),
         VJingEffectMappingConfig(letter="A", effect="wave"),
     ]
+    # VJing presets (predefined effect combinations)
+    vjing_presets: list[VJingPresetConfig] = []
+    vjing_default_preset: str = ""  # Empty = use genre mappings
 
 class PluginsConfig(BaseModel):
     """Plugins configuration."""

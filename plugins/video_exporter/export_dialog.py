@@ -237,8 +237,20 @@ class ExportDialog(QDialog):
         self.dynamics_check = QCheckBox("Dynamics Effects (energy-based)")
         layers_layout.addWidget(self.dynamics_check)
 
-        self.vjing_check = QCheckBox("VJing Effects (genre-based)")
+        self.vjing_check = QCheckBox("VJing Effects")
         layers_layout.addWidget(self.vjing_check)
+
+        # VJing preset selector
+        preset_layout = QHBoxLayout()
+        preset_layout.addWidget(QLabel("    Preset:"))
+        self.vjing_preset_combo = QComboBox()
+        self.vjing_preset_combo.addItem("(Use genre mapping)", "")
+        for preset in self.context.config.video_exporter.vjing_presets:
+            self.vjing_preset_combo.addItem(preset.name, preset.name)
+        self.vjing_preset_combo.setToolTip("Select a preset or use genre-based effects")
+        preset_layout.addWidget(self.vjing_preset_combo)
+        preset_layout.addStretch()
+        layers_layout.addLayout(preset_layout)
 
         self.video_bg_check = QCheckBox("Video Background")
         layers_layout.addWidget(self.video_bg_check)
@@ -331,6 +343,11 @@ class ExportDialog(QDialog):
             "vjing_mappings": {
                 m.letter: m.get_effects()
                 for m in self.context.config.video_exporter.vjing_mappings
+            },
+            "vjing_preset": self.vjing_preset_combo.currentData(),
+            "vjing_presets": {
+                p.name: p.effects
+                for p in self.context.config.video_exporter.vjing_presets
             },
             # Waveform layer settings
             "waveform_height_ratio": self.context.config.video_exporter.waveform_height_ratio,

@@ -121,6 +121,8 @@ class VideoExportWorker(QThread):
                 track_metadata=track_metadata,
                 video_clips_folder=self.config.get("video_clips_folder", ""),
                 vjing_mappings=self.config.get("vjing_mappings", {}),
+                vjing_preset=self.config.get("vjing_preset", ""),
+                vjing_presets=self.config.get("vjing_presets", {}),
                 waveform_config=waveform_config,
             )
         except Exception as e:
