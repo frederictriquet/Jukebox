@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
+
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -27,7 +29,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QImage, QPixmap
 
 from jukebox.core.event_bus import Events
 
@@ -75,9 +78,18 @@ class ExportDialog(QDialog):
         self.track_metadata = track_metadata
         self.worker = None
 
+        # Preview state
+        self._preview_renderer = None
+        self._preview_audio = None
+        self._preview_sr = 22050
+        self._preview_playing = False
+        self._preview_frame = 0
+        self._preview_timer = QTimer(self)
+        self._preview_timer.timeout.connect(self._update_preview_frame)
+
         self.setWindowTitle("Export Video")
-        self.setMinimumWidth(500)
-        self.setMinimumHeight(520)
+        self.setMinimumWidth(600)
+        self.setMinimumHeight(600)
 
         self._apply_dark_style()
         self._setup_ui()
@@ -450,6 +462,58 @@ class ExportDialog(QDialog):
         scroll.setWidget(content)
         self.tabs.addTab(scroll, "Layers")
 
+        # Preview tab
+        preview_tab = QWidget()
+        preview_layout = QVBoxLayout(preview_tab)
+
+        # Preview display
+        self.preview_label = QLabel()
+        self.preview_label.setMinimumSize(480, 270)
+        self.preview_label.setMaximumSize(640, 360)
+        self.preview_label.setStyleSheet("background: #1a1a1a; border: 1px solid #555;")
+        self.preview_label.setAlignment(Qt.AlignCenter)
+        self.preview_label.setText("Click 'Load Preview' to start")
+        preview_layout.addWidget(self.preview_label, alignment=Qt.AlignCenter)
+
+        # Time slider
+        time_layout = QHBoxLayout()
+        self.preview_time_label = QLabel("0.0s")
+        self.preview_time_label.setMinimumWidth(50)
+        self.preview_time_slider = QSlider(Qt.Horizontal)
+        self.preview_time_slider.setRange(0, 1000)
+        self.preview_time_slider.setValue(0)
+        self.preview_time_slider.valueChanged.connect(self._on_preview_time_changed)
+        self.preview_duration_label = QLabel("0.0s")
+        self.preview_duration_label.setMinimumWidth(50)
+        time_layout.addWidget(self.preview_time_label)
+        time_layout.addWidget(self.preview_time_slider)
+        time_layout.addWidget(self.preview_duration_label)
+        preview_layout.addLayout(time_layout)
+
+        # Control buttons
+        controls_layout = QHBoxLayout()
+        self.preview_load_btn = QPushButton("Load Preview")
+        self.preview_load_btn.clicked.connect(self._load_preview)
+        self.preview_play_btn = QPushButton("Play")
+        self.preview_play_btn.clicked.connect(self._toggle_preview_playback)
+        self.preview_play_btn.setEnabled(False)
+        self.preview_refresh_btn = QPushButton("Refresh Frame")
+        self.preview_refresh_btn.clicked.connect(self._refresh_preview_frame)
+        self.preview_refresh_btn.setEnabled(False)
+        controls_layout.addWidget(self.preview_load_btn)
+        controls_layout.addWidget(self.preview_play_btn)
+        controls_layout.addWidget(self.preview_refresh_btn)
+        controls_layout.addStretch()
+        preview_layout.addLayout(controls_layout)
+
+        # Preview info
+        self.preview_info_label = QLabel("Preview uses current settings from other tabs")
+        self.preview_info_label.setStyleSheet("color: #888; font-style: italic;")
+        preview_layout.addWidget(self.preview_info_label)
+
+        preview_layout.addStretch()
+        self.tabs.addTab(preview_tab, "Preview")
+
     def _load_defaults(self) -> None:
         """Load default values from config."""
         config = self.context.config.video_exporter
@@ -490,6 +554,185 @@ class ExportDialog(QDialog):
         if directory:
             self.video_folder_edit.setText(directory)
 
+    def _load_preview(self) -> None:
+        """Load audio and initialize preview renderer."""
+        try:
+            import librosa
+            from plugins.video_exporter.renderers.frame_renderer import FrameRenderer
+        except ImportError as e:
+            self.preview_info_label.setText(f"Error: {e}")
+            return
+
+        self.preview_load_btn.setEnabled(False)
+        self.preview_info_label.setText("Loading audio...")
+        self.preview_label.setText("Loading...")
+
+        # Get preview settings
+        duration = self.loop_end - self.loop_start
+        fps = self.fps_spin.value()
+        resolution = RESOLUTION_PRESETS[self.resolution_combo.currentText()]
+        # Use smaller resolution for preview (max 480p)
+        scale = min(1.0, 480 / resolution[1])
+        preview_width = int(resolution[0] * scale)
+        preview_height = int(resolution[1] * scale)
+
+        try:
+            # Load audio
+            self._preview_audio, self._preview_sr = librosa.load(
+                str(self.filepath),
+                sr=22050,
+                offset=self.loop_start,
+                duration=duration,
+                mono=True,
+            )
+
+            # Build config for renderer
+            layers_config = {
+                "waveform": self.waveform_check.isChecked(),
+                "text": self.text_check.isChecked(),
+                "dynamics": self.dynamics_check.isChecked(),
+                "vjing": self.vjing_check.isChecked(),
+                "video_background": self.video_bg_check.isChecked(),
+            }
+
+            waveform_config = {
+                "height_ratio": self.context.config.video_exporter.waveform_height_ratio,
+                "bass_color": self.context.config.video_exporter.waveform_bass_color,
+                "mid_color": self.context.config.video_exporter.waveform_mid_color,
+                "treble_color": self.context.config.video_exporter.waveform_treble_color,
+                "cursor_color": self.context.config.video_exporter.waveform_cursor_color,
+            }
+
+            # Create renderer
+            self._preview_renderer = FrameRenderer(
+                width=preview_width,
+                height=preview_height,
+                fps=fps,
+                audio=self._preview_audio,
+                sr=self._preview_sr,
+                duration=duration,
+                layers_config=layers_config,
+                track_metadata=self.track_metadata,
+                video_clips_folder=self.video_folder_edit.text(),
+                vjing_mappings={
+                    m.letter: m.get_effects()
+                    for m in self.context.config.video_exporter.vjing_mappings
+                },
+                vjing_preset=self.vjing_preset_combo.currentData(),
+                vjing_presets={
+                    p.name: p.effects
+                    for p in self.context.config.video_exporter.vjing_presets
+                },
+                waveform_config=waveform_config,
+                use_gpu=True,
+                effect_intensities=self._get_effect_intensities(),
+                color_palette=self.color_palette_combo.currentData(),
+                audio_sensitivity=self._get_audio_sensitivity(),
+            )
+
+            # Update UI
+            total_frames = int(duration * fps)
+            self.preview_time_slider.setRange(0, total_frames - 1)
+            self.preview_time_slider.setValue(0)
+            self.preview_duration_label.setText(f"{duration:.1f}s")
+            self._preview_frame = 0
+
+            # Enable controls
+            self.preview_play_btn.setEnabled(True)
+            self.preview_refresh_btn.setEnabled(True)
+            self.preview_load_btn.setEnabled(True)
+            self.preview_load_btn.setText("Reload")
+            self.preview_info_label.setText(
+                f"Preview ready: {preview_width}x{preview_height} @ {fps}fps"
+            )
+
+            # Render first frame
+            self._refresh_preview_frame()
+
+        except Exception as e:
+            logging.exception("[Export Dialog] Preview load failed")
+            self.preview_info_label.setText(f"Error: {e}")
+            self.preview_label.setText("Failed to load preview")
+            self.preview_load_btn.setEnabled(True)
+
+    def _on_preview_time_changed(self, value: int) -> None:
+        """Handle preview time slider change."""
+        if self._preview_renderer is None:
+            return
+
+        self._preview_frame = value
+        fps = self.fps_spin.value()
+        time_pos = value / fps
+        self.preview_time_label.setText(f"{time_pos:.1f}s")
+
+        # Only refresh if not playing (to avoid double rendering)
+        if not self._preview_playing:
+            self._refresh_preview_frame()
+
+    def _toggle_preview_playback(self) -> None:
+        """Toggle preview playback."""
+        if self._preview_playing:
+            # Stop
+            self._preview_timer.stop()
+            self._preview_playing = False
+            self.preview_play_btn.setText("Play")
+        else:
+            # Start
+            fps = self.fps_spin.value()
+            interval = int(1000 / fps)  # milliseconds per frame
+            self._preview_timer.start(interval)
+            self._preview_playing = True
+            self.preview_play_btn.setText("Pause")
+
+    def _update_preview_frame(self) -> None:
+        """Update preview frame (called by timer)."""
+        if self._preview_renderer is None:
+            return
+
+        # Advance frame
+        self._preview_frame += 1
+        max_frame = self.preview_time_slider.maximum()
+        if self._preview_frame > max_frame:
+            self._preview_frame = 0  # Loop
+
+        # Update slider (without triggering refresh)
+        self.preview_time_slider.blockSignals(True)
+        self.preview_time_slider.setValue(self._preview_frame)
+        self.preview_time_slider.blockSignals(False)
+
+        # Update time label
+        fps = self.fps_spin.value()
+        time_pos = self._preview_frame / fps
+        self.preview_time_label.setText(f"{time_pos:.1f}s")
+
+        # Render frame
+        self._refresh_preview_frame()
+
+    def _refresh_preview_frame(self) -> None:
+        """Render and display the current preview frame."""
+        if self._preview_renderer is None:
+            return
+
+        try:
+            fps = self.fps_spin.value()
+            time_pos = self._preview_frame / fps
+
+            # Render frame
+            frame = self._preview_renderer.render_frame(self._preview_frame, time_pos)
+
+            # Convert numpy array to QPixmap
+            height, width, channels = frame.shape
+            bytes_per_line = channels * width
+            qimage = QImage(
+                frame.data, width, height, bytes_per_line, QImage.Format_RGB888
+            )
+            pixmap = QPixmap.fromImage(qimage)
+
+            # Display
+            self.preview_label.setPixmap(pixmap)
+
+        except Exception as e:
+            logging.warning(f"[Export Dialog] Preview render failed: {e}")
 
     def _get_effect_intensities(self) -> dict[str, float]:
         """Build effect intensities dictionary from UI sliders.
@@ -571,6 +814,16 @@ class ExportDialog(QDialog):
             # Audio sensitivity
             "audio_sensitivity": self._get_audio_sensitivity(),
         }
+
+    def closeEvent(self, event: Any) -> None:
+        """Clean up resources when dialog is closed."""
+        # Stop preview timer
+        if self._preview_timer.isActive():
+            self._preview_timer.stop()
+        # Clear preview renderer
+        self._preview_renderer = None
+        self._preview_audio = None
+        super().closeEvent(event)
 
     def _start_export(self) -> None:
         """Start the video export process."""
