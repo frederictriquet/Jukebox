@@ -175,30 +175,76 @@ video_exporter:
     - letter: "N"
       effects: ["wave", "smoke"]
   vjing_presets:
+    # Ambient / Chill
     - name: "Chill"
       effects: ["aurora", "wave", "smoke"]
       description: "Relaxing ambient visuals"
+    - name: "Deep"
+      effects: ["flow_field", "smoke", "feedback", "wave"]
+      description: "Deep house atmosphere with trails"
+    # Club / House
     - name: "Energetic"
       effects: ["strobe", "pulse", "explosion"]
       description: "High energy club visuals"
+    - name: "Club"
+      effects: ["particles", "pulse", "fft_bars", "feedback"]
+      description: "Classic club visuals with particles"
+    # Techno / Industrial
+    - name: "Techno"
+      effects: ["radar", "tunnel", "pixelate", "strobe"]
+      description: "Dark industrial mechanical visuals"
+    - name: "Hypnotic"
+      effects: ["tunnel", "spiral", "kaleidoscope", "feedback"]
+      description: "Hypnotic repetitive patterns"
+    # Psychedelic / Trance
     - name: "Psychedelic"
       effects: ["fractal", "plasma", "wormhole", "chromatic"]
       description: "Trippy hypnotic patterns"
+    - name: "Trance"
+      effects: ["wormhole", "kaleidoscope", "fractal", "chromatic"]
+      description: "Deep trance journey visuals"
+    # Organic / Nature
     - name: "Nature"
       effects: ["flow_field", "water", "aurora", "smoke"]
       description: "Organic natural elements"
+    - name: "Elements"
+      effects: ["fire", "water", "lightning", "smoke"]
+      description: "Four elements in motion"
+    # Retro / Vintage
     - name: "Retro"
       effects: ["vinyl", "neon", "chromatic"]
       description: "Vintage aesthetics"
+    - name: "Arcade"
+      effects: ["neon", "pixelate", "radar", "pulse"]
+      description: "Retro arcade game aesthetics"
+    # Space / Cosmic
     - name: "Space"
       effects: ["starfield", "tunnel", "lightning"]
       description: "Cosmic journey"
+    - name: "Nebula"
+      effects: ["voronoi", "aurora", "starfield", "plasma"]
+      description: "Cosmic nebula and galaxies"
+    # Fluid / Liquid
     - name: "Liquid"
       effects: ["metaballs", "plasma", "water"]
       description: "Fluid organic shapes"
+    - name: "Lava"
+      effects: ["metaballs", "fire", "bass_warp", "chromatic"]
+      description: "Molten lava flow visuals"
+    # Geometric / Mathematical
     - name: "Geometric"
       effects: ["kaleidoscope", "lissajous", "voronoi", "spiral"]
       description: "Mathematical patterns"
+    - name: "Spectral"
+      effects: ["fft_bars", "fft_rings", "bass_warp"]
+      description: "Audio spectrum visualizations"
+    # Minimal
+    - name: "Minimal"
+      effects: ["wave", "particles"]
+      description: "Simple elegant visuals"
+    - name: "Glitch"
+      effects: ["pixelate", "chromatic", "feedback", "strobe"]
+      description: "Digital glitch aesthetics"
   vjing_default_preset: ""  # Empty = use genre mappings
 
 plugins:

@@ -964,11 +964,17 @@ class VJingLayer(BaseVisualLayer):
         if self.transitions_enabled and len(self.active_effects) > 1:
             self._render_with_transitions(img, frame_idx, time_pos, ctx)
         else:
-            # Render all active effects (composited together)
+            # Render all active effects with proper alpha compositing
             for effect_name in self.active_effects:
+                # Create temporary image for this effect
+                effect_img = self.create_transparent_image()
+                
                 self._current_intensity = self._get_intensity(effect_name)
                 effect_method = getattr(self, f"_render_{effect_name}", self._render_wave)
-                effect_method(img, frame_idx, time_pos, ctx)
+                effect_method(effect_img, frame_idx, time_pos, ctx)
+                
+                # Alpha composite using paste with mask (safer than alpha_composite)
+                img.paste(effect_img, (0, 0), effect_img)
 
         return img
 
@@ -1217,10 +1223,12 @@ class VJingLayer(BaseVisualLayer):
 
             c1 = colors[idx1]
             c2 = colors[idx2]
-            r = int((c1[0] + (c2[0] - c1[0]) * blend) * amplitude)
-            g = int((c1[1] + (c2[1] - c1[1]) * blend) * amplitude)
-            b = int((c1[2] + (c2[2] - c1[2]) * blend) * amplitude)
-            alpha = int(120 * self._current_intensity * (0.5 + amplitude * 0.5))
+            # Keep colors vivid even with lower amplitude
+            r = int(c1[0] + (c2[0] - c1[0]) * blend)
+            g = int(c1[1] + (c2[1] - c1[1]) * blend)
+            b = int(c1[2] + (c2[2] - c1[2]) * blend)
+            # Increased alpha from 120 to 200
+            alpha = int(200 * self._current_intensity * (0.5 + amplitude * 0.5))
 
             # Draw arc
             n_points = 60
@@ -1233,7 +1241,7 @@ class VJingLayer(BaseVisualLayer):
                 points.append((x, y))
 
             if len(points) >= 2:
-                draw.line(points, fill=(r, g, b, alpha), width=2)
+                draw.line(points, fill=(r, g, b, alpha), width=3)
 
     def _render_bass_warp(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
@@ -1380,9 +1388,10 @@ class VJingLayer(BaseVisualLayer):
             color_progress = (particle["x"] / self.width + particle["y"] / self.height) / 2
             color_idx = int(color_progress * len(self.color_palette))
             base_color = self._get_palette_color(color_idx)
-            alpha = int(100 * self.intensity * (particle["life"] / 100))
+            # Increased alpha from 100 to 180
+            alpha = int(180 * self._current_intensity * (particle["life"] / 100))
 
-            draw.line([(x, y), (x2, y2)], fill=(*base_color, alpha), width=1)
+            draw.line([(x, y), (x2, y2)], fill=(*base_color, alpha), width=2)
 
     def _render_explosion(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
@@ -1817,8 +1826,8 @@ class VJingLayer(BaseVisualLayer):
                 # Get ripple color from palette
                 color = colors[ripple.get("color_idx", 0) % len(colors)]
 
-                # Draw concentric circles
-                alpha = int(100 * (ripple["life"] / 60) * self._current_intensity)
+                # Draw concentric circles - increased alpha from 100 to 200
+                alpha = int(200 * (ripple["life"] / 60) * self._current_intensity)
                 for i in range(3):
                     r = ripple["radius"] - i * 10
                     if r > 0:
@@ -1871,9 +1880,9 @@ class VJingLayer(BaseVisualLayer):
             # Use palette colors
             base_color = self._get_palette_color(band)
 
-            # Draw band with varying alpha
+            # Draw band with good visibility (increased alpha from 80 to 200)
             if len(points) >= 2:
-                alpha = int(80 * self.intensity * (0.5 + mid * 0.5))
+                alpha = int(200 * self._current_intensity * (0.6 + mid * 0.4))
                 color = (*base_color, alpha)
                 draw.line(points, fill=color, width=8 - band)
 
@@ -1909,10 +1918,11 @@ class VJingLayer(BaseVisualLayer):
                 points.append((x, int(y)))
 
             if len(points) >= 2:
-                alpha = int(100 * self.intensity / (i + 1))
+                # Increased alpha from 100 to 200, reduced division factor
+                alpha = int(200 * self._current_intensity / (i * 0.5 + 1))
                 base_color = self._get_palette_color(i)
                 color = (*base_color, alpha)
-                draw.line(points, fill=color, width=2)
+                draw.line(points, fill=color, width=3)
 
     def _render_neon(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
@@ -1962,7 +1972,8 @@ class VJingLayer(BaseVisualLayer):
         n_grooves = 15
         for i in range(n_grooves):
             radius = max_radius * (i + 1) / n_grooves
-            alpha = int(60 * self._current_intensity)
+            # Increased alpha from 60 to 150
+            alpha = int(150 * self._current_intensity)
 
             # Draw partial arc that rotates
             start_angle = rotation + i * 0.2
@@ -2150,28 +2161,28 @@ class VJingLayer(BaseVisualLayer):
         sweep_speed = 1.0 + energy * 0.5
         angle = time_pos * sweep_speed * 2
 
-        # Draw concentric circles (grid) with dim palette color
-        dim_r = secondary_color[0] // 4
-        dim_g = secondary_color[1] // 4
-        dim_b = secondary_color[2] // 4
+        # Draw concentric circles (grid) with palette color - increased alpha from 60 to 120
+        grid_alpha = int(120 * self._current_intensity)
+        dim_r = secondary_color[0] // 2
+        dim_g = secondary_color[1] // 2
+        dim_b = secondary_color[2] // 2
         for r_ratio in [0.25, 0.5, 0.75, 1.0]:
             r = int(max_radius * r_ratio)
             draw.ellipse(
                 [cx - r, cy - r, cx + r, cy + r],
-                outline=(dim_r, dim_g, dim_b, int(60 * self._current_intensity)),
+                outline=(dim_r, dim_g, dim_b, grid_alpha),
                 width=1,
             )
 
         # Draw cross lines
-        alpha = int(60 * self._current_intensity)
-        draw.line([(cx - max_radius, cy), (cx + max_radius, cy)], fill=(dim_r, dim_g, dim_b, alpha))
-        draw.line([(cx, cy - max_radius), (cx, cy + max_radius)], fill=(dim_r, dim_g, dim_b, alpha))
+        draw.line([(cx - max_radius, cy), (cx + max_radius, cy)], fill=(dim_r, dim_g, dim_b, grid_alpha))
+        draw.line([(cx, cy - max_radius), (cx, cy + max_radius)], fill=(dim_r, dim_g, dim_b, grid_alpha))
 
         # Draw sweep beam with trail
         num_trail = 30
         for i in range(num_trail):
             trail_angle = angle - i * 0.03
-            trail_alpha = int((1.0 - i / num_trail) * 180 * self._current_intensity)
+            trail_alpha = int((1.0 - i / num_trail) * 200 * self._current_intensity)
             x_end = cx + int(math.cos(trail_angle) * max_radius)
             y_end = cy + int(math.sin(trail_angle) * max_radius)
 
@@ -2217,7 +2228,7 @@ class VJingLayer(BaseVisualLayer):
                         fill=(blip_color[0], blip_color[1], blip_color[2], alpha),
                     )
                     new_blips.append(blip)
-            self.radar_blips = new_blips[:50]  # Limit blips  # Limit blips
+            self.radar_blips = new_blips[:50]  # Limit blips  # Limit blips  # Limit blips
 
     # ========================================================================
     # PLASMA EFFECT
@@ -2940,7 +2951,8 @@ class VJingLayer(BaseVisualLayer):
             "size": random.random() * 30 + 20,
             "life": 1.0,
             "decay": random.random() * 0.01 + 0.005,
-            "alpha": random.random() * 0.3 + 0.2,
+            # Increased alpha from 0.2-0.5 to 0.5-0.8
+            "alpha": random.random() * 0.3 + 0.5,
             "turbulence_offset": random.random() * 100,
             "color_idx": random.randint(0, len(self.color_palette) - 1),
         })

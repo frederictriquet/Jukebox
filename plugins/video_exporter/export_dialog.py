@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from PIL import Image
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -107,6 +108,7 @@ class EffectPreviewDialog(QDialog):
         # Local VLC player (independent from main app player)
         self._vlc_instance = vlc.Instance()
         self._vlc_player = self._vlc_instance.media_player_new()
+        self._vlc_released = False  # Track if VLC resources were released
 
         self.setWindowTitle(f"Preview: {effect_name}")
         self.setMinimumSize(400, 350)
@@ -167,7 +169,14 @@ class EffectPreviewDialog(QDialog):
         """Stop playback and close the dialog."""
         if self._timer.isActive():
             self._timer.stop()
-        self._vlc_player.stop()
+        
+        # Stop VLC (release will happen in closeEvent)
+        if not self._vlc_released:
+            try:
+                self._vlc_player.stop()
+            except Exception:
+                pass
+        
         self.close()
 
     def _load_effect(self) -> None:
@@ -239,6 +248,14 @@ class EffectPreviewDialog(QDialog):
         time_pos = value / self._fps
         self.time_label.setText(f"{time_pos:.1f}s")
 
+        # Sync VLC player position (time_pos is relative to loop, add loop_start)
+        if not self._vlc_released:
+            absolute_time_ms = int((self.loop_start + time_pos) * 1000)
+            try:
+                self._vlc_player.set_time(absolute_time_ms)
+            except Exception:
+                pass
+
         if not self._playing:
             self._refresh_frame()
 
@@ -292,9 +309,13 @@ class EffectPreviewDialog(QDialog):
             # Render frame from VJingLayer
             img = self._vjing_layer.render(self._frame, time_pos)
 
-            # Convert PIL Image to QPixmap
-            # First convert to RGB numpy array
-            rgb = img.convert("RGB")
+            # Composite onto black background (same as export)
+            # This ensures preview matches final video output
+            background = Image.new("RGBA", img.size, (0, 0, 0, 255))
+            background.paste(img, (0, 0), img)
+
+            # Convert to RGB numpy array
+            rgb = background.convert("RGB")
             frame = np.array(rgb, dtype=np.uint8)
 
             height, width, channels = frame.shape
@@ -309,14 +330,35 @@ class EffectPreviewDialog(QDialog):
         except Exception as e:
             logging.warning(f"[Effect Preview] Render failed: {e}")
 
+    def reject(self) -> None:
+        """Handle Escape key - stop playback before closing."""
+        if self._timer.isActive():
+            self._timer.stop()
+        
+        # Stop VLC (release will happen in closeEvent)
+        if not self._vlc_released:
+            try:
+                self._vlc_player.stop()
+            except Exception:
+                pass
+        
+        super().reject()
+
     def closeEvent(self, event: Any) -> None:
         """Clean up resources when dialog is closed."""
         if self._timer.isActive():
             self._timer.stop()
-        # Stop local VLC player
-        self._vlc_player.stop()
-        self._vlc_player.release()
-        self._vlc_instance.release()
+        
+        # Only release VLC resources once
+        if not self._vlc_released:
+            self._vlc_released = True
+            try:
+                self._vlc_player.stop()
+                self._vlc_player.release()
+                self._vlc_instance.release()
+            except Exception:
+                pass  # Ignore VLC cleanup errors
+        
         self._vjing_layer = None
         self._audio = None
         super().closeEvent(event)
@@ -628,82 +670,142 @@ class ExportDialog(QDialog):
 
         # Effect intensities group
         intensity_group = QGroupBox("Effect Intensities")
-        intensity_group.setMinimumHeight(320)  # Ensure enough height for all sliders
-        intensity_layout = QGridLayout(intensity_group)
-        intensity_layout.setContentsMargins(12, 20, 12, 12)
-        intensity_layout.setVerticalSpacing(8)
-        intensity_layout.setColumnStretch(1, 1)  # Slider column stretches
-        intensity_layout.setColumnMinimumWidth(0, 80)  # Label column min width
-        intensity_layout.setColumnMinimumWidth(2, 40)  # Percentage column min width
+        intensity_main_layout = QVBoxLayout(intensity_group)
+        intensity_main_layout.setContentsMargins(12, 20, 12, 12)
+        intensity_main_layout.setSpacing(8)
 
-        row = 0
-
-        # Global intensity slider
+        # Global intensity slider at the top
+        global_layout = QHBoxLayout()
         global_label = QLabel("Global:")
-        global_label.setFixedHeight(28)
+        global_label.setFixedWidth(60)
         self.global_intensity_slider = QSlider(Qt.Horizontal)
         self.global_intensity_slider.setRange(0, 100)
         self.global_intensity_slider.setValue(100)
-        self.global_intensity_slider.setMinimumWidth(150)
-        self.global_intensity_slider.setFixedHeight(28)
         self.global_intensity_slider.setToolTip("Default intensity for all effects")
         self.global_intensity_label = QLabel("100%")
-        self.global_intensity_label.setMinimumWidth(40)
-        self.global_intensity_label.setFixedHeight(28)
+        self.global_intensity_label.setFixedWidth(40)
         self.global_intensity_slider.valueChanged.connect(
             lambda v: self.global_intensity_label.setText(f"{v}%")
         )
-        intensity_layout.addWidget(global_label, row, 0)
-        intensity_layout.addWidget(self.global_intensity_slider, row, 1)
-        intensity_layout.addWidget(self.global_intensity_label, row, 2)
-        row += 1
+        global_layout.addWidget(global_label)
+        global_layout.addWidget(self.global_intensity_slider)
+        global_layout.addWidget(self.global_intensity_label)
+        intensity_main_layout.addLayout(global_layout)
 
-        # Per-effect intensity sliders (main GPU effects)
+        # Per-effect intensity sliders (all effects grouped by theme)
         self.effect_intensity_sliders: dict[str, QSlider] = {}
         self.effect_intensity_labels: dict[str, QLabel] = {}
 
-        gpu_effects = [
-            ("fractal", "Fractal"),
-            ("plasma", "Plasma"),
-            ("wormhole", "Wormhole"),
-            ("voronoi", "Voronoi"),
-            ("metaballs", "Metaballs"),
-            ("fire", "Fire"),
-            ("smoke", "Smoke"),
+        # All effects organized by theme (split into 2 columns)
+        effect_groups_left = [
+            ("Rythmiques", [
+                ("pulse", "Pulse"),
+                ("strobe", "Strobe"),
+            ]),
+            ("Spectraux", [
+                ("fft_bars", "FFT Bars"),
+                ("fft_rings", "FFT Rings"),
+                ("bass_warp", "Bass Warp"),
+            ]),
+            ("Particules", [
+                ("particles", "Particles"),
+                ("flow_field", "Flow Field"),
+                ("explosion", "Explosion"),
+                ("starfield", "Starfield"),
+            ]),
+            ("Géométriques", [
+                ("kaleidoscope", "Kaleidoscope"),
+                ("lissajous", "Lissajous"),
+                ("tunnel", "Tunnel"),
+                ("spiral", "Spiral"),
+                ("radar", "Radar"),
+            ]),
         ]
 
-        intensity_layout.setColumnMinimumWidth(3, 32)  # Preview button column
+        effect_groups_right = [
+            ("GPU", [
+                ("fractal", "Fractal"),
+                ("plasma", "Plasma"),
+                ("wormhole", "Wormhole"),
+                ("voronoi", "Voronoi"),
+                ("metaballs", "Metaballs"),
+            ]),
+            ("Naturels", [
+                ("fire", "Fire"),
+                ("water", "Water"),
+                ("aurora", "Aurora"),
+                ("smoke", "Smoke"),
+                ("lightning", "Lightning"),
+            ]),
+            ("Classiques", [
+                ("wave", "Wave"),
+                ("neon", "Neon"),
+                ("vinyl", "Vinyl"),
+            ]),
+            ("Post-process", [
+                ("chromatic", "Chromatic"),
+                ("pixelate", "Pixelate"),
+                ("feedback", "Feedback"),
+            ]),
+        ]
 
-        for effect_id, effect_name in gpu_effects:
-            name_label = QLabel(f"{effect_name}:")
-            name_label.setFixedHeight(28)
-            slider = QSlider(Qt.Horizontal)
-            slider.setRange(0, 100)
-            slider.setValue(100)
-            slider.setMinimumWidth(150)
-            slider.setFixedHeight(28)
-            slider.setToolTip(f"Intensity for {effect_name} effect")
-            value_label = QLabel("100%")
-            value_label.setMinimumWidth(40)
-            value_label.setFixedHeight(28)
-            slider.valueChanged.connect(
-                lambda v, lbl=value_label: lbl.setText(f"{v}%")
-            )
-            # Preview button
-            preview_btn = QPushButton("👁")
-            preview_btn.setFixedSize(28, 28)
-            preview_btn.setToolTip(f"Preview {effect_name} effect")
-            preview_btn.clicked.connect(
-                lambda checked, eid=effect_id, ename=effect_name: self._preview_single_effect(eid, ename)
-            )
-            intensity_layout.addWidget(name_label, row, 0)
-            intensity_layout.addWidget(slider, row, 1)
-            intensity_layout.addWidget(value_label, row, 2)
-            intensity_layout.addWidget(preview_btn, row, 3)
-            self.effect_intensity_sliders[effect_id] = slider
-            self.effect_intensity_labels[effect_id] = value_label
-            row += 1
+        # Two-column layout for effects
+        columns_layout = QHBoxLayout()
+        columns_layout.setSpacing(20)
 
+        def create_effect_column(groups: list) -> QWidget:
+            """Create a column widget with effect groups."""
+            column = QWidget()
+            col_layout = QVBoxLayout(column)
+            col_layout.setContentsMargins(0, 0, 0, 0)
+            col_layout.setSpacing(4)
+
+            for group_name, effects in groups:
+                # Group header
+                header = QLabel(group_name)
+                header.setStyleSheet("color: #aaa; font-weight: bold; font-size: 10px;")
+                col_layout.addWidget(header)
+
+                for effect_id, effect_name in effects:
+                    row_layout = QHBoxLayout()
+                    row_layout.setSpacing(4)
+
+                    name_label = QLabel(f"{effect_name}:")
+                    name_label.setFixedWidth(75)
+                    slider = QSlider(Qt.Horizontal)
+                    slider.setRange(0, 100)
+                    slider.setValue(100)
+                    slider.setMinimumWidth(80)
+                    slider.setToolTip(f"Intensity for {effect_name} effect")
+                    value_label = QLabel("100%")
+                    value_label.setFixedWidth(35)
+                    slider.valueChanged.connect(
+                        lambda v, lbl=value_label: lbl.setText(f"{v}%")
+                    )
+                    # Preview button
+                    preview_btn = QPushButton("👁")
+                    preview_btn.setFixedSize(24, 24)
+                    preview_btn.setToolTip(f"Preview {effect_name}")
+                    preview_btn.clicked.connect(
+                        lambda checked, eid=effect_id, ename=effect_name: self._preview_single_effect(eid, ename)
+                    )
+
+                    row_layout.addWidget(name_label)
+                    row_layout.addWidget(slider)
+                    row_layout.addWidget(value_label)
+                    row_layout.addWidget(preview_btn)
+                    col_layout.addLayout(row_layout)
+
+                    self.effect_intensity_sliders[effect_id] = slider
+                    self.effect_intensity_labels[effect_id] = value_label
+
+            col_layout.addStretch()
+            return column
+
+        columns_layout.addWidget(create_effect_column(effect_groups_left))
+        columns_layout.addWidget(create_effect_column(effect_groups_right))
+
+        intensity_main_layout.addLayout(columns_layout)
         layout.addWidget(intensity_group)
 
         # Audio sensitivity group
