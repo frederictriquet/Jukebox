@@ -208,6 +208,9 @@ class VideoExporterPlugin:
             logging.warning("[Video Exporter] Track not found in database")
             return
 
+        # Stop playback when opening export dialog
+        self.context.player.stop()
+
         # Import dialog here to avoid circular imports
         from plugins.video_exporter.export_dialog import ExportDialog
 

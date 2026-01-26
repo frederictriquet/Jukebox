@@ -32,6 +32,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
 
+import vlc
+
 from jukebox.core.event_bus import Events
 
 if TYPE_CHECKING:
@@ -54,6 +56,7 @@ class EffectPreviewDialog(QDialog):
     def __init__(
         self,
         parent: QWidget | None,
+        context: "PluginContextProtocol",
         effect_id: str,
         effect_name: str,
         filepath: Path,
@@ -68,6 +71,7 @@ class EffectPreviewDialog(QDialog):
 
         Args:
             parent: Parent widget.
+            context: Plugin context for audio player access.
             effect_id: Effect identifier.
             effect_name: Display name of the effect.
             filepath: Path to the audio file.
@@ -79,6 +83,7 @@ class EffectPreviewDialog(QDialog):
             track_metadata: Track metadata dictionary.
         """
         super().__init__(parent)
+        self.context = context
         self.effect_id = effect_id
         self.effect_name = effect_name
         self.filepath = filepath
@@ -98,6 +103,10 @@ class EffectPreviewDialog(QDialog):
         self._frame = 0
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._update_frame)
+
+        # Local VLC player (independent from main app player)
+        self._vlc_instance = vlc.Instance()
+        self._vlc_player = self._vlc_instance.media_player_new()
 
         self.setWindowTitle(f"Preview: {effect_name}")
         self.setMinimumSize(400, 350)
@@ -148,14 +157,18 @@ class EffectPreviewDialog(QDialog):
 
         # Control buttons
         controls_layout = QHBoxLayout()
-        self.play_btn = QPushButton("Play")
-        self.play_btn.clicked.connect(self._toggle_playback)
-        controls_layout.addWidget(self.play_btn)
         controls_layout.addStretch()
         close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.close)
+        close_btn.clicked.connect(self._stop_and_close)
         controls_layout.addWidget(close_btn)
         layout.addLayout(controls_layout)
+
+    def _stop_and_close(self) -> None:
+        """Stop playback and close the dialog."""
+        if self._timer.isActive():
+            self._timer.stop()
+        self._vlc_player.stop()
+        self.close()
 
     def _load_effect(self) -> None:
         """Load audio and initialize the effect renderer."""
@@ -210,6 +223,9 @@ class EffectPreviewDialog(QDialog):
             # Render first frame
             self._refresh_frame()
 
+            # Auto-start playback
+            self._start_playback()
+
         except Exception as e:
             logging.exception(f"[Effect Preview] Failed to load effect {self.effect_id}")
             self.preview_label.setText(f"Error: {e}")
@@ -226,17 +242,23 @@ class EffectPreviewDialog(QDialog):
         if not self._playing:
             self._refresh_frame()
 
-    def _toggle_playback(self) -> None:
-        """Toggle preview playback."""
+    def _start_playback(self) -> None:
+        """Start preview playback automatically."""
         if self._playing:
-            self._timer.stop()
-            self._playing = False
-            self.play_btn.setText("Play")
-        else:
-            interval = int(1000 / self._fps)
-            self._timer.start(interval)
-            self._playing = True
-            self.play_btn.setText("Pause")
+            return
+
+        interval = int(1000 / self._fps)
+
+        # Load audio file in local VLC player
+        media = self._vlc_instance.media_new(str(self.filepath))
+        self._vlc_player.set_media(media)
+        # Position at loop start (in milliseconds)
+        self._vlc_player.play()
+        # Wait a bit for player to initialize, then seek
+        QTimer.singleShot(50, lambda: self._vlc_player.set_time(int(self.loop_start * 1000)))
+
+        self._timer.start(interval)
+        self._playing = True
 
     def _update_frame(self) -> None:
         """Update frame (called by timer)."""
@@ -247,6 +269,8 @@ class EffectPreviewDialog(QDialog):
         max_frame = self.time_slider.maximum()
         if self._frame > max_frame:
             self._frame = 0
+            # Reposition audio to loop start
+            self._vlc_player.set_time(int(self.loop_start * 1000))
 
         self.time_slider.blockSignals(True)
         self.time_slider.setValue(self._frame)
@@ -289,6 +313,10 @@ class EffectPreviewDialog(QDialog):
         """Clean up resources when dialog is closed."""
         if self._timer.isActive():
             self._timer.stop()
+        # Stop local VLC player
+        self._vlc_player.stop()
+        self._vlc_player.release()
+        self._vlc_instance.release()
         self._vjing_layer = None
         self._audio = None
         super().closeEvent(event)
@@ -332,6 +360,10 @@ class ExportDialog(QDialog):
         self._preview_frame = 0
         self._preview_timer = QTimer(self)
         self._preview_timer.timeout.connect(self._update_preview_frame)
+
+        # Local VLC player for preview (independent from main app player)
+        self._vlc_instance = vlc.Instance()
+        self._vlc_player = self._vlc_instance.media_player_new()
 
         self.setWindowTitle("Export Video")
         self.setMinimumWidth(600)
@@ -445,6 +477,7 @@ class ExportDialog(QDialog):
         # Tab widget for settings
         self.tabs = QTabWidget()
         self.tabs.setMinimumHeight(320)  # Prevent compression when progress appears
+        self.tabs.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(self.tabs)
 
         # General tab
@@ -911,6 +944,15 @@ class ExportDialog(QDialog):
             self.preview_label.setText("Failed to load preview")
             self.preview_load_btn.setEnabled(True)
 
+    def _on_tab_changed(self, index: int) -> None:
+        """Handle tab change - stop preview playback when leaving Preview tab."""
+        # Preview tab is at index 2
+        if index != 2 and self._preview_playing:
+            self._preview_timer.stop()
+            self._vlc_player.stop()
+            self._preview_playing = False
+            self.preview_play_btn.setText("Play")
+
     def _on_preview_time_changed(self, value: int) -> None:
         """Handle preview time slider change."""
         if self._preview_renderer is None:
@@ -920,6 +962,11 @@ class ExportDialog(QDialog):
         fps = self.fps_spin.value()
         time_pos = value / fps
         self.preview_time_label.setText(f"{time_pos:.1f}s")
+
+        # Reposition local VLC player if playing
+        if self._preview_playing:
+            position_ms = int((self.loop_start + time_pos) * 1000)
+            self._vlc_player.set_time(position_ms)
 
         # Only refresh if not playing (to avoid double rendering)
         if not self._preview_playing:
@@ -932,10 +979,22 @@ class ExportDialog(QDialog):
             self._preview_timer.stop()
             self._preview_playing = False
             self.preview_play_btn.setText("Play")
+            # Pause local VLC player
+            self._vlc_player.pause()
         else:
             # Start
             fps = self.fps_spin.value()
             interval = int(1000 / fps)  # milliseconds per frame
+
+            # Load audio file in local VLC player
+            media = self._vlc_instance.media_new(str(self.filepath))
+            self._vlc_player.set_media(media)
+            self._vlc_player.play()
+            # Wait a bit for player to initialize, then seek
+            preview_time = self._preview_frame / fps
+            position_ms = int((self.loop_start + preview_time) * 1000)
+            QTimer.singleShot(50, lambda: self._vlc_player.set_time(position_ms))
+
             self._preview_timer.start(interval)
             self._preview_playing = True
             self.preview_play_btn.setText("Pause")
@@ -950,6 +1009,8 @@ class ExportDialog(QDialog):
         max_frame = self.preview_time_slider.maximum()
         if self._preview_frame > max_frame:
             self._preview_frame = 0  # Loop
+            # Reposition local VLC player to loop start
+            self._vlc_player.set_time(int(self.loop_start * 1000))
 
         # Update slider (without triggering refresh)
         self.preview_time_slider.blockSignals(True)
@@ -1005,6 +1066,7 @@ class ExportDialog(QDialog):
         # Create and show the effect preview dialog
         dialog = EffectPreviewDialog(
             parent=self,
+            context=self.context,
             effect_id=effect_id,
             effect_name=effect_name,
             filepath=self.filepath,
@@ -1103,6 +1165,10 @@ class ExportDialog(QDialog):
         # Stop preview timer
         if self._preview_timer.isActive():
             self._preview_timer.stop()
+        # Stop and release local VLC player
+        self._vlc_player.stop()
+        self._vlc_player.release()
+        self._vlc_instance.release()
         # Clear preview renderer
         self._preview_renderer = None
         self._preview_audio = None
@@ -1110,6 +1176,13 @@ class ExportDialog(QDialog):
 
     def _start_export(self) -> None:
         """Start the video export process."""
+        # Stop preview playback
+        if self._preview_timer.isActive():
+            self._preview_timer.stop()
+        self._vlc_player.stop()
+        self._preview_playing = False
+        self.preview_play_btn.setText("Play")
+
         config = self._get_export_config()
 
         # Validate output directory
@@ -1188,6 +1261,11 @@ class ExportDialog(QDialog):
 
     def _on_cancel(self) -> None:
         """Handle cancel button click."""
+        # Stop preview playback
+        if self._preview_timer.isActive():
+            self._preview_timer.stop()
+        self._vlc_player.stop()
+
         if self.worker and self.worker.isRunning():
             self.worker.cancel()
             self.worker.wait()
