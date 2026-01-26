@@ -36,6 +36,7 @@ class FrameRenderer:
         effect_intensities: dict[str, float] | None = None,
         color_palette: str = "neon",
         audio_sensitivity: dict[str, float] | None = None,
+        transitions_enabled: bool = True,
     ) -> None:
         """Initialize frame renderer.
 
@@ -57,6 +58,7 @@ class FrameRenderer:
             effect_intensities: Per-effect intensity overrides {effect_name: intensity}.
             color_palette: Name of color palette for VJing effects.
             audio_sensitivity: Per-band audio sensitivity {bass, mid, treble: 0.0-2.0}.
+            transitions_enabled: Enable smooth transitions/cycling between effects.
         """
         self.width = width
         self.height = height
@@ -74,6 +76,7 @@ class FrameRenderer:
         self.effect_intensities = effect_intensities or {}
         self.color_palette = color_palette
         self.audio_sensitivity = audio_sensitivity or {}
+        self.transitions_enabled = transitions_enabled
 
         # Initialize enabled layers
         self.layers: list[BaseVisualLayer] = []
@@ -174,6 +177,7 @@ class FrameRenderer:
                     effect_intensities=self.effect_intensities,
                     color_palette=self.color_palette,
                     audio_sensitivity=self.audio_sensitivity,
+                    transitions_enabled=self.transitions_enabled,
                 )
                 self.layers.append(layer)
                 logging.info("[Frame Renderer] VJing layer enabled")

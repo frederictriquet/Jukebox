@@ -651,6 +651,15 @@ class ExportDialog(QDialog):
         palette_layout.addStretch()
         layers_layout.addLayout(palette_layout)
 
+        # Transitions toggle
+        self.transitions_check = QCheckBox("    Transitions (cycle entre effets avec fade)")
+        self.transitions_check.setChecked(True)  # Default: enabled
+        self.transitions_check.setToolTip(
+            "Activé: les effets s'affichent un par un avec crossfade\n"
+            "Désactivé: tous les effets sont superposés simultanément"
+        )
+        layers_layout.addWidget(self.transitions_check)
+
         self.video_bg_check = QCheckBox("Video Background")
         layers_layout.addWidget(self.video_bg_check)
 
@@ -1019,6 +1028,7 @@ class ExportDialog(QDialog):
                 effect_intensities=self._get_effect_intensities(),
                 color_palette=self.color_palette_combo.currentData(),
                 audio_sensitivity=self._get_audio_sensitivity(),
+                transitions_enabled=self.transitions_check.isChecked(),
             )
 
             # Update UI
@@ -1260,6 +1270,8 @@ class ExportDialog(QDialog):
             "effect_intensities": self._get_effect_intensities(),
             # Audio sensitivity
             "audio_sensitivity": self._get_audio_sensitivity(),
+            # Transitions
+            "transitions_enabled": self.transitions_check.isChecked(),
         }
 
     def closeEvent(self, event: Any) -> None:

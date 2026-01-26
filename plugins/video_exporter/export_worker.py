@@ -127,6 +127,7 @@ class VideoExportWorker(QThread):
                 effect_intensities=self.config.get("effect_intensities", {}),
                 color_palette=self.config.get("color_palette", "neon"),
                 audio_sensitivity=self.config.get("audio_sensitivity", {}),
+                transitions_enabled=self.config.get("transitions_enabled", True),
             )
         except Exception as e:
             self.error.emit(f"Failed to initialize renderer: {e}")

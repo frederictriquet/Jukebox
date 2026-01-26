@@ -143,7 +143,8 @@ void main() {
     }
 
     if (iter == maxIter) {
-        fragColor = vec4(0.0, 0.0, 0.0, intensity);
+        // Center of fractal: fully transparent to show effects underneath
+        fragColor = vec4(0.0, 0.0, 0.0, 0.0);
     } else {
         float t = float(iter) / float(maxIter);
         // Get color from palette based on iteration count

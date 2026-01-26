@@ -142,38 +142,27 @@ video_exporter:
   waveform_treble_color: "#FFFFFF"
   waveform_cursor_color: "#FFFFFF"
   vjing_mappings:
-    - letter: "D"
-      effects: ["aurora", "metaballs"]
-    - letter: "C"
-      effects: ["kaleidoscope"]
-    - letter: "P"
-      effects: ["strobe", "pulse"]
-    - letter: "T"
-      effects: ["fractal", "tunnel"]
-    - letter: "H"
-      effects: ["fire", "smoke"]
-    - letter: "G"
-      effects: ["flow_field", "smoke"]
-    - letter: "I"
-      effects: ["neon", "strobe"]
-    - letter: "A"
-      effects: ["wave"]
-    - letter: "W"
-      effects: ["plasma", "smoke"]
-    - letter: "B"
-      effects: ["explosion", "strobe"]
-    - letter: "F"
-      effects: ["particles", "explosion"]
-    - letter: "R"
-      effects: ["vinyl"]
-    - letter: "L"
-      effects: ["lissajous", "metaballs"]
-    - letter: "U"
-      effects: ["wormhole", "voronoi"]
-    - letter: "O"
-      effects: ["flow_field", "metaballs"]
-    - letter: "N"
-      effects: ["wave", "smoke"]
+    - letter: "D"  # Deep House
+      effects: ["aurora", "metaballs", "flow_field", "water"]
+    - letter: "P"  # Power (hard techno, hard house, très rythmé)
+      effects: ["strobe", "explosion", "tunnel", "bass_warp"]
+    - letter: "T"  # Trance (hypnotique, euphoric)
+      effects: ["wormhole", "kaleidoscope", "fractal", "chromatic"]
+    - letter: "H"  # House (festif, coloré)
+      effects: ["neon", "particles", "pulse", "fft_bars"]
+    - letter: "G"  # Garden (House festive / Progressive énergique)
+      effects: ["particles", "pulse", "neon", "fft_bars"]
+    - letter: "I"  # Ibiza (cool, plage, festive)
+      effects: ["wave", "aurora", "water", "starfield"]
+    - letter: "W"  # Weed (hypnotisant, trippy)
+      effects: ["fractal", "plasma", "wormhole", "feedback"]
+    # - letter: "B"  # Banger (retiré)
+    - letter: "R"  # Retro (house/tech/trance 90s-2000s)
+      effects: ["tunnel", "radar", "pixelate", "fft_rings"]
+    - letter: "O"  # Organic House (naturel, fluide)
+      effects: ["flow_field", "smoke", "metaballs", "water"]
+    - letter: "N"  # Namaste (chill, downtempo)
+      effects: ["wave", "smoke", "aurora", "flow_field"]
   vjing_presets:
     # Ambient / Chill
     - name: "Chill"
