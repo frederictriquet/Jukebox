@@ -153,6 +153,7 @@ class VideoExportWorker(QThread):
                 audio_path=Path(filepath),
                 audio_start=loop_start,
                 audio_duration=duration,
+                fade_duration=self.config.get("fade_duration", 1.0),
             )
             encoder.start()
         except Exception as e:

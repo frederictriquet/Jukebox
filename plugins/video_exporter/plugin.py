@@ -237,7 +237,7 @@ class VideoExporterPlugin:
             "default_resolution": {
                 "label": "Default Resolution",
                 "type": "choice",
-                "options": ["1080p", "720p", "square_1080", "square_720", "vertical"],
+                "options": ["1080p", "720p", "square_1080", "square_720", "vertical", "instagram", "instagram_full"],
                 "default": self.context.config.video_exporter.default_resolution,
             },
             "default_fps": {

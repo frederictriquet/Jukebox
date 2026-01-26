@@ -143,96 +143,96 @@ video_exporter:
   waveform_cursor_color: "#FFFFFF"
   vjing_mappings:
     - letter: "D"  # Deep House
-      effects: ["aurora", "metaballs", "flow_field", "water"]
+      effects: ["aurora", "metaballs", "flow_field", "water", "timestretch"]
     - letter: "P"  # Power (hard techno, hard house, très rythmé)
-      effects: ["strobe", "explosion", "tunnel", "bass_warp"]
+      effects: ["strobe", "explosion", "tunnel", "bass_warp", "timestretch"]
     - letter: "T"  # Trance (hypnotique, euphoric)
-      effects: ["wormhole", "kaleidoscope", "fractal", "chromatic"]
+      effects: ["wormhole", "kaleidoscope", "fractal", "chromatic", "timestretch"]
     - letter: "H"  # House (festif, coloré)
-      effects: ["neon", "particles", "pulse", "fft_bars"]
+      effects: ["neon", "particles", "pulse", "fft_bars", "timestretch"]
     - letter: "G"  # Garden (House festive / Progressive énergique)
-      effects: ["particles", "pulse", "neon", "fft_bars"]
+      effects: ["particles", "pulse", "neon", "fft_bars", "timestretch"]
     - letter: "I"  # Ibiza (cool, plage, festive)
-      effects: ["wave", "aurora", "water", "starfield"]
+      effects: ["wave", "aurora", "water", "starfield", "timestretch"]
     - letter: "W"  # Weed (hypnotisant, trippy)
-      effects: ["fractal", "plasma", "wormhole", "feedback"]
+      effects: ["fractal", "plasma", "wormhole", "feedback", "timestretch"]
     # - letter: "B"  # Banger (retiré)
     - letter: "R"  # Retro (house/tech/trance 90s-2000s)
-      effects: ["tunnel", "radar", "pixelate", "fft_rings"]
+      effects: ["tunnel", "radar", "pixelate", "fft_rings", "timestretch"]
     - letter: "O"  # Organic House (naturel, fluide)
-      effects: ["flow_field", "smoke", "metaballs", "water"]
+      effects: ["flow_field", "smoke", "metaballs", "water", "timestretch"]
     - letter: "N"  # Namaste (chill, downtempo)
-      effects: ["wave", "smoke", "aurora", "flow_field"]
+      effects: ["wave", "smoke", "aurora", "flow_field", "timestretch"]
   vjing_presets:
     # Ambient / Chill
     - name: "Chill"
-      effects: ["aurora", "wave", "smoke"]
+      effects: ["aurora", "wave", "smoke", "timestretch"]
       description: "Relaxing ambient visuals"
     - name: "Deep"
-      effects: ["flow_field", "smoke", "feedback", "wave"]
+      effects: ["flow_field", "smoke", "feedback", "wave", "timestretch"]
       description: "Deep house atmosphere with trails"
     # Club / House
     - name: "Energetic"
-      effects: ["strobe", "pulse", "explosion"]
+      effects: ["strobe", "pulse", "explosion", "timestretch"]
       description: "High energy club visuals"
     - name: "Club"
-      effects: ["particles", "pulse", "fft_bars", "feedback"]
+      effects: ["particles", "pulse", "fft_bars", "feedback", "timestretch"]
       description: "Classic club visuals with particles"
     # Techno / Industrial
     - name: "Techno"
-      effects: ["radar", "tunnel", "pixelate", "strobe"]
+      effects: ["radar", "tunnel", "pixelate", "strobe", "timestretch"]
       description: "Dark industrial mechanical visuals"
     - name: "Hypnotic"
-      effects: ["tunnel", "spiral", "kaleidoscope", "feedback"]
+      effects: ["tunnel", "spiral", "kaleidoscope", "feedback", "timestretch"]
       description: "Hypnotic repetitive patterns"
     # Psychedelic / Trance
     - name: "Psychedelic"
-      effects: ["fractal", "plasma", "wormhole", "chromatic"]
+      effects: ["fractal", "plasma", "wormhole", "chromatic", "timestretch"]
       description: "Trippy hypnotic patterns"
     - name: "Trance"
-      effects: ["wormhole", "kaleidoscope", "fractal", "chromatic"]
+      effects: ["wormhole", "kaleidoscope", "fractal", "chromatic", "timestretch"]
       description: "Deep trance journey visuals"
     # Organic / Nature
     - name: "Nature"
-      effects: ["flow_field", "water", "aurora", "smoke"]
+      effects: ["flow_field", "water", "aurora", "smoke", "timestretch"]
       description: "Organic natural elements"
     - name: "Elements"
-      effects: ["fire", "water", "lightning", "smoke"]
+      effects: ["fire", "water", "lightning", "smoke", "timestretch"]
       description: "Four elements in motion"
     # Retro / Vintage
     - name: "Retro"
-      effects: ["vinyl", "neon", "chromatic"]
+      effects: ["vinyl", "neon", "chromatic", "timestretch"]
       description: "Vintage aesthetics"
     - name: "Arcade"
-      effects: ["neon", "pixelate", "radar", "pulse"]
+      effects: ["neon", "pixelate", "radar", "pulse", "timestretch"]
       description: "Retro arcade game aesthetics"
     # Space / Cosmic
     - name: "Space"
-      effects: ["starfield", "tunnel", "lightning"]
+      effects: ["starfield", "tunnel", "lightning", "timestretch"]
       description: "Cosmic journey"
     - name: "Nebula"
-      effects: ["voronoi", "aurora", "starfield", "plasma"]
+      effects: ["voronoi", "aurora", "starfield", "plasma", "timestretch"]
       description: "Cosmic nebula and galaxies"
     # Fluid / Liquid
     - name: "Liquid"
-      effects: ["metaballs", "plasma", "water"]
+      effects: ["metaballs", "plasma", "water", "timestretch"]
       description: "Fluid organic shapes"
     - name: "Lava"
-      effects: ["metaballs", "fire", "bass_warp", "chromatic"]
+      effects: ["metaballs", "fire", "bass_warp", "chromatic", "timestretch"]
       description: "Molten lava flow visuals"
     # Geometric / Mathematical
     - name: "Geometric"
-      effects: ["kaleidoscope", "lissajous", "voronoi", "spiral"]
+      effects: ["kaleidoscope", "lissajous", "voronoi", "spiral", "timestretch"]
       description: "Mathematical patterns"
     - name: "Spectral"
-      effects: ["fft_bars", "fft_rings", "bass_warp"]
+      effects: ["fft_bars", "fft_rings", "bass_warp", "timestretch"]
       description: "Audio spectrum visualizations"
     # Minimal
     - name: "Minimal"
-      effects: ["wave", "particles"]
+      effects: ["wave", "particles", "timestretch"]
       description: "Simple elegant visuals"
     - name: "Glitch"
-      effects: ["pixelate", "chromatic", "feedback", "strobe"]
+      effects: ["pixelate", "chromatic", "feedback", "strobe", "timestretch"]
       description: "Digital glitch aesthetics"
   vjing_default_preset: ""  # Empty = use genre mappings
 

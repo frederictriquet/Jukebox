@@ -26,6 +26,7 @@ class FFmpegEncoder:
         audio_path: Path,
         audio_start: float,
         audio_duration: float,
+        fade_duration: float = 1.0,
     ) -> None:
         """Initialize FFmpeg encoder.
 
@@ -37,6 +38,7 @@ class FFmpegEncoder:
             audio_path: Path to the audio file.
             audio_start: Start time in the audio file (seconds).
             audio_duration: Duration of audio to include (seconds).
+            fade_duration: Duration of fade in/out in seconds (0 to disable).
 
         Raises:
             RuntimeError: If FFmpeg is not found.
@@ -48,6 +50,7 @@ class FFmpegEncoder:
         self.audio_path = audio_path
         self.audio_start = audio_start
         self.audio_duration = audio_duration
+        self.fade_duration = fade_duration
         self.process: subprocess.Popen | None = None
         self._frame_count = 0
 
@@ -85,7 +88,26 @@ class FFmpegEncoder:
             str(self.audio_duration),
             "-i",
             str(self.audio_path),
-            # Output settings
+        ]
+
+        # Add fade filters if enabled
+        if self.fade_duration > 0:
+            fade_out_start = max(0, self.audio_duration - self.fade_duration)
+            # Video fade: fade in at start, fade out at end
+            video_filter = (
+                f"fade=t=in:st=0:d={self.fade_duration},"
+                f"fade=t=out:st={fade_out_start}:d={self.fade_duration}"
+            )
+            # Audio fade: fade in at start, fade out at end
+            audio_filter = (
+                f"afade=t=in:st=0:d={self.fade_duration},"
+                f"afade=t=out:st={fade_out_start}:d={self.fade_duration}"
+            )
+            cmd.extend(["-vf", video_filter])
+            cmd.extend(["-af", audio_filter])
+
+        # Output settings
+        cmd.extend([
             "-c:v",
             "libx264",
             "-preset",
@@ -100,7 +122,7 @@ class FFmpegEncoder:
             "192k",
             "-shortest",  # End when shortest stream ends
             str(self.output_path),
-        ]
+        ])
 
         logging.info(f"[FFmpeg] Starting encoder: {' '.join(cmd)}")
 

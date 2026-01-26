@@ -7,20 +7,23 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import vlc
 from PIL import Image
-
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QGridLayout,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -30,10 +33,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QImage, QPixmap
-
-import vlc
 
 from jukebox.core.event_bus import Events
 
@@ -48,6 +47,8 @@ RESOLUTION_PRESETS: dict[str, tuple[int, int]] = {
     "square_1080": (1080, 1080),
     "square_720": (720, 720),
     "vertical": (1080, 1920),
+    "instagram": (1080, 1350),
+    "instagram_full": (1080, 1440),
 }
 
 
@@ -57,7 +58,7 @@ class EffectPreviewDialog(QDialog):
     def __init__(
         self,
         parent: QWidget | None,
-        context: "PluginContextProtocol",
+        context: PluginContextProtocol,
         effect_id: str,
         effect_name: str,
         filepath: Path,
@@ -169,20 +170,21 @@ class EffectPreviewDialog(QDialog):
         """Stop playback and close the dialog."""
         if self._timer.isActive():
             self._timer.stop()
-        
+
         # Stop VLC (release will happen in closeEvent)
         if not self._vlc_released:
             try:
                 self._vlc_player.stop()
             except Exception:
                 pass
-        
+
         self.close()
 
     def _load_effect(self) -> None:
         """Load audio and initialize the effect renderer."""
         try:
             import librosa
+
             from plugins.video_exporter.layers.vjing_layer import VJingLayer
         except ImportError as e:
             self.preview_label.setText(f"Error: {e}")
@@ -334,21 +336,21 @@ class EffectPreviewDialog(QDialog):
         """Handle Escape key - stop playback before closing."""
         if self._timer.isActive():
             self._timer.stop()
-        
+
         # Stop VLC (release will happen in closeEvent)
         if not self._vlc_released:
             try:
                 self._vlc_player.stop()
             except Exception:
                 pass
-        
+
         super().reject()
 
     def closeEvent(self, event: Any) -> None:
         """Clean up resources when dialog is closed."""
         if self._timer.isActive():
             self._timer.stop()
-        
+
         # Only release VLC resources once
         if not self._vlc_released:
             self._vlc_released = True
@@ -358,7 +360,7 @@ class EffectPreviewDialog(QDialog):
                 self._vlc_instance.release()
             except Exception:
                 pass  # Ignore VLC cleanup errors
-        
+
         self._vjing_layer = None
         self._audio = None
         super().closeEvent(event)
@@ -568,6 +570,15 @@ class ExportDialog(QDialog):
         self.fps_spin.setRange(15, 60)
         self.fps_spin.setValue(30)
         layout.addRow("FPS:", self.fps_spin)
+
+        # Fade duration
+        self.fade_spin = QDoubleSpinBox()
+        self.fade_spin.setRange(0.0, 5.0)
+        self.fade_spin.setValue(1.0)
+        self.fade_spin.setSingleStep(0.5)
+        self.fade_spin.setSuffix(" s")
+        self.fade_spin.setToolTip("Durée du fade in/out audio et vidéo (0 = désactivé)")
+        layout.addRow("Fade in/out:", self.fade_spin)
 
         # Output directory
         output_layout = QHBoxLayout()
@@ -958,6 +969,7 @@ class ExportDialog(QDialog):
         """Load audio and initialize preview renderer."""
         try:
             import librosa
+
             from plugins.video_exporter.renderers.frame_renderer import FrameRenderer
         except ImportError as e:
             self.preview_info_label.setText(f"Error: {e}")
@@ -1272,7 +1284,21 @@ class ExportDialog(QDialog):
             "audio_sensitivity": self._get_audio_sensitivity(),
             # Transitions
             "transitions_enabled": self.transitions_check.isChecked(),
+            # Fade in/out
+            "fade_duration": self.fade_spin.value(),
         }
+
+    def reject(self) -> None:
+        """Handle Escape key - stop playback before closing."""
+        # Stop preview timer
+        if self._preview_timer.isActive():
+            self._preview_timer.stop()
+        # Stop VLC player
+        try:
+            self._vlc_player.stop()
+        except Exception:
+            pass
+        super().reject()
 
     def closeEvent(self, event: Any) -> None:
         """Clean up resources when dialog is closed."""
@@ -1280,9 +1306,12 @@ class ExportDialog(QDialog):
         if self._preview_timer.isActive():
             self._preview_timer.stop()
         # Stop and release local VLC player
-        self._vlc_player.stop()
-        self._vlc_player.release()
-        self._vlc_instance.release()
+        try:
+            self._vlc_player.stop()
+            self._vlc_player.release()
+            self._vlc_instance.release()
+        except Exception:
+            pass  # Ignore VLC cleanup errors
         # Clear preview renderer
         self._preview_renderer = None
         self._preview_audio = None

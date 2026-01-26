@@ -818,6 +818,8 @@ class VJingLayer(BaseVisualLayer):
             self._init_metaballs()
         if "smoke" in self.active_effects:
             self._init_smoke()
+        if "timestretch" in self.active_effects:
+            self._init_timestretch()
 
         # Initialize GPU renderer if enabled
         if self._pending_gpu_init:
@@ -1741,6 +1743,147 @@ class VJingLayer(BaseVisualLayer):
 
         # Update img
         img.paste(result, (0, 0))
+
+    def _init_timestretch(self) -> None:
+        """Initialize timestretch effect state.
+
+        Pre-computes break and drop detection for the entire track.
+        """
+        # Smooth energy for break/drop detection
+        window_size = int(self.fps * 0.5)  # 0.5 second window
+        self._smoothed_energy = np.convolve(
+            self.energy, np.ones(window_size) / window_size, mode="same"
+        )
+
+        # Compute energy derivative (rate of change)
+        self._energy_derivative = np.gradient(self._smoothed_energy)
+
+        # Detect breaks (sustained low energy) and drops (sudden high energy)
+        self._time_scale = np.ones(self.total_frames)
+        energy_threshold_low = 0.3
+        energy_threshold_high = 0.6
+        derivative_threshold = 0.02  # Sudden change threshold
+
+        for i in range(self.total_frames):
+            energy = self._smoothed_energy[i]
+            derivative = self._energy_derivative[i]
+
+            if energy < energy_threshold_low:
+                # Break: slow motion (scale 0.3 to 0.7)
+                self._time_scale[i] = 0.3 + energy * 1.3
+            elif derivative > derivative_threshold and energy > energy_threshold_high:
+                # Drop: speed up (scale 1.5 to 3.0)
+                self._time_scale[i] = 1.5 + derivative * 50
+            else:
+                # Normal: scale based on energy
+                self._time_scale[i] = 0.8 + energy * 0.4
+
+        # Clamp values
+        self._time_scale = np.clip(self._time_scale, 0.2, 3.0)
+
+        # Smooth the time scale to avoid jarring transitions
+        smooth_window = int(self.fps * 0.3)
+        self._time_scale = np.convolve(
+            self._time_scale, np.ones(smooth_window) / smooth_window, mode="same"
+        )
+
+        # Buffer for frame echoes
+        self._timestretch_buffer: list[Image.Image] = []
+        self._timestretch_accumulated_time = 0.0
+
+    def _render_timestretch(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render time-stretch visual effect.
+
+        Creates slow-motion trails during breaks and motion blur during drops.
+
+        Args:
+            img: Image to draw on.
+            frame_idx: Frame index.
+            time_pos: Time position in seconds.
+            ctx: Audio context dict.
+        """
+        draw = ImageDraw.Draw(img)
+        safe_idx = min(frame_idx, len(self._time_scale) - 1)
+        time_scale = self._time_scale[safe_idx]
+        energy = ctx["energy"]
+
+        # Get palette colors
+        colors = self.color_palette
+
+        if time_scale < 0.7:
+            # SLOW MOTION: Create echo/trail effect
+            # Store current frame in buffer
+            if len(self._timestretch_buffer) > 10:
+                self._timestretch_buffer.pop(0)
+            self._timestretch_buffer.append(img.copy())
+
+            # Draw previous frames with decreasing opacity
+            n_echoes = min(len(self._timestretch_buffer), int((1 - time_scale) * 8) + 2)
+            for i, echo in enumerate(reversed(self._timestretch_buffer[-n_echoes:])):
+                if i == 0:
+                    continue  # Skip current frame
+                alpha = int(150 * (1 - i / n_echoes) * self._current_intensity)
+                # Slight offset for each echo
+                offset_x = int(math.sin(time_pos * 2 + i) * 5 * (1 - time_scale))
+                offset_y = int(math.cos(time_pos * 2 + i) * 3 * (1 - time_scale))
+
+                echo_data = np.array(echo)
+                echo_data[:, :, 3] = np.clip(
+                    echo_data[:, :, 3] * (alpha / 255), 0, 255
+                ).astype(np.uint8)
+                echo_img = Image.fromarray(echo_data, "RGBA")
+                img.paste(echo_img, (offset_x, offset_y), echo_img)
+
+            # Draw slow-mo indicator lines
+            indicator_alpha = int(100 * self._current_intensity * (0.7 - time_scale))
+            color = (*colors[0], indicator_alpha)
+            for i in range(3):
+                y = self.height // 4 + i * self.height // 4
+                x_offset = int(math.sin(time_pos * 3 + i) * 50)
+                draw.line(
+                    [(0, y + x_offset), (self.width, y - x_offset)],
+                    fill=color,
+                    width=2,
+                )
+
+        elif time_scale > 1.3:
+            # SPEED UP: Motion blur / speed lines effect
+            self._timestretch_buffer.clear()
+
+            # Draw radial speed lines from center
+            cx, cy = self.width // 2, self.height // 2
+            n_lines = int(20 * (time_scale - 1) * self._current_intensity)
+
+            for i in range(n_lines):
+                angle = random.random() * math.pi * 2
+                inner_r = 50 + random.random() * 100
+                outer_r = inner_r + 100 + (time_scale - 1) * 200
+
+                x1 = cx + int(math.cos(angle) * inner_r)
+                y1 = cy + int(math.sin(angle) * inner_r)
+                x2 = cx + int(math.cos(angle) * outer_r)
+                y2 = cy + int(math.sin(angle) * outer_r)
+
+                alpha = int(180 * self._current_intensity * (time_scale - 1))
+                color_idx = i % len(colors)
+                color = (*colors[color_idx], alpha)
+
+                draw.line([(x1, y1), (x2, y2)], fill=color, width=2)
+
+            # Flash effect on high acceleration
+            if time_scale > 2.0:
+                flash_alpha = int(50 * (time_scale - 2.0) * self._current_intensity)
+                flash_color = (*colors[0], flash_alpha)
+                flash = Image.new("RGBA", (self.width, self.height), flash_color)
+                img.paste(flash, (0, 0), flash)
+
+        else:
+            # Normal speed: just maintain buffer
+            if len(self._timestretch_buffer) > 5:
+                self._timestretch_buffer.pop(0)
+            self._timestretch_buffer.append(img.copy())
 
     # ========================================================================
     # NATURE-INSPIRED EFFECTS
