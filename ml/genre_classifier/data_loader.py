@@ -296,17 +296,23 @@ def get_dataset_stats(db_path: Path | str = DEFAULT_DB_PATH) -> dict:
         "SELECT COUNT(*) FROM tracks WHERE genre IS NOT NULL AND genre != ''"
     ).fetchone()[0]
 
-    # Tracks with analysis
+    # Tracks with basic analysis (any entry in audio_analysis)
     tracks_with_analysis = conn.execute(
         "SELECT COUNT(*) FROM audio_analysis"
     ).fetchone()[0]
 
-    # Tracks with both (usable for training)
+    # Tracks with ML features (rms_mean is not null)
+    tracks_with_ml_features = conn.execute(
+        "SELECT COUNT(*) FROM audio_analysis WHERE rms_mean IS NOT NULL"
+    ).fetchone()[0]
+
+    # Tracks with both genre and ML features (usable for training)
     usable_tracks = conn.execute("""
         SELECT COUNT(*)
         FROM tracks t
         INNER JOIN audio_analysis a ON t.id = a.track_id
         WHERE t.genre IS NOT NULL AND t.genre != ''
+        AND a.rms_mean IS NOT NULL
     """).fetchone()[0]
 
     # Genre distribution (multi-label aware)
@@ -315,6 +321,7 @@ def get_dataset_stats(db_path: Path | str = DEFAULT_DB_PATH) -> dict:
         FROM tracks t
         INNER JOIN audio_analysis a ON t.id = a.track_id
         WHERE t.genre IS NOT NULL AND t.genre != ''
+        AND a.rms_mean IS NOT NULL
     """
     genre_dist: dict[str, int] = {}
     for row in conn.execute(genre_query):
@@ -328,6 +335,7 @@ def get_dataset_stats(db_path: Path | str = DEFAULT_DB_PATH) -> dict:
         "total_tracks": total_tracks,
         "tracks_with_genre": tracks_with_genre,
         "tracks_with_analysis": tracks_with_analysis,
+        "tracks_with_ml_features": tracks_with_ml_features,
         "usable_for_training": usable_tracks,
         "genre_distribution": dict(sorted(genre_dist.items(), key=lambda x: -x[1])),
         "unique_genres": len(genre_dist),

@@ -1,4 +1,4 @@
-.PHONY: help install test lint format type-check clean run sync
+.PHONY: help install test lint format type-check clean run sync analyze
 
 help:
 	@echo "Available commands:"
@@ -11,6 +11,7 @@ help:
 	@echo "  make clean        Clean build artifacts"
 	@echo "  make run          Run application"
 	@echo "  make ci           Run all CI checks"
+	@echo "  make analyze      Analyze tracks (extract ML features)"
 
 install:
 	uv sync --all-extras
@@ -46,3 +47,7 @@ run:
 # Run all CI checks locally
 ci: format lint type-check test
 	@echo "All CI checks passed!"
+
+# Analyze tracks (extract ML features for genre classification)
+analyze:
+	uv run python -m ml.genre_classifier.cli analyze -w 8
