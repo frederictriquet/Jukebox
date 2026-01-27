@@ -131,8 +131,12 @@ class ModeSwitcherPlugin:
             # Update track list display mode (jukebox: artist-title, curating: filename)
             main_window.track_list.set_mode(mode.value)
 
-            # Reload tracks for new mode
-            main_window._load_tracks_from_db()
+            # Reload tracks for new mode (apply search if active)
+            search_query = main_window.search_bar.text().strip()
+            if search_query:
+                main_window._perform_search(search_query)
+            else:
+                main_window._load_tracks_from_db()
 
             logging.info(f"Switched to {mode.value} mode")
 
