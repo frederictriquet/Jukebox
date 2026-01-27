@@ -37,6 +37,8 @@ class FrameRenderer:
         color_palette: str = "neon",
         audio_sensitivity: dict[str, float] | None = None,
         transitions_enabled: bool = True,
+        simultaneous_effects: int = 1,
+        use_all_effects: bool = False,
         intro_video_path: str = "",
     ) -> None:
         """Initialize frame renderer.
@@ -60,6 +62,8 @@ class FrameRenderer:
             color_palette: Name of color palette for VJing effects.
             audio_sensitivity: Per-band audio sensitivity {bass, mid, treble: 0.0-2.0}.
             transitions_enabled: Enable smooth transitions/cycling between effects.
+            simultaneous_effects: Number of VJing effects visible at the same time (1-10).
+            use_all_effects: Use all available VJing effects regardless of genre/preset.
             intro_video_path: Path to intro video to overlay on top (plays once).
         """
         self.width = width
@@ -79,6 +83,8 @@ class FrameRenderer:
         self.color_palette = color_palette
         self.audio_sensitivity = audio_sensitivity or {}
         self.transitions_enabled = transitions_enabled
+        self.simultaneous_effects = simultaneous_effects
+        self.use_all_effects = use_all_effects
         self.intro_video_path = intro_video_path
 
         # Initialize enabled layers
@@ -181,6 +187,8 @@ class FrameRenderer:
                     color_palette=self.color_palette,
                     audio_sensitivity=self.audio_sensitivity,
                     transitions_enabled=self.transitions_enabled,
+                    simultaneous_effects=self.simultaneous_effects,
+                    use_all_effects=self.use_all_effects,
                 )
                 self.layers.append(layer)
                 logging.info("[Frame Renderer] VJing layer enabled")

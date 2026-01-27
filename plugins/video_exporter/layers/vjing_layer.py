@@ -417,6 +417,8 @@ class VJingLayer(BaseVisualLayer):
         transitions_enabled: bool = True,
         transition_duration: float = 2.0,
         effect_cycle_duration: float = 8.0,
+        simultaneous_effects: int = 1,
+        use_all_effects: bool = False,
         use_gpu: bool = True,
         **kwargs: Any,
     ) -> None:
@@ -440,6 +442,8 @@ class VJingLayer(BaseVisualLayer):
             transitions_enabled: Enable smooth transitions between effects.
             transition_duration: Duration of fade transition in seconds.
             effect_cycle_duration: How long each effect is prominently visible.
+            simultaneous_effects: Number of effects visible at the same time (1 to 10).
+            use_all_effects: If True, use all available effects regardless of genre/preset.
             use_gpu: Enable GPU-accelerated shaders when available.
             **kwargs: Additional parameters.
         """
@@ -462,6 +466,8 @@ class VJingLayer(BaseVisualLayer):
         self.transitions_enabled = transitions_enabled
         self.transition_duration = transition_duration
         self.effect_cycle_duration = effect_cycle_duration
+        self.simultaneous_effects = max(1, min(10, simultaneous_effects))
+        self.use_all_effects = use_all_effects
         self.use_gpu = use_gpu
         self._gpu_renderer: GPUShaderRenderer | None = None
         # Cache for pre-rendered GPU frames: {frame_idx: {effect_name: Image}}
@@ -474,6 +480,8 @@ class VJingLayer(BaseVisualLayer):
         }
 
         logging.info(f"[VJingLayer] Initializing with genre='{genre}', preset='{preset}'")
+        logging.info(f"[VJingLayer] Simultaneous effects: {self.simultaneous_effects}")
+        logging.info(f"[VJingLayer] Use all effects: {self.use_all_effects}")
         logging.debug(f"[VJingLayer] Effect mappings: {self.effect_mappings}")
 
         # Determine which effects to use based on preset or genre
@@ -482,7 +490,7 @@ class VJingLayer(BaseVisualLayer):
         # Randomize effect order for variety
         random.shuffle(self.active_effects)
 
-        logging.info(f"[VJingLayer] Active effects (randomized): {self.active_effects}")
+        logging.info(f"[VJingLayer] Active effects ({len(self.active_effects)}): {self.active_effects}")
 
         # Initialize LFOs for parameter modulation
         self._init_lfos()
@@ -695,12 +703,18 @@ class VJingLayer(BaseVisualLayer):
     def _determine_effects(self) -> list[str]:
         """Determine which effects to use based on preset or genre.
 
+        If use_all_effects is True, use all available effects.
         If a preset is selected, use its effects directly.
         Otherwise, determine effects from genre letters using mappings.
 
         Returns:
             List of effect names (unique).
         """
+        # If use_all_effects is enabled, return all available effects
+        if self.use_all_effects:
+            logging.info(f"[VJingLayer] Using ALL effects ({len(self.AVAILABLE_EFFECTS)})")
+            return list(self.AVAILABLE_EFFECTS)
+
         # If a preset is selected, use its effects
         if self.preset and self.preset in self.presets:
             effects = self.presets[self.preset]
@@ -986,9 +1000,8 @@ class VJingLayer(BaseVisualLayer):
     def _calculate_effect_alpha(self, effect_idx: int, time_pos: float) -> float:
         """Calculate alpha multiplier for crossfade between effects.
 
-        At any time, one effect is "dominant" (the one whose window contains time_pos).
-        During the transition period at the end of each window, the dominant effect
-        fades out while the next effect fades in.
+        Supports multiple simultaneous effects. At any time, `simultaneous_effects`
+        effects are visible, cycling through the list with smooth transitions.
 
         Args:
             effect_idx: Index of the effect in active_effects.
@@ -1001,37 +1014,54 @@ class VJingLayer(BaseVisualLayer):
         if num_effects <= 1:
             return 1.0
 
-        cycle = self.effect_cycle_duration
-        total_cycle = cycle * num_effects
-        fade = self.transition_duration
+        # If we want more simultaneous effects than available, show all at full intensity
+        if self.simultaneous_effects >= num_effects:
+            return 1.0  # All effects visible at full intensity
 
+        cycle = self.effect_cycle_duration
+        fade = self.transition_duration
+        num_simultaneous = self.simultaneous_effects
+
+        # Total cycle = time for all effects to rotate through
+        total_cycle = cycle * num_effects
         t = time_pos % total_cycle
 
-        # Which effect is dominant (whose window contains t)?
-        dominant_idx = int(t / cycle) % num_effects
-        # Position within the dominant effect's window
+        # Calculate which "slot" is currently the primary (oldest visible effect)
+        primary_slot = int(t / cycle) % num_effects
         pos_in_window = t % cycle
 
-        # Are we in the transition period (end of window)?
-        if pos_in_window >= cycle - fade:
-            # Transition period - crossfade between dominant and next
-            transition_progress = (pos_in_window - (cycle - fade)) / fade  # 0 to 1
-            next_idx = (dominant_idx + 1) % num_effects
+        # Determine if this effect is in one of the visible slots
+        # Visible slots are: primary_slot, primary_slot+1, ..., primary_slot+(num_simultaneous-1)
+        for slot_offset in range(num_simultaneous):
+            slot_idx = (primary_slot + slot_offset) % num_effects
 
-            if effect_idx == dominant_idx:
-                # Outgoing effect
-                return 1.0 - transition_progress
-            elif effect_idx == next_idx:
-                # Incoming effect
+            if effect_idx == slot_idx:
+                # This effect is in a visible slot - full intensity
+                # Check if we're in a transition period
+                if pos_in_window >= cycle - fade:
+                    # Transition period
+                    transition_progress = (pos_in_window - (cycle - fade)) / fade
+
+                    if slot_offset == 0:
+                        # Oldest effect (primary) - fading out
+                        return 1.0 - transition_progress
+                    else:
+                        # Other visible effects stay at full intensity
+                        return 1.0
+                else:
+                    # Not in transition - full intensity
+                    return 1.0
+
+        # Check if this effect is the incoming one during transition
+        if pos_in_window >= cycle - fade:
+            next_slot_idx = (primary_slot + num_simultaneous) % num_effects
+            if effect_idx == next_slot_idx:
+                # Incoming effect - fading in
+                transition_progress = (pos_in_window - (cycle - fade)) / fade
                 return transition_progress
-            else:
-                return 0.0
-        else:
-            # No transition - only dominant effect is visible
-            if effect_idx == dominant_idx:
-                return 1.0
-            else:
-                return 0.0
+
+        # Effect is not visible
+        return 0.0
 
     def _render_with_transitions(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict

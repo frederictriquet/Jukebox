@@ -128,6 +128,8 @@ class VideoExportWorker(QThread):
                 color_palette=self.config.get("color_palette", "neon"),
                 audio_sensitivity=self.config.get("audio_sensitivity", {}),
                 transitions_enabled=self.config.get("transitions_enabled", True),
+                simultaneous_effects=self.config.get("simultaneous_effects", 1),
+                use_all_effects=self.config.get("use_all_effects", False),
                 intro_video_path=self.config.get("intro_video_path", ""),
             )
         except Exception as e:

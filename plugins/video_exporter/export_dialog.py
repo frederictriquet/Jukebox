@@ -662,14 +662,24 @@ class ExportDialog(QDialog):
         palette_layout.addStretch()
         layers_layout.addLayout(palette_layout)
 
-        # Transitions toggle
-        self.transitions_check = QCheckBox("    Transitions (cycle entre effets avec fade)")
-        self.transitions_check.setChecked(True)  # Default: enabled
-        self.transitions_check.setToolTip(
-            "Activé: les effets s'affichent un par un avec crossfade\n"
-            "Désactivé: tous les effets sont superposés simultanément"
+        # Simultaneous effects selector
+        simultaneous_layout = QHBoxLayout()
+        simultaneous_layout.addWidget(QLabel("    Simultanés:"))
+        self.simultaneous_effects_spin = QSpinBox()
+        self.simultaneous_effects_spin.setRange(1, 10)
+        self.simultaneous_effects_spin.setValue(1)
+        self.simultaneous_effects_spin.setToolTip(
+            "Nombre d'effets visibles en même temps (1 = un seul effet à la fois)"
         )
-        layers_layout.addWidget(self.transitions_check)
+        simultaneous_layout.addWidget(self.simultaneous_effects_spin)
+        self.use_all_effects_check = QCheckBox("Tous (30 effets)")
+        self.use_all_effects_check.setChecked(False)
+        self.use_all_effects_check.setToolTip(
+            "Utiliser les 30 effets disponibles au lieu de ceux définis par le genre"
+        )
+        simultaneous_layout.addWidget(self.use_all_effects_check)
+        simultaneous_layout.addStretch()
+        layers_layout.addLayout(simultaneous_layout)
 
         self.video_bg_check = QCheckBox("Video Background")
         layers_layout.addWidget(self.video_bg_check)
@@ -1072,7 +1082,9 @@ class ExportDialog(QDialog):
                 effect_intensities=self._get_effect_intensities(),
                 color_palette=self.color_palette_combo.currentData(),
                 audio_sensitivity=self._get_audio_sensitivity(),
-                transitions_enabled=self.transitions_check.isChecked(),
+                transitions_enabled=True,
+                simultaneous_effects=self.simultaneous_effects_spin.value(),
+                use_all_effects=self.use_all_effects_check.isChecked(),
             )
 
             # Update UI
@@ -1315,7 +1327,11 @@ class ExportDialog(QDialog):
             # Audio sensitivity
             "audio_sensitivity": self._get_audio_sensitivity(),
             # Transitions
-            "transitions_enabled": self.transitions_check.isChecked(),
+            "transitions_enabled": True,
+            # Simultaneous effects
+            "simultaneous_effects": self.simultaneous_effects_spin.value(),
+            # Use all effects
+            "use_all_effects": self.use_all_effects_check.isChecked(),
             # Fade in/out
             "fade_duration": self.fade_spin.value(),
             # Intro video overlay

@@ -201,6 +201,8 @@ class VideoExporterConfig(BaseModel):
     # VJing presets (predefined effect combinations)
     vjing_presets: list[VJingPresetConfig] = []
     vjing_default_preset: str = ""  # Empty = use genre mappings
+    # VJing simultaneous effects (how many effects are visible at once)
+    vjing_simultaneous_effects: int = Field(ge=1, le=10, default=1)
 
 
 class PluginsConfig(BaseModel):
