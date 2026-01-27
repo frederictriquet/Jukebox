@@ -100,8 +100,24 @@ class WaveformVisualizerPlugin:
             self.waveform_widget.set_position(position)
 
     def _on_seek_requested(self, position: float) -> None:
-        """Handle seek request from waveform click."""
-        self.context.player.set_position(position)
+        """Handle seek request from waveform click.
+
+        If the player is stopped, start playback first then seek.
+        """
+        player = self.context.player
+        if not player.current_file:
+            return
+
+        was_playing = player.is_playing()
+
+        if not was_playing:
+            # Must start playback first, then seek (VLC ignores seek when stopped)
+            player.play()
+            # Small delay to let VLC start, then seek
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(50, lambda: player.set_position(position))
+        else:
+            player.set_position(position)
 
     def _on_track_loaded(self, track_id: int) -> None:
         """Display waveform from cache, or add to priority queue if not cached."""

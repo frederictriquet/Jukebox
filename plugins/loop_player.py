@@ -282,6 +282,14 @@ class LoopPlayerPlugin:
         # Update visual region
         self._update_loop_region()
 
+        # Notify other plugins of the new loop position
+        self.context.emit(
+            Events.LOOP_ACTIVATED,
+            loop_start=self.loop_start,
+            loop_end=self.loop_end,
+            filepath=player.current_file,
+        )
+
         logging.debug(f"[Loop Player] Loop moved to {self.loop_start:.2f}s - {self.loop_end:.2f}s")
 
     def _move_loop_coarse_forward(self) -> None:

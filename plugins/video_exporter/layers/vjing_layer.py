@@ -1763,23 +1763,23 @@ class VJingLayer(BaseVisualLayer):
 
         # Detect breaks (sustained low energy) and drops (sudden high energy)
         self._time_scale = np.ones(self.total_frames)
-        energy_threshold_low = 0.3
-        energy_threshold_high = 0.6
-        derivative_threshold = 0.02  # Sudden change threshold
+        energy_threshold_low = 0.4  # More sensitive to breaks
+        energy_threshold_high = 0.5  # More sensitive to drops
+        derivative_threshold = 0.01  # More sensitive to changes
 
         for i in range(self.total_frames):
             energy = self._smoothed_energy[i]
             derivative = self._energy_derivative[i]
 
             if energy < energy_threshold_low:
-                # Break: slow motion (scale 0.3 to 0.7)
-                self._time_scale[i] = 0.3 + energy * 1.3
+                # Break: slow motion (scale 0.2 to 0.6)
+                self._time_scale[i] = 0.2 + energy * 1.0
             elif derivative > derivative_threshold and energy > energy_threshold_high:
                 # Drop: speed up (scale 1.5 to 3.0)
-                self._time_scale[i] = 1.5 + derivative * 50
+                self._time_scale[i] = 1.5 + derivative * 75
             else:
-                # Normal: scale based on energy
-                self._time_scale[i] = 0.8 + energy * 0.4
+                # Normal: scale based on energy (more variation)
+                self._time_scale[i] = 0.7 + energy * 0.6
 
         # Clamp values
         self._time_scale = np.clip(self._time_scale, 0.2, 3.0)
@@ -1823,11 +1823,11 @@ class VJingLayer(BaseVisualLayer):
             self._timestretch_buffer.append(img.copy())
 
             # Draw previous frames with decreasing opacity
-            n_echoes = min(len(self._timestretch_buffer), int((1 - time_scale) * 8) + 2)
+            n_echoes = min(len(self._timestretch_buffer), int((1 - time_scale) * 12) + 3)
             for i, echo in enumerate(reversed(self._timestretch_buffer[-n_echoes:])):
                 if i == 0:
                     continue  # Skip current frame
-                alpha = int(150 * (1 - i / n_echoes) * self._current_intensity)
+                alpha = int(200 * (1 - i / n_echoes) * self._current_intensity)
                 # Slight offset for each echo
                 offset_x = int(math.sin(time_pos * 2 + i) * 5 * (1 - time_scale))
                 offset_y = int(math.cos(time_pos * 2 + i) * 3 * (1 - time_scale))
@@ -1839,16 +1839,16 @@ class VJingLayer(BaseVisualLayer):
                 echo_img = Image.fromarray(echo_data, "RGBA")
                 img.paste(echo_img, (offset_x, offset_y), echo_img)
 
-            # Draw slow-mo indicator lines
-            indicator_alpha = int(100 * self._current_intensity * (0.7 - time_scale))
-            color = (*colors[0], indicator_alpha)
-            for i in range(3):
-                y = self.height // 4 + i * self.height // 4
-                x_offset = int(math.sin(time_pos * 3 + i) * 50)
+            # Draw slow-mo indicator lines (horizontal streaks)
+            indicator_alpha = int(180 * self._current_intensity * (0.7 - time_scale))
+            for i in range(5):
+                y = self.height // 6 + i * self.height // 5
+                x_offset = int(math.sin(time_pos * 3 + i) * 80)
+                color = (*colors[i % len(colors)], indicator_alpha)
                 draw.line(
                     [(0, y + x_offset), (self.width, y - x_offset)],
                     fill=color,
-                    width=2,
+                    width=4,
                 )
 
         elif time_scale > 1.3:
@@ -1857,28 +1857,28 @@ class VJingLayer(BaseVisualLayer):
 
             # Draw radial speed lines from center
             cx, cy = self.width // 2, self.height // 2
-            n_lines = int(20 * (time_scale - 1) * self._current_intensity)
+            n_lines = int(40 * (time_scale - 1) * self._current_intensity)
 
             for i in range(n_lines):
                 angle = random.random() * math.pi * 2
-                inner_r = 50 + random.random() * 100
-                outer_r = inner_r + 100 + (time_scale - 1) * 200
+                inner_r = 30 + random.random() * 80
+                outer_r = inner_r + 150 + (time_scale - 1) * 300
 
                 x1 = cx + int(math.cos(angle) * inner_r)
                 y1 = cy + int(math.sin(angle) * inner_r)
                 x2 = cx + int(math.cos(angle) * outer_r)
                 y2 = cy + int(math.sin(angle) * outer_r)
 
-                alpha = int(180 * self._current_intensity * (time_scale - 1))
+                alpha = int(220 * self._current_intensity * (time_scale - 1))
                 color_idx = i % len(colors)
-                color = (*colors[color_idx], alpha)
+                color = (*colors[color_idx], min(alpha, 255))
 
-                draw.line([(x1, y1), (x2, y2)], fill=color, width=2)
+                draw.line([(x1, y1), (x2, y2)], fill=color, width=3)
 
             # Flash effect on high acceleration
-            if time_scale > 2.0:
-                flash_alpha = int(50 * (time_scale - 2.0) * self._current_intensity)
-                flash_color = (*colors[0], flash_alpha)
+            if time_scale > 1.8:
+                flash_alpha = int(80 * (time_scale - 1.8) * self._current_intensity)
+                flash_color = (*colors[0], min(flash_alpha, 150))
                 flash = Image.new("RGBA", (self.width, self.height), flash_color)
                 img.paste(flash, (0, 0), flash)
 

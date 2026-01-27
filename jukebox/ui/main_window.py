@@ -154,6 +154,7 @@ class MainWindow(QMainWindow):
 
         # Player feedback
         self.player.volume_changed.connect(self.controls.set_volume)
+        self.player.state_changed.connect(self._on_player_state_changed)
 
     def _register_shortcuts(self) -> None:
         """Register default keyboard shortcuts."""
@@ -466,6 +467,16 @@ class MainWindow(QMainWindow):
         self.position_timer.stop()
         # Emit for plugins (waveform cursor)
         self.event_bus.emit(Events.POSITION_UPDATE, position=0.0)
+
+    def _on_player_state_changed(self, state: str) -> None:
+        """Handle player state changes (from any source, including plugins)."""
+        if state == "playing":
+            if not self.position_timer.isActive():
+                self.position_timer.start()
+        elif state in ("paused", "stopped"):
+            self.position_timer.stop()
+            if state == "stopped":
+                self.event_bus.emit(Events.POSITION_UPDATE, position=0.0)
 
     def _update_position(self) -> None:
         """Update position based on player position."""
