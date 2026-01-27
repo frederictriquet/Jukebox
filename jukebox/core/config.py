@@ -142,7 +142,6 @@ class FileManagerConfig(BaseModel):
     trash_key: str = "Delete"
 
 
-
 class VJingEffectMappingConfig(BaseModel):
     """Configuration for VJing effect mapping by genre letter."""
 
@@ -202,6 +201,7 @@ class VideoExporterConfig(BaseModel):
     # VJing presets (predefined effect combinations)
     vjing_presets: list[VJingPresetConfig] = []
     vjing_default_preset: str = ""  # Empty = use genre mappings
+
 
 class PluginsConfig(BaseModel):
     """Plugins configuration."""

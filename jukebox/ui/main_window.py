@@ -593,11 +593,12 @@ class MainWindow(QMainWindow):
         """Handle mode change - reload track list for new mode.
 
         Note: Most mode change logic is handled by mode_switcher plugin.
-        This handler is for cases where mode_manager is used without the plugin.
+        This handler provides minimal functionality when the plugin is not loaded.
 
         Args:
             mode: New application mode
         """
-        # Only reload if mode_switcher plugin hasn't already done it
-        # (mode_switcher calls _load_tracks_from_db directly)
-        pass
+        # Only act if mode_switcher plugin is not loaded
+        if "mode_switcher" not in self.plugin_manager.plugins:
+            logging.info(f"[MainWindow] Mode changed to {mode.value} (no mode_switcher plugin)")
+            self._load_tracks_from_db()

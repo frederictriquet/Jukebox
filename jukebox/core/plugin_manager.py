@@ -81,6 +81,57 @@ class PluginContext:
         if self.event_bus:
             self.event_bus.subscribe(event, callback)
 
+    def get_setting(
+        self,
+        plugin_name: str,
+        key: str,
+        value_type: type,
+        default: Any = None,
+    ) -> Any:
+        """Get a plugin setting with automatic type conversion.
+
+        Retrieves a setting from the database and converts it to the specified type.
+        Handles errors gracefully by returning the default value.
+
+        Args:
+            plugin_name: Name of the plugin.
+            key: Setting key.
+            value_type: Target type (int, float, bool, str).
+            default: Default value if setting not found or conversion fails.
+
+        Returns:
+            The setting value converted to value_type, or default on failure.
+        """
+        value = self.database.settings.get(plugin_name, key)
+
+        if value is None:
+            return default
+
+        try:
+            if value_type is bool:
+                return value.lower() in ("true", "1", "yes")
+            return value_type(value)
+        except (ValueError, AttributeError):
+            logging.warning(f"[{plugin_name}] Invalid {key} value: {value}, using default")
+            return default
+
+    def get_current_track_duration(self) -> float | None:
+        """Get the duration of the currently loaded track.
+
+        Convenience method that retrieves the current track from database
+        and returns its duration.
+
+        Returns:
+            Duration in seconds, or None if no track loaded or duration unavailable.
+        """
+        if not self.player.current_file:
+            return None
+        track = self.database.tracks.get_by_filepath(self.player.current_file)
+        if not track or not track["duration_seconds"]:
+            return None
+        duration: float = track["duration_seconds"]
+        return duration
+
 
 class PluginManager:
     """Manage plugins lifecycle."""

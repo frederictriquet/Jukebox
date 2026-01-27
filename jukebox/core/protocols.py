@@ -300,3 +300,17 @@ class PluginContextProtocol(Protocol):
 
     def emit(self, event: str, **data: Any) -> None: ...
     def subscribe(self, event: str, callback: Callable[..., None]) -> None: ...
+
+    def get_setting(
+        self,
+        plugin_name: str,
+        key: str,
+        value_type: type,
+        default: Any = None,
+    ) -> Any:
+        """Get a plugin setting with automatic type conversion."""
+        ...
+
+    def get_current_track_duration(self) -> float | None:
+        """Get the duration of the currently loaded track."""
+        ...

@@ -133,16 +133,7 @@ class VideoExporterPlugin:
         """Reload config when settings change."""
         logging.info("[Video Exporter] Settings changed, reloading config from database")
 
-        db = self.context.database
         config = self.context.config.video_exporter
-
-        # Helper to get setting from DB
-        def get_setting(key: str) -> str | None:
-            result = db.conn.execute(
-                "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
-                ("video_exporter", key),
-            ).fetchone()
-            return result["setting_value"] if result else None
 
         # Reload string settings
         for key in (
@@ -154,28 +145,21 @@ class VideoExporterPlugin:
             "waveform_treble_color",
             "waveform_cursor_color",
         ):
-            value = get_setting(key)
-            if value is not None:
-                setattr(config, key, value)
-                logging.debug(f"[Video Exporter] {key}: {value}")
+            value = self.context.get_setting("video_exporter", key, str, getattr(config, key))
+            setattr(config, key, value)
+            logging.debug(f"[Video Exporter] {key}: {value}")
 
         # Reload int settings
-        value = get_setting("default_fps")
-        if value is not None:
-            try:
-                config.default_fps = int(float(value))
-                logging.debug(f"[Video Exporter] default_fps: {config.default_fps}")
-            except ValueError:
-                logging.error(f"[Video Exporter] Invalid default_fps value: {value}")
+        config.default_fps = self.context.get_setting(
+            "video_exporter", "default_fps", int, config.default_fps
+        )
+        logging.debug(f"[Video Exporter] default_fps: {config.default_fps}")
 
         # Reload float settings
-        value = get_setting("waveform_height_ratio")
-        if value is not None:
-            try:
-                config.waveform_height_ratio = float(value)
-                logging.debug(f"[Video Exporter] waveform_height_ratio: {config.waveform_height_ratio}")
-            except ValueError:
-                logging.error(f"[Video Exporter] Invalid waveform_height_ratio value: {value}")
+        config.waveform_height_ratio = self.context.get_setting(
+            "video_exporter", "waveform_height_ratio", float, config.waveform_height_ratio
+        )
+        logging.debug(f"[Video Exporter] waveform_height_ratio: {config.waveform_height_ratio}")
 
         # Reload boolean settings
         for key in (
@@ -185,11 +169,9 @@ class VideoExporterPlugin:
             "vjing_enabled",
             "video_background_enabled",
         ):
-            value = get_setting(key)
-            if value is not None:
-                bool_value = value.lower() in ("true", "1", "yes")
-                setattr(config, key, bool_value)
-                logging.debug(f"[Video Exporter] {key}: {bool_value}")
+            value = self.context.get_setting("video_exporter", key, bool, getattr(config, key))
+            setattr(config, key, value)
+            logging.debug(f"[Video Exporter] {key}: {value}")
 
     def _show_export_dialog(self) -> None:
         """Show the export configuration dialog."""
@@ -237,7 +219,15 @@ class VideoExporterPlugin:
             "default_resolution": {
                 "label": "Default Resolution",
                 "type": "choice",
-                "options": ["1080p", "720p", "square_1080", "square_720", "vertical", "instagram", "instagram_full"],
+                "options": [
+                    "1080p",
+                    "720p",
+                    "square_1080",
+                    "square_720",
+                    "vertical",
+                    "instagram",
+                    "instagram_full",
+                ],
                 "default": self.context.config.video_exporter.default_resolution,
             },
             "default_fps": {

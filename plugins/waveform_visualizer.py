@@ -115,6 +115,7 @@ class WaveformVisualizerPlugin:
             player.play()
             # Small delay to let VLC start, then seek
             from PySide6.QtCore import QTimer
+
             QTimer.singleShot(50, lambda: player.set_position(position))
         else:
             player.set_position(position)
@@ -324,38 +325,22 @@ class WaveformVisualizerPlugin:
         """Reload config when settings change."""
         logging.info("[Waveform] Settings changed, reloading config from database")
 
-        db = self.context.database
         config = self.context.config.waveform
 
-        # Helper to get setting from DB
-        def get_setting(key: str) -> str | None:
-            result = db.conn.execute(
-                "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
-                ("waveform_visualizer", key),
-            ).fetchone()
-            return result["setting_value"] if result else None
-
         # Reload chunk_duration
-        value = get_setting("chunk_duration")
-        if value is not None:
-            try:
-                config.chunk_duration = int(float(value))
-                logging.debug(f"[Waveform] chunk_duration: {config.chunk_duration}")
-            except ValueError:
-                logging.error(f"[Waveform] Invalid chunk_duration value: {value}")
+        config.chunk_duration = self.context.get_setting(
+            "waveform_visualizer", "chunk_duration", int, config.chunk_duration
+        )
+        logging.debug(f"[Waveform] chunk_duration: {config.chunk_duration}")
 
         # Reload height
-        value = get_setting("height")
-        if value is not None:
-            try:
-                new_height = int(float(value))
-                config.height = new_height
-                logging.debug(f"[Waveform] height: {config.height}")
-                # Update widget height if it exists
-                if self.waveform_widget:
-                    self.waveform_widget.setFixedHeight(new_height)
-            except ValueError:
-                logging.error(f"[Waveform] Invalid height value: {value}")
+        new_height = self.context.get_setting("waveform_visualizer", "height", int, config.height)
+        if new_height != config.height:
+            config.height = new_height
+            logging.debug(f"[Waveform] height: {config.height}")
+            # Update widget height if it exists
+            if self.waveform_widget:
+                self.waveform_widget.setFixedHeight(new_height)
 
     def get_settings_schema(self) -> dict[str, Any]:
         """Return settings schema for configuration UI.

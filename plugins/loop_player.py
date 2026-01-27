@@ -122,16 +122,13 @@ class LoopPlayerPlugin:
                     self.loop_button.setChecked(False)
                 return
 
-            # Get track duration from database
-            track = self.context.database.tracks.get_by_filepath(player.current_file)
-
-            if not track or not track["duration_seconds"]:
+            # Get track duration
+            track_duration = self.context.get_current_track_duration()
+            if not track_duration:
                 logging.warning("[Loop Player] Cannot get track duration")
                 if self.loop_button:
                     self.loop_button.setChecked(False)
                 return
-
-            track_duration = track["duration_seconds"]
 
             # Get current position in seconds
             loop_duration = self.context.config.loop_player.duration
@@ -187,13 +184,11 @@ class LoopPlayerPlugin:
         if not player.is_playing():
             return
 
-        # Get track duration from database
-        track = self.context.database.tracks.get_by_filepath(player.current_file)
-
-        if not track or not track["duration_seconds"]:
+        # Get track duration
+        track_duration = self.context.get_current_track_duration()
+        if not track_duration:
             return
 
-        track_duration = track["duration_seconds"]
         current_pos = player.get_position() * track_duration
 
         # If we've passed the loop end, jump back to loop start
@@ -209,18 +204,16 @@ class LoopPlayerPlugin:
         try:
             import pyqtgraph as pg
 
-            # Convert seconds to waveform x coordinates
-            player = self.context.player
-            track = self.context.database.tracks.get_by_filepath(player.current_file)
-
-            if not track or not track["duration_seconds"]:
+            # Get track duration
+            track_duration = self.context.get_current_track_duration()
+            if not track_duration:
                 return
 
-            track_duration = track["duration_seconds"]
             waveform_length = self.waveform_widget.expected_length
             if waveform_length <= 0:
                 return
 
+            # Convert seconds to waveform x coordinates
             x_start = (self.loop_start / track_duration) * waveform_length
             x_end = (self.loop_end / track_duration) * waveform_length
 
@@ -257,11 +250,10 @@ class LoopPlayerPlugin:
         if not player.current_file:
             return
 
-        track = self.context.database.tracks.get_by_filepath(player.current_file)
-        if not track or not track["duration_seconds"]:
+        track_duration = self.context.get_current_track_duration()
+        if not track_duration:
             return
 
-        track_duration = track["duration_seconds"]
         loop_duration = self.loop_end - self.loop_start
 
         # Calculate new positions
@@ -318,13 +310,10 @@ class LoopPlayerPlugin:
             return
 
         try:
-            player = self.context.player
-            track = self.context.database.tracks.get_by_filepath(player.current_file)
-
-            if not track or not track["duration_seconds"]:
+            track_duration = self.context.get_current_track_duration()
+            if not track_duration:
                 return
 
-            track_duration = track["duration_seconds"]
             waveform_length = self.waveform_widget.expected_length
             if waveform_length <= 0:
                 return
@@ -376,59 +365,28 @@ class LoopPlayerPlugin:
         """Reload config when settings change."""
         logging.info("[Loop Player] Settings changed, reloading config from database")
 
-        db = self.context.database
+        config = self.context.config.loop_player
 
         # Reload duration setting
-        duration_setting = db.conn.execute(
-            "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
-            ("loop_player", "duration"),
-        ).fetchone()
+        duration = self.context.get_setting("loop_player", "duration", float, config.duration)
+        config.duration = duration
+        logging.debug(f"[Loop Player] Loop duration: {duration}s")
 
-        if duration_setting:
-            try:
-                duration = float(duration_setting["setting_value"])
-                self.context.config.loop_player.duration = duration
-                logging.info(f"[Loop Player] Loop duration: {duration}s")
-
-                # Update button tooltip if button exists
-                if self.loop_button:
-                    self.loop_button.setToolTip(f"Loop section ({duration}s from current position)")
-            except ValueError:
-                logging.error(
-                    f"[Loop Player] Invalid duration value: {duration_setting['setting_value']}"
-                )
+        # Update button tooltip if button exists
+        if self.loop_button:
+            self.loop_button.setToolTip(f"Loop section ({duration}s from current position)")
 
         # Reload coarse_step setting
-        coarse_setting = db.conn.execute(
-            "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
-            ("loop_player", "coarse_step"),
-        ).fetchone()
-
-        if coarse_setting:
-            try:
-                coarse_step = float(coarse_setting["setting_value"])
-                self.context.config.loop_player.coarse_step = coarse_step
-                logging.info(f"[Loop Player] Coarse step: {coarse_step}s")
-            except ValueError:
-                logging.error(
-                    f"[Loop Player] Invalid coarse_step value: {coarse_setting['setting_value']}"
-                )
+        config.coarse_step = self.context.get_setting(
+            "loop_player", "coarse_step", float, config.coarse_step
+        )
+        logging.debug(f"[Loop Player] Coarse step: {config.coarse_step}s")
 
         # Reload fine_step setting
-        fine_setting = db.conn.execute(
-            "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
-            ("loop_player", "fine_step"),
-        ).fetchone()
-
-        if fine_setting:
-            try:
-                fine_step = float(fine_setting["setting_value"])
-                self.context.config.loop_player.fine_step = fine_step
-                logging.info(f"[Loop Player] Fine step: {fine_step}s")
-            except ValueError:
-                logging.error(
-                    f"[Loop Player] Invalid fine_step value: {fine_setting['setting_value']}"
-                )
+        config.fine_step = self.context.get_setting(
+            "loop_player", "fine_step", float, config.fine_step
+        )
+        logging.debug(f"[Loop Player] Fine step: {config.fine_step}s")
 
     def get_settings_schema(self) -> dict[str, Any]:
         """Return settings schema for configuration UI.

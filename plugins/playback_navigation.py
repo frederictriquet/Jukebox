@@ -178,12 +178,7 @@ class PlaybackNavigationPlugin:
         Returns:
             Duration in seconds or None
         """
-        current_file = self.context.player.current_file
-        if not current_file:
-            return None
-
-        track = self.context.database.tracks.get_by_filepath(current_file)
-        return track["duration_seconds"] if track else None
+        return self.context.get_current_track_duration()
 
     def _next_track(self) -> None:
         """Play next track in list."""
@@ -269,51 +264,31 @@ class PlaybackNavigationPlugin:
         """Reload config when settings change."""
         logging.info("[Playback Navigation] Settings changed, reloading config from database")
 
-        db = self.context.database
         config = self.context.config.playback_navigation
 
-        # Helper to get setting from DB
-        def get_setting(key: str) -> str | None:
-            result = db.conn.execute(
-                "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
-                ("playback_navigation", key),
-            ).fetchone()
-            return result["setting_value"] if result else None
-
         # Reload seek_amount
-        value = get_setting("seek_amount")
-        if value is not None:
-            try:
-                config.seek_amount = int(float(value))
-                logging.debug(f"[Playback Navigation] seek_amount: {config.seek_amount}")
-            except ValueError:
-                logging.error(f"[Playback Navigation] Invalid seek_amount value: {value}")
+        config.seek_amount = self.context.get_setting(
+            "playback_navigation", "seek_amount", int, config.seek_amount
+        )
+        logging.debug(f"[Playback Navigation] seek_amount: {config.seek_amount}")
 
-        # Reload rapid_press_threshold (stored in ms, config is in seconds)
-        value = get_setting("rapid_press_threshold")
-        if value is not None:
-            try:
-                config.rapid_press_threshold = int(float(value)) / 1000.0
-                logging.debug(
-                    f"[Playback Navigation] rapid_press_threshold: {config.rapid_press_threshold}"
-                )
-            except ValueError:
-                logging.error(
-                    f"[Playback Navigation] Invalid rapid_press_threshold value: {value}"
-                )
+        # Reload rapid_press_threshold (stored in ms in DB, config expects seconds)
+        threshold_ms = self.context.get_setting(
+            "playback_navigation",
+            "rapid_press_threshold",
+            int,
+            int(config.rapid_press_threshold * 1000),
+        )
+        config.rapid_press_threshold = threshold_ms / 1000.0
+        logging.debug(
+            f"[Playback Navigation] rapid_press_threshold: {config.rapid_press_threshold}"
+        )
 
         # Reload max_seek_multiplier
-        value = get_setting("max_seek_multiplier")
-        if value is not None:
-            try:
-                config.max_seek_multiplier = int(float(value))
-                logging.debug(
-                    f"[Playback Navigation] max_seek_multiplier: {config.max_seek_multiplier}"
-                )
-            except ValueError:
-                logging.error(
-                    f"[Playback Navigation] Invalid max_seek_multiplier value: {value}"
-                )
+        config.max_seek_multiplier = self.context.get_setting(
+            "playback_navigation", "max_seek_multiplier", int, config.max_seek_multiplier
+        )
+        logging.debug(f"[Playback Navigation] max_seek_multiplier: {config.max_seek_multiplier}")
 
     def get_settings_schema(self) -> dict[str, Any]:
         """Return settings schema for configuration UI.
@@ -336,7 +311,9 @@ class PlaybackNavigationPlugin:
                 "min": 100,
                 "max": 2000,
                 "suffix": " ms",
-                "default": int(self.context.config.playback_navigation.rapid_press_threshold * 1000),
+                "default": int(
+                    self.context.config.playback_navigation.rapid_press_threshold * 1000
+                ),
             },
             "max_seek_multiplier": {
                 "label": "Max Seek Multiplier",
