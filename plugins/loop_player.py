@@ -43,6 +43,9 @@ class LoopPlayerPlugin:
         # Subscribe to settings changes
         self.context.subscribe(Events.PLUGIN_SETTINGS_CHANGED, self._on_settings_changed)
 
+        # Subscribe to waveform widget ready event (decoupled from waveform_visualizer)
+        self.context.subscribe(Events.WAVEFORM_WIDGET_READY, self._on_waveform_widget_ready)
+
         # Load settings from database at startup
         self._on_settings_changed()
 
@@ -104,12 +107,6 @@ class LoopPlayerPlugin:
         ui_builder.add_menu_action(
             menu, "Move Loop Backward (Fine)", self._move_loop_fine_backward, shortcut="Shift+Left"
         )
-
-        # Get reference to waveform widget if available
-        if hasattr(main_window, "plugin_manager"):
-            waveform_plugin = main_window.plugin_manager.plugins.get("waveform_visualizer")
-            if waveform_plugin and hasattr(waveform_plugin, "waveform_widget"):
-                self.waveform_widget = waveform_plugin.waveform_widget
 
     def _toggle_loop(self) -> None:
         """Toggle loop mode."""
@@ -345,6 +342,15 @@ class LoopPlayerPlugin:
             if self.loop_button:
                 self.loop_button.setChecked(False)
             self._update_button_style()
+
+    def _on_waveform_widget_ready(self, widget: Any) -> None:
+        """Handle waveform widget ready event.
+
+        Args:
+            widget: The waveform widget instance.
+        """
+        self.waveform_widget = widget
+        logging.debug("[Loop Player] Waveform widget received via event")
 
     def activate(self, mode: str) -> None:
         """Activate plugin for mode."""

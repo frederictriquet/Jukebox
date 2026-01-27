@@ -5,6 +5,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QApplication, QLabel
+
 from jukebox.core.event_bus import Events
 from jukebox.core.mode_manager import AppMode, ModeManager
 
@@ -97,9 +100,6 @@ class ModeSwitcherPlugin:
         self.context.config.ui.mode = mode.value
 
         # Create overlay to hide transition
-        from PySide6.QtCore import Qt
-        from PySide6.QtWidgets import QApplication, QLabel
-
         overlay = QLabel(main_window)
         overlay.setStyleSheet("background-color: #1e1e1e; color: #ffffff; font-size: 16px;")
         overlay.setGeometry(0, 0, main_window.width(), main_window.height())
@@ -145,8 +145,6 @@ class ModeSwitcherPlugin:
             main_window.update()
 
             # Small delay then remove overlay
-            from PySide6.QtCore import QTimer
-
             QTimer.singleShot(50, overlay.deleteLater)
 
     def register_shortcuts(self, shortcut_manager: ShortcutManagerProtocol) -> None:

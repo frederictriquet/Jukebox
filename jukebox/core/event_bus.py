@@ -99,6 +99,8 @@ class Events:
     UI Events:
         WAVEFORM_CLEAR: Clear waveform display
             kwargs: None
+        WAVEFORM_WIDGET_READY: Waveform widget is initialized and available
+            kwargs: widget (Any) - The waveform widget instance
         POSITION_UPDATE: Playback position changed
             kwargs: position (float) - Position as ratio 0.0-1.0
         STATUS_MESSAGE: Display status message in status bar
@@ -146,6 +148,7 @@ class Events:
 
     # UI events
     WAVEFORM_CLEAR = "waveform_clear"  # kwargs: None
+    WAVEFORM_WIDGET_READY = "waveform_widget_ready"  # kwargs: widget (Any)
     POSITION_UPDATE = "position_update"  # kwargs: position (float)
     STATUS_MESSAGE = "status_message"  # kwargs: message (str), color (str, optional)
 
@@ -159,4 +162,6 @@ class Events:
     AUDIO_ANALYSIS_COMPLETE = "audio_analysis_complete"  # kwargs: track_id (int)
 
     # Capability events (plugins declare their capabilities)
-    POSITION_SEEKING_PROVIDED = "position_seeking_provided"  # kwargs: None  # kwargs: None
+    POSITION_SEEKING_PROVIDED = (
+        "position_seeking_provided"  # kwargs: None  # kwargs: None  # kwargs: None
+    )

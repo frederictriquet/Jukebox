@@ -82,6 +82,9 @@ class WaveformVisualizerPlugin:
         # This allows MainWindow to skip adding a fallback position slider
         self.context.emit(Events.POSITION_SEEKING_PROVIDED)
 
+        # Notify other plugins that waveform widget is ready
+        self.context.emit(Events.WAVEFORM_WIDGET_READY, widget=self.waveform_widget)
+
         # Add menu for batch waveform generation
         menu = ui_builder.get_or_create_menu("&View")
         ui_builder.add_menu_separator(menu)

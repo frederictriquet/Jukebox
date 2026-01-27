@@ -49,6 +49,50 @@ class JukeboxPlugin(Protocol):
         ...
 
 
+class BasePlugin:
+    """Base class for plugins with default implementations.
+
+    Plugins can inherit from this class to avoid implementing empty methods.
+    All lifecycle methods have no-op defaults.
+
+    Attributes:
+        name: Plugin identifier (must be overridden).
+        version: Plugin version string (must be overridden).
+        description: Human-readable description (must be overridden).
+        modes: List of modes where plugin is active. Defaults to all modes.
+        context: Plugin context, set during initialize().
+    """
+
+    name: str = "base_plugin"
+    version: str = "0.0.0"
+    description: str = "Base plugin class"
+    modes: list[str] = ["jukebox", "curating"]
+
+    def __init__(self) -> None:
+        """Initialize plugin instance."""
+        self.context: PluginContextProtocol | None = None
+
+    def initialize(self, context: PluginContextProtocol) -> None:
+        """Called when plugin is loaded. Override to add initialization logic."""
+        self.context = context
+
+    def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
+        """Register UI elements. Override to add UI components."""
+        pass
+
+    def activate(self, mode: str) -> None:
+        """Called when entering a mode where this plugin is active."""
+        pass
+
+    def deactivate(self, mode: str) -> None:
+        """Called when leaving a mode where this plugin is active."""
+        pass
+
+    def shutdown(self) -> None:
+        """Called when application closes. Override for cleanup."""
+        pass
+
+
 class PluginContext:
     """Context provided to plugins.
 
