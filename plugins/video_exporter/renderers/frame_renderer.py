@@ -37,6 +37,7 @@ class FrameRenderer:
         color_palette: str = "neon",
         audio_sensitivity: dict[str, float] | None = None,
         transitions_enabled: bool = True,
+        intro_video_path: str = "",
     ) -> None:
         """Initialize frame renderer.
 
@@ -59,6 +60,7 @@ class FrameRenderer:
             color_palette: Name of color palette for VJing effects.
             audio_sensitivity: Per-band audio sensitivity {bass, mid, treble: 0.0-2.0}.
             transitions_enabled: Enable smooth transitions/cycling between effects.
+            intro_video_path: Path to intro video to overlay on top (plays once).
         """
         self.width = width
         self.height = height
@@ -77,6 +79,7 @@ class FrameRenderer:
         self.color_palette = color_palette
         self.audio_sensitivity = audio_sensitivity or {}
         self.transitions_enabled = transitions_enabled
+        self.intro_video_path = intro_video_path
 
         # Initialize enabled layers
         self.layers: list[BaseVisualLayer] = []
@@ -197,6 +200,20 @@ class FrameRenderer:
                 logging.info("[Frame Renderer] Text layer enabled")
             except Exception as e:
                 logging.warning(f"[Frame Renderer] Failed to init text layer: {e}")
+
+        # Intro overlay layer (plays once on top of everything)
+        if self.intro_video_path:
+            try:
+                from plugins.video_exporter.layers.intro_overlay_layer import IntroOverlayLayer
+
+                layer = IntroOverlayLayer(
+                    **common_kwargs,
+                    video_path=self.intro_video_path,
+                )
+                self.layers.append(layer)
+                logging.info("[Frame Renderer] Intro overlay layer enabled")
+            except Exception as e:
+                logging.warning(f"[Frame Renderer] Failed to init intro overlay layer: {e}")
 
         # Sort by z-index
         self.layers.sort(key=lambda layer: layer.z_index)

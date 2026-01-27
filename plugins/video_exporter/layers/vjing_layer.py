@@ -479,7 +479,10 @@ class VJingLayer(BaseVisualLayer):
         # Determine which effects to use based on preset or genre
         self.active_effects = self._determine_effects()
 
-        logging.info(f"[VJingLayer] Active effects: {self.active_effects}")
+        # Randomize effect order for variety
+        random.shuffle(self.active_effects)
+
+        logging.info(f"[VJingLayer] Active effects (randomized): {self.active_effects}")
 
         # Initialize LFOs for parameter modulation
         self._init_lfos()

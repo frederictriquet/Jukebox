@@ -176,6 +176,7 @@ class VideoExporterConfig(BaseModel):
     default_fps: int = Field(ge=15, le=60, default=30)
     output_directory: str = "~/Videos/Jukebox"
     video_clips_folder: str = ""
+    intro_video_path: str = ""  # Overlay video that plays once on top
     # Layer defaults
     waveform_enabled: bool = True
     text_enabled: bool = True

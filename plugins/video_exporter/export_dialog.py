@@ -686,6 +686,22 @@ class ExportDialog(QDialog):
         video_folder_layout.addWidget(self.video_folder_edit)
         layers_layout.addLayout(video_folder_layout)
 
+        # Intro overlay video (plays once on top)
+        intro_video_layout = QHBoxLayout()
+        intro_video_layout.addWidget(QLabel("Intro video:"))
+        self.intro_video_edit = QLineEdit()
+        self.intro_video_edit.setPlaceholderText("Optional video overlay (plays once)")
+        self.intro_video_edit.setReadOnly(True)
+        self.intro_video_edit.setCursor(Qt.PointingHandCursor)
+        self.intro_video_edit.mousePressEvent = lambda e: self._browse_intro_video()
+        intro_video_layout.addWidget(self.intro_video_edit)
+        clear_intro_btn = QPushButton("X")
+        clear_intro_btn.setFixedWidth(30)
+        clear_intro_btn.setToolTip("Clear intro video")
+        clear_intro_btn.clicked.connect(lambda: self.intro_video_edit.clear())
+        intro_video_layout.addWidget(clear_intro_btn)
+        layers_layout.addLayout(intro_video_layout)
+
         layout.addWidget(layers_group)
 
         # Effect intensities group
@@ -934,6 +950,10 @@ class ExportDialog(QDialog):
         self.fps_spin.setValue(config.default_fps)
         self.output_dir_edit.setText(str(Path(config.output_directory).expanduser()))
         self.video_folder_edit.setText(config.video_clips_folder)
+        # Intro video overlay (optional)
+        intro_video = getattr(config, "intro_video_path", "")
+        if intro_video:
+            self.intro_video_edit.setText(str(Path(intro_video).expanduser()))
 
         # Layers
         self.waveform_check.setChecked(config.waveform_enabled)
@@ -964,6 +984,18 @@ class ExportDialog(QDialog):
         directory = QFileDialog.getExistingDirectory(self, "Select Video Clips Folder", current)
         if directory:
             self.video_folder_edit.setText(directory)
+
+    def _browse_intro_video(self) -> None:
+        """Browse for intro overlay video file."""
+        current = self.intro_video_edit.text() or str(Path.home() / "Movies")
+        filepath, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Intro Video",
+            current,
+            "Video Files (*.mp4 *.mov *.avi *.mkv *.webm);;All Files (*)",
+        )
+        if filepath:
+            self.intro_video_edit.setText(filepath)
 
     def _load_preview(self) -> None:
         """Load audio and initialize preview renderer."""
@@ -1286,6 +1318,8 @@ class ExportDialog(QDialog):
             "transitions_enabled": self.transitions_check.isChecked(),
             # Fade in/out
             "fade_duration": self.fade_spin.value(),
+            # Intro video overlay
+            "intro_video_path": self.intro_video_edit.text(),
         }
 
     def reject(self) -> None:

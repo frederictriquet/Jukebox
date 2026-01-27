@@ -38,6 +38,7 @@ class VideoBackgroundLayer(BaseVisualLayer):
         video_folder: str = "",
         opacity: float = 0.5,
         blend_mode: str = "normal",
+        fade_duration: float = 1.0,
         **kwargs: Any,
     ) -> None:
         """Initialize video background layer.
@@ -52,14 +53,18 @@ class VideoBackgroundLayer(BaseVisualLayer):
             video_folder: Path to folder containing video clips.
             opacity: Opacity of the video background (0.0 to 1.0).
             blend_mode: Blend mode (normal, multiply, screen).
+            fade_duration: Duration of fade in/out between clips in seconds.
             **kwargs: Additional parameters.
         """
         self.video_folder = Path(video_folder).expanduser() if video_folder else None
         self.opacity = opacity
         self.blend_mode = blend_mode
+        self.fade_duration = fade_duration
         self.video_clips: list[Path] = []
         # Pre-loaded frames for the entire duration (thread-safe access)
         self.all_frames: list[Image.Image] = []
+        # Clip boundaries: list of (start_frame, end_frame) for each clip
+        self.clip_boundaries: list[tuple[int, int]] = []
 
         super().__init__(width, height, fps, audio, sr, duration, **kwargs)
 
@@ -102,6 +107,8 @@ class VideoBackgroundLayer(BaseVisualLayer):
             clip_path = self.video_clips[clip_idx % len(self.video_clips)]
             logging.info(f"[Video Layer] Loading clip: {clip_path}")
 
+            clip_start_frame = frames_loaded
+
             try:
                 cap = cv2.VideoCapture(str(clip_path))
 
@@ -123,6 +130,10 @@ class VideoBackgroundLayer(BaseVisualLayer):
 
                 cap.release()
 
+                # Record clip boundaries
+                if frames_loaded > clip_start_frame:
+                    self.clip_boundaries.append((clip_start_frame, frames_loaded - 1))
+
             except Exception as e:
                 logging.error(f"[Video Layer] Error loading video {clip_path}: {e}")
 
@@ -130,7 +141,7 @@ class VideoBackgroundLayer(BaseVisualLayer):
 
         logging.info(
             f"[Video Layer] Pre-loaded {len(self.all_frames)} frames "
-            f"for {self.total_frames} total needed"
+            f"for {self.total_frames} total needed, {len(self.clip_boundaries)} clips"
         )
 
     def _load_as_images(self) -> None:
@@ -153,14 +164,14 @@ class VideoBackgroundLayer(BaseVisualLayer):
             while len(self.all_frames) < self.total_frames:
                 self.all_frames.append(self.all_frames[len(self.all_frames) % original_count])
 
-    def render(self, frame_idx: int, time_pos: float) -> Image.Image:
+    def render(self, frame_idx: int, _time_pos: float) -> Image.Image:
         """Render video background frame.
 
         Thread-safe: Only reads from pre-loaded frames.
 
         Args:
             frame_idx: Frame index.
-            time_pos: Time position in seconds.
+            _time_pos: Time position in seconds (unused).
 
         Returns:
             RGBA image with video frame.
@@ -177,15 +188,56 @@ class VideoBackgroundLayer(BaseVisualLayer):
         if frame.mode != "RGBA":
             frame = frame.convert("RGBA")
 
-        # Apply opacity
-        if self.opacity < 1.0:
-            alpha = int(255 * self.opacity)
+        # Calculate fade factor based on clip boundaries
+        fade_factor = self._get_fade_factor(actual_idx)
+
+        # Apply opacity with fade
+        effective_opacity = self.opacity * fade_factor
+        if effective_opacity < 1.0:
+            alpha = int(255 * effective_opacity)
             # Create alpha mask
             r, g, b, a = frame.split()
             a = a.point(lambda x: min(x, alpha))
             frame = Image.merge("RGBA", (r, g, b, a))
 
         return frame
+
+    def _get_fade_factor(self, frame_idx: int) -> float:
+        """Calculate fade factor for the given frame index.
+
+        Args:
+            frame_idx: Frame index within all_frames.
+
+        Returns:
+            Fade factor between 0.0 and 1.0.
+        """
+        if not self.clip_boundaries or self.fade_duration <= 0:
+            return 1.0
+
+        fade_frames = int(self.fade_duration * self.fps)
+
+        # Find which clip this frame belongs to
+        for clip_start, clip_end in self.clip_boundaries:
+            if clip_start <= frame_idx <= clip_end:
+                clip_length = clip_end - clip_start + 1
+                position_in_clip = frame_idx - clip_start
+
+                # Don't fade if clip is too short
+                if clip_length < fade_frames * 2:
+                    return 1.0
+
+                # Fade in at the beginning of clip
+                if position_in_clip < fade_frames:
+                    return position_in_clip / fade_frames
+
+                # Fade out at the end of clip
+                frames_from_end = clip_end - frame_idx
+                if frames_from_end < fade_frames:
+                    return frames_from_end / fade_frames
+
+                return 1.0
+
+        return 1.0
 
     def _apply_blend(self, background: Image.Image, foreground: Image.Image) -> Image.Image:
         """Apply blend mode to combine images.

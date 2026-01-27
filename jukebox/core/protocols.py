@@ -198,6 +198,7 @@ class VideoExporterConfigProtocol(Protocol):
     default_fps: int
     output_directory: str
     video_clips_folder: str
+    intro_video_path: str
     waveform_enabled: bool
     text_enabled: bool
     dynamics_enabled: bool

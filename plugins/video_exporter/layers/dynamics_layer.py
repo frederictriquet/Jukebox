@@ -26,9 +26,9 @@ class DynamicsLayer(BaseVisualLayer):
         audio: NDArray[np.floating],
         sr: int,
         duration: float,
-        pulse_intensity: float = 0.3,
-        brightness_intensity: float = 0.2,
-        vignette_intensity: float = 0.5,
+        pulse_intensity: float = 0.8,
+        brightness_intensity: float = 0.6,
+        vignette_intensity: float = 0.7,
         **kwargs: Any,
     ) -> None:
         """Initialize dynamics layer.
@@ -128,7 +128,7 @@ class DynamicsLayer(BaseVisualLayer):
         bass_energy = self.bass_energy_envelope[frame_idx]
 
         # Apply pulse effect (radial glow on bass)
-        if self.pulse_intensity > 0 and bass_energy > 0.3:
+        if self.pulse_intensity > 0 and bass_energy > 0.15:
             self._apply_pulse(img, bass_energy)
 
         # Apply vignette that responds to energy
@@ -136,7 +136,7 @@ class DynamicsLayer(BaseVisualLayer):
             self._apply_vignette(img, energy)
 
         # Apply brightness flash on peaks
-        if self.brightness_intensity > 0 and energy > 0.7:
+        if self.brightness_intensity > 0 and energy > 0.5:
             self._apply_flash(img, energy)
 
         return img
@@ -159,15 +159,15 @@ class DynamicsLayer(BaseVisualLayer):
 
         # Draw concentric circles with decreasing alpha
         center = (self.width // 2, self.height // 2)
-        n_circles = 5
-        base_alpha = int(100 * self.pulse_intensity * bass_energy)
+        n_circles = 8
+        base_alpha = int(200 * self.pulse_intensity * bass_energy)
 
         for i in range(n_circles):
             radius = pulse_radius * (1 - i / n_circles)
             alpha = int(base_alpha * (1 - i / n_circles))
             if radius > 0 and alpha > 0:
                 # Cyan/blue tint for the pulse
-                color = (0, 200, 255, alpha)
+                color = (0, 200, 255, min(alpha, 255))
                 draw.ellipse(
                     [
                         center[0] - radius,
@@ -176,7 +176,7 @@ class DynamicsLayer(BaseVisualLayer):
                         center[1] + radius,
                     ],
                     outline=color,
-                    width=3,
+                    width=5,
                 )
 
     def _apply_vignette(self, img: Image.Image, energy: float) -> None:
@@ -219,9 +219,9 @@ class DynamicsLayer(BaseVisualLayer):
             img: Image to modify.
             energy: Normalized energy (0.0 to 1.0).
         """
-        # Create white overlay with low alpha
-        flash_alpha = int(50 * (energy - 0.7) / 0.3 * self.brightness_intensity)
-        flash_alpha = min(flash_alpha, 50)
+        # Create white overlay with moderate alpha
+        flash_alpha = int(120 * (energy - 0.5) / 0.5 * self.brightness_intensity)
+        flash_alpha = min(flash_alpha, 100)
 
         if flash_alpha <= 0:
             return

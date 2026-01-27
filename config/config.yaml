@@ -130,6 +130,7 @@ video_exporter:
   default_fps: 30
   output_directory: "~/Videos/Jukebox"
   video_clips_folder: ""
+  intro_video_path: "/Users/fred/Movies/Insta-Templates/intro/dj__frezz.mp4"
   waveform_enabled: true
   text_enabled: true
   dynamics_enabled: true
