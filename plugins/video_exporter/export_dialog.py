@@ -12,6 +12,7 @@ from PIL import Image
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -35,6 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from jukebox.core.event_bus import Events
+from plugins.video_exporter.layers.vjing_layer import VJingLayer
 
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol
@@ -50,6 +52,52 @@ RESOLUTION_PRESETS: dict[str, tuple[int, int]] = {
     "instagram": (1080, 1350),
     "instagram_full": (1080, 1440),
 }
+
+# Palette display names for tooltips
+PALETTE_NAMES: dict[str, str] = {
+    "neon": "Neon",
+    "fire": "Fire",
+    "ice": "Ice",
+    "nature": "Nature",
+    "sunset": "Sunset",
+    "ocean": "Ocean",
+    "cosmic": "Cosmic",
+    "retro": "Retro",
+    "monochrome": "Mono",
+    "rainbow": "Rainbow",
+}
+
+
+class PaletteButton(QPushButton):
+    """Button showing color palette preview."""
+
+    def __init__(self, palette_id: str, name: str, colors: list[tuple[int, int, int]]) -> None:
+        super().__init__()
+        self.palette_id = palette_id
+        self.setCheckable(True)
+        self.setFixedSize(60, 28)
+        self.setToolTip(name)
+
+        # Build gradient style from colors
+        stops = []
+        for i, (r, g, b) in enumerate(colors):
+            pos = i / (len(colors) - 1) if len(colors) > 1 else 0
+            stops.append(f"stop:{pos:.2f} rgb({r},{g},{b})")
+
+        gradient = ", ".join(stops)
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, {gradient});
+                border: 2px solid #444;
+                border-radius: 4px;
+            }}
+            QPushButton:checked {{
+                border: 2px solid #fff;
+            }}
+            QPushButton:hover {{
+                border: 2px solid #888;
+            }}
+        """)
 
 
 class EffectPreviewDialog(QDialog):
@@ -639,28 +687,26 @@ class ExportDialog(QDialog):
         preset_layout.addStretch()
         layers_layout.addLayout(preset_layout)
 
-        # Color palette selector
-        palette_layout = QHBoxLayout()
-        palette_layout.addWidget(QLabel("    Palette:"))
-        self.color_palette_combo = QComboBox()
-        palettes = [
-            ("neon", "Neon (Pink/Cyan/Yellow)"),
-            ("fire", "Fire (Orange/Red/Gold)"),
-            ("ice", "Ice (Blue/White)"),
-            ("nature", "Nature (Greens)"),
-            ("sunset", "Sunset (Coral/Peach)"),
-            ("ocean", "Ocean (Turquoise/Cyan)"),
-            ("cosmic", "Cosmic (Purple/Violet)"),
-            ("retro", "Retro (Mustard/Teal)"),
-            ("monochrome", "Monochrome (Grays)"),
-            ("rainbow", "Rainbow"),
-        ]
-        for palette_id, palette_name in palettes:
-            self.color_palette_combo.addItem(palette_name, palette_id)
-        self.color_palette_combo.setToolTip("Color palette for VJing effects")
-        palette_layout.addWidget(self.color_palette_combo)
-        palette_layout.addStretch()
-        layers_layout.addLayout(palette_layout)
+        # Color palette selector (button grid, max 5 per row)
+        palette_container = QHBoxLayout()
+        palette_container.addWidget(QLabel("    Palette:"))
+        palette_grid = QGridLayout()
+        palette_grid.setSpacing(4)
+        max_per_row = 5
+        self.palette_button_group = QButtonGroup(self)
+        self.palette_buttons: dict[str, PaletteButton] = {}
+        for idx, (palette_id, colors) in enumerate(VJingLayer.COLOR_PALETTES.items()):
+            name = PALETTE_NAMES.get(palette_id, palette_id)
+            btn = PaletteButton(palette_id, name, colors)
+            self.palette_button_group.addButton(btn)
+            self.palette_buttons[palette_id] = btn
+            row, col = divmod(idx, max_per_row)
+            palette_grid.addWidget(btn, row, col)
+        # Select default (neon)
+        self.palette_buttons["neon"].setChecked(True)
+        palette_container.addLayout(palette_grid)
+        palette_container.addStretch()
+        layers_layout.addLayout(palette_container)
 
         # Simultaneous effects selector
         simultaneous_layout = QHBoxLayout()
@@ -1080,7 +1126,7 @@ class ExportDialog(QDialog):
                 waveform_config=waveform_config,
                 use_gpu=True,  # GPU shaders now support dynamic palettes
                 effect_intensities=self._get_effect_intensities(),
-                color_palette=self.color_palette_combo.currentData(),
+                color_palette=self._get_selected_palette(),
                 audio_sensitivity=self._get_audio_sensitivity(),
                 transitions_enabled=True,
                 simultaneous_effects=self.simultaneous_effects_spin.value(),
@@ -1228,7 +1274,7 @@ class ExportDialog(QDialog):
         """
         # Get current settings
         intensity = self.effect_intensity_sliders[effect_id].value() / 100.0
-        color_palette = self.color_palette_combo.currentData()
+        color_palette = self._get_selected_palette()
         audio_sensitivity = self._get_audio_sensitivity()
 
         # Create and show the effect preview dialog
@@ -1246,6 +1292,17 @@ class ExportDialog(QDialog):
             track_metadata=self.track_metadata,
         )
         dialog.exec()
+
+    def _get_selected_palette(self) -> str:
+        """Get the currently selected color palette ID.
+
+        Returns:
+            Palette ID string (e.g., "neon", "fire").
+        """
+        checked = self.palette_button_group.checkedButton()
+        if checked and isinstance(checked, PaletteButton):
+            return checked.palette_id
+        return "neon"  # Default fallback
 
     def _get_effect_intensities(self) -> dict[str, float]:
         """Build effect intensities dictionary from UI sliders.
@@ -1315,7 +1372,7 @@ class ExportDialog(QDialog):
                 p.name: p.effects
                 for p in self.context.config.video_exporter.vjing_presets
             },
-            "color_palette": self.color_palette_combo.currentData(),
+            "color_palette": self._get_selected_palette(),
             # Waveform layer settings
             "waveform_height_ratio": self.context.config.video_exporter.waveform_height_ratio,
             "waveform_bass_color": self.context.config.video_exporter.waveform_bass_color,

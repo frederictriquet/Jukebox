@@ -36,6 +36,7 @@ class IntroOverlayLayer(BaseVisualLayer):
         duration: float,
         video_path: str = "",
         chroma_key_threshold: int = 30,
+        fade_out_duration: float = 1.0,
         **kwargs: Any,
     ) -> None:
         """Initialize intro overlay layer.
@@ -50,13 +51,16 @@ class IntroOverlayLayer(BaseVisualLayer):
             video_path: Path to the intro video file.
             chroma_key_threshold: Brightness threshold for black chroma key (0-255).
                                   Pixels darker than this become transparent.
+            fade_out_duration: Duration of fade-out at the end in seconds (default 1.0).
             **kwargs: Additional parameters.
         """
         self.video_path = Path(video_path).expanduser() if video_path else None
         self.chroma_key_threshold = chroma_key_threshold
+        self.fade_out_duration = fade_out_duration
         # Pre-loaded frames for the intro video (thread-safe access)
         self.all_frames: list[Image.Image] = []
         self.video_duration_frames = 0
+        self.fade_out_frames = 0  # Calculated after video is loaded
 
         super().__init__(width, height, fps, audio, sr, duration, **kwargs)
 
@@ -134,11 +138,13 @@ class IntroOverlayLayer(BaseVisualLayer):
             cap.release()
 
             self.video_duration_frames = len(self.all_frames)
+            self.fade_out_frames = int(self.fade_out_duration * self.fps)
             video_duration_sec = self.video_duration_frames / self.fps
 
             logging.info(
                 f"[Intro Overlay] Pre-loaded {self.video_duration_frames} frames "
-                f"({video_duration_sec:.2f}s at {self.fps}fps)"
+                f"({video_duration_sec:.2f}s at {self.fps}fps), "
+                f"fade-out: {self.fade_out_frames} frames"
             )
 
         except Exception as e:
@@ -240,5 +246,19 @@ class IntroOverlayLayer(BaseVisualLayer):
         # Ensure RGBA mode
         if frame.mode != "RGBA":
             frame = frame.convert("RGBA")
+
+        # Apply fade-out at the end
+        if self.fade_out_frames > 0:
+            fade_start = self.video_duration_frames - self.fade_out_frames
+            if frame_idx >= fade_start:
+                # Calculate fade progress (0.0 = start of fade, 1.0 = end)
+                fade_progress = (frame_idx - fade_start) / self.fade_out_frames
+                # Alpha multiplier goes from 1.0 to 0.0
+                alpha_multiplier = 1.0 - fade_progress
+
+                # Apply alpha to frame
+                frame_data = np.array(frame)
+                frame_data[:, :, 3] = (frame_data[:, :, 3] * alpha_multiplier).astype(np.uint8)
+                frame = Image.fromarray(frame_data, "RGBA")
 
         return frame

@@ -1718,7 +1718,7 @@ class VJingLayer(BaseVisualLayer):
         # Offset amount based on bass
         offset = int(5 + bass * 15 * self._current_intensity)
 
-        if offset < 2:
+        if offset < 10:
             return
 
         # Get image data
