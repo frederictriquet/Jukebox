@@ -144,7 +144,7 @@ video_exporter:
   waveform_cursor_color: "#FFFFFF"
   vjing_mappings:
     - letter: "D"  # Deep House
-      effects: ["aurora", "metaballs", "flow_field", "water", "timestretch"]
+      effects: ["aurora", "metaballs", "flow_field", "water", "timestretch","chromatic"]
     - letter: "P"  # Power (hard techno, hard house, très rythmé)
       effects: ["strobe", "explosion", "tunnel", "bass_warp", "timestretch"]
     - letter: "T"  # Trance (hypnotique, euphoric)

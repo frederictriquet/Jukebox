@@ -256,8 +256,8 @@ class MainWindow(QMainWindow):
                 Path(track["filepath"]),
                 track["title"],
                 track["artist"],
-                track["genre"] if "genre" in track else None,
-                track["duration_seconds"] if "duration_seconds" in track else None,
+                track["genre"],
+                track["duration_seconds"],
             )
 
         # Restore selection of current playing track
@@ -278,8 +278,8 @@ class MainWindow(QMainWindow):
                 Path(track["filepath"]),
                 track["title"],
                 track["artist"],
-                track["genre"] if "genre" in track else None,
-                track["duration_seconds"] if "duration_seconds" in track else None,
+                track["genre"],
+                track["duration_seconds"],
             )
 
     def _on_tracks_changed(self) -> None:
@@ -575,8 +575,8 @@ class MainWindow(QMainWindow):
                     filepath,
                     track["title"],
                     track["artist"],
-                    track["genre"] if "genre" in track else None,
-                    track["duration_seconds"] if "duration_seconds" in track else None,
+                    track["genre"],
+                    track["duration_seconds"],
                 )
 
     def _get_current_mode(self) -> str:

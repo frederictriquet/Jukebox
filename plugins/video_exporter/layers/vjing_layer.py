@@ -322,6 +322,9 @@ class VJingLayer(BaseVisualLayer):
         "smoke",
     ]
 
+    # Post-processing effects (applied after generators, on the composite image)
+    POST_PROCESSING_EFFECTS = {"chromatic", "pixelate", "feedback"}
+
     # Color palettes: each palette is a list of 4-6 RGB tuples
     # Effects will use these colors for their visuals
     COLOR_PALETTES: dict[str, list[tuple[int, int, int]]] = {
@@ -955,7 +958,6 @@ class VJingLayer(BaseVisualLayer):
 
         # Get current energy values
         safe_idx = min(frame_idx, len(self.energy) - 1)
-        energy = self.energy[safe_idx]
         bass = self.bass_energy[safe_idx]
         mid = self.mid_energy[safe_idx]
         treble = self.treble_energy[safe_idx]
@@ -979,25 +981,33 @@ class VJingLayer(BaseVisualLayer):
             "is_beat": is_beat,
         }
 
-        # Render effects with transitions
-        if self.transitions_enabled and len(self.active_effects) > 1:
-            self._render_with_transitions(img, frame_idx, time_pos, ctx)
+        # Separate generator effects from post-processing effects
+        generators = [e for e in self.active_effects if e not in self.POST_PROCESSING_EFFECTS]
+        post_processors = [e for e in self.active_effects if e in self.POST_PROCESSING_EFFECTS]
+
+        # First: render all generator effects
+        if self.transitions_enabled and len(generators) > 1:
+            self._render_with_transitions(img, frame_idx, time_pos, ctx, generators)
         else:
-            # Render all active effects with proper alpha compositing
-            for effect_name in self.active_effects:
-                # Create temporary image for this effect
+            for effect_name in generators:
                 effect_img = self.create_transparent_image()
-                
                 self._current_intensity = self._get_intensity(effect_name)
                 effect_method = getattr(self, f"_render_{effect_name}", self._render_wave)
                 effect_method(effect_img, frame_idx, time_pos, ctx)
-                
-                # Alpha composite using paste with mask (safer than alpha_composite)
                 img.paste(effect_img, (0, 0), effect_img)
+
+        # Second: apply post-processing effects on the composite image
+        for effect_name in post_processors:
+            self._current_intensity = self._get_intensity(effect_name)
+            effect_method = getattr(self, f"_render_{effect_name}", None)
+            if effect_method:
+                effect_method(img, frame_idx, time_pos, ctx)
 
         return img
 
-    def _calculate_effect_alpha(self, effect_idx: int, time_pos: float) -> float:
+    def _calculate_effect_alpha(
+        self, effect_idx: int, time_pos: float, num_effects: int | None = None
+    ) -> float:
         """Calculate alpha multiplier for crossfade between effects.
 
         Supports multiple simultaneous effects. At any time, `simultaneous_effects`
@@ -1006,11 +1016,13 @@ class VJingLayer(BaseVisualLayer):
         Args:
             effect_idx: Index of the effect in active_effects.
             time_pos: Current time position in seconds.
+            num_effects: Total number of effects (defaults to len(active_effects)).
 
         Returns:
             Alpha multiplier (0.0 to 1.0).
         """
-        num_effects = len(self.active_effects)
+        if num_effects is None:
+            num_effects = len(self.active_effects)
         if num_effects <= 1:
             return 1.0
 
@@ -1064,7 +1076,8 @@ class VJingLayer(BaseVisualLayer):
         return 0.0
 
     def _render_with_transitions(
-        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict,
+        effects: list[str] | None = None
     ) -> None:
         """Render effects with smooth transitions between them.
 
@@ -1073,9 +1086,12 @@ class VJingLayer(BaseVisualLayer):
             frame_idx: Frame index.
             time_pos: Time position in seconds.
             ctx: Audio context dictionary.
+            effects: List of effects to render (defaults to active_effects).
         """
-        for idx, effect_name in enumerate(self.active_effects):
-            alpha = self._calculate_effect_alpha(idx, time_pos)
+        effects_to_render = effects if effects is not None else self.active_effects
+
+        for idx, effect_name in enumerate(effects_to_render):
+            alpha = self._calculate_effect_alpha(idx, time_pos, len(effects_to_render))
 
             if alpha < 0.01:
                 continue  # Skip nearly invisible effects
@@ -1101,7 +1117,7 @@ class VJingLayer(BaseVisualLayer):
             # paste with mask doesn't handle transparent backgrounds correctly
             img_data = np.array(img)
             effect_data = np.array(effect_img)
-            
+
             # Manual alpha compositing: result = effect + img * (1 - effect_alpha)
             effect_alpha = effect_data[:, :, 3:4].astype(np.float32) / 255.0
             result = (
@@ -1114,7 +1130,7 @@ class VJingLayer(BaseVisualLayer):
                 0,
                 255,
             ).astype(np.uint8)
-            
+
             # Update img in place
             combined = np.dstack([result, result_alpha])
             img.paste(Image.fromarray(combined, "RGBA"))
