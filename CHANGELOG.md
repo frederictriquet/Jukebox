@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Genre Filter Plugin**
+  - Interactive genre filtering for jukebox mode
+  - Toolbar buttons with 3-state toggle (indifferent/on/off)
+  - ON filter: tracks must have ALL selected genres (AND logic)
+  - OFF filter: tracks must NOT have ANY excluded genres
+  - Works transparently with search, navigation, and random selection
+  - Filter state persists across mode switches
+  - Event emission for plugin coordination (GENRE_FILTER_CHANGED)
+  - Comprehensive documentation in `plugins/README_genre_filter.md`
+  - 26 unit tests with full coverage of filtering logic
+
 ## [0.2.0-alpha] - 2026-01-08
 
 ### Added - CI/CD Infrastructure

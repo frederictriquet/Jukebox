@@ -99,6 +99,34 @@ logging:
 | Ctrl+P | Pause |
 | Ctrl+S | Stop |
 
+## Plugins
+
+Jukebox features an extensible plugin system. Plugins can add UI elements, respond to events, and extend functionality without modifying core code.
+
+### Available Plugins
+
+#### Genre Filter
+Filter tracks by genre in jukebox mode with interactive toggle buttons.
+
+- **Status**: ✅ Stable
+- **Mode**: Jukebox
+- **Description**: Adds toolbar buttons for each genre code (H, T, W, etc.). Each button has 3 states:
+  - Gray (indifferent): Genre not considered
+  - Green (ON): Track must have this genre
+  - Red (OFF): Track must NOT have this genre
+- **Documentation**: See [plugins/README_genre_filter.md](plugins/README_genre_filter.md)
+
+Enable in `config/config.yaml`:
+```yaml
+plugins:
+  enabled:
+    - genre_filter
+```
+
+### Plugin Development
+
+See [CLAUDE.md](CLAUDE.md#plugin-development) for plugin development guide and architecture details.
+
 ## Development
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and guidelines.

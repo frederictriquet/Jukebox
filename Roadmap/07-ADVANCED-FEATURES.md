@@ -345,6 +345,41 @@ Créer `docs/USER_GUIDE.md`:
 
 ---
 
+## 7.7 Genre Filter Plugin (Jours 7+)
+
+### 7.7.1 Overview
+Interactive genre filtering for jukebox mode. Allows users to filter the track list by genre using toolbar buttons with 3-state toggle (indifferent/on/off).
+
+### 7.7.2 Architecture
+Uses Qt's QSortFilterProxyModel for transparent filtering between source model and view. Filtering is non-invasive and works with search, navigation, and random selection.
+
+### 7.7.3 Features
+- Toolbar buttons for each genre code (from config.genre_editor.codes)
+- 3-state buttons: INDIFFERENT (gray) → ON (green) → OFF (red) → cycle
+- ON filter: tracks must have ALL selected genres (AND logic)
+- OFF filter: tracks must NOT have ANY excluded genres
+- Filter state persists during mode switches
+- Event emission for plugin coordination (GENRE_FILTER_CHANGED)
+- Transparent navigation: arrow keys only visit visible tracks
+- Transparent random: selects only from visible tracks
+
+### 7.7.4 Files
+- `plugins/genre_filter.py` - Plugin implementation (4 classes: State, Button, ProxyModel, Plugin)
+- `tests/plugins/test_genre_filter.py` - 26 unit tests
+- `plugins/README_genre_filter.md` - User guide
+
+### 7.7.5 Configuration
+Enable in `config/config.yaml`:
+```yaml
+plugins:
+  enabled:
+    - genre_filter
+```
+
+Genre codes defined in `config.genre_editor.codes` (shared with genre_editor plugin).
+
+---
+
 ## Checklist Phase 7
 
 ### Modes (Jours 1-2)
@@ -386,6 +421,18 @@ Créer `docs/USER_GUIDE.md`:
 - [ ] Keyboard shortcuts
 - [ ] Troubleshooting
 - [ ] Screenshots
+
+### Genre Filter Plugin (Jours 7+)
+- [x] Plugin créé avec QSortFilterProxyModel
+- [x] 3-state buttons (INDIFFERENT/ON/OFF)
+- [x] Filtering logic: ON=AND, OFF=exclusion
+- [x] Toolbar integration with genre buttons
+- [x] Event emission (GENRE_FILTER_CHANGED)
+- [x] TrackList proxy model support
+- [x] MainWindow integration (track_model distinction)
+- [x] 26 unit tests (full coverage)
+- [x] Documentation (inline + README plugin + CHANGELOG)
+- [x] Capitalisation (3 patterns/standards)
 
 ---
 
