@@ -165,3 +165,6 @@ class Events:
     POSITION_SEEKING_PROVIDED = (
         "position_seeking_provided"  # kwargs: None  # kwargs: None  # kwargs: None
     )
+
+    # Genre filter events
+    GENRE_FILTER_CHANGED = "genre_filter_changed"  # kwargs: on_genres (set), off_genres (set)

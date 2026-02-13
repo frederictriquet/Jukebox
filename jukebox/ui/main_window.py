@@ -125,7 +125,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.track_list, stretch=1)
 
         # Connect to model's row_deleted signal (emitted after deletion is complete)
-        self.track_list.model().row_deleted.connect(self._on_row_deleted_complete)
+        self.track_list.track_model.row_deleted.connect(self._on_row_deleted_complete)
 
         # Player controls (no stretch - fixed height)
         self.controls = PlayerControls()
@@ -262,10 +262,7 @@ class MainWindow(QMainWindow):
 
         # Restore selection of current playing track
         if current_track:
-            model = self.track_list.model()
-            row = model.find_row_by_filepath(current_track)
-            if row >= 0:
-                self.track_list.selectRow(row)
+            self.track_list.select_track_by_filepath(current_track)
 
     def _load_tracks_from_db(self) -> None:
         """Load all tracks from database for current mode."""
@@ -294,10 +291,7 @@ class MainWindow(QMainWindow):
 
         # Restore selection of current playing track
         if current_track:
-            model = self.track_list.model()
-            row = model.find_row_by_filepath(current_track)
-            if row >= 0:
-                self.track_list.selectRow(row)
+            self.track_list.select_track_by_filepath(current_track)
 
     def _on_track_deleted(self, filepath: Path) -> None:
         """Handle track deletion - stop current playback and determine next track.
@@ -310,8 +304,8 @@ class MainWindow(QMainWindow):
         # Check if the deleted file was currently playing
         was_deleted_file_playing = self.player.current_file and self.player.current_file == filepath
 
-        # Find the row that will be deleted
-        model = self.track_list.model()
+        # Find the row that will be deleted (use source model directly)
+        model = self.track_list.track_model
         deleted_row = model.find_row_by_filepath(filepath)
 
         logging.info(
@@ -378,12 +372,11 @@ class MainWindow(QMainWindow):
         delattr(self, "deleted_track_next_filepath")
 
         # Find the row of this filepath (it has shifted after deletion)
-        model = self.track_list.model()
-        row = model.find_row_by_filepath(next_filepath)
+        self.track_list.select_track_by_filepath(next_filepath)
+        row = self.track_list.track_model.find_row_by_filepath(next_filepath)
 
         if row >= 0:
             logging.debug(f"[MainWindow] Playing next track at row {row}: {next_filepath.name}")
-            self.track_list.selectRow(row)
             self._load_and_play(next_filepath)
         else:
             logging.error(f"[MainWindow] Could not find next filepath: {next_filepath}")
