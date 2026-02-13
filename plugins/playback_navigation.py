@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from jukebox.core.event_bus import Events
@@ -39,6 +40,12 @@ class PlaybackNavigationPlugin:
 
         # Subscribe to track finished event
         context.player.track_finished.connect(self._on_track_finished)
+
+        # Subscribe to settings changes
+        context.subscribe(Events.PLUGIN_SETTINGS_CHANGED, self._on_settings_changed)
+
+        # Load settings from DB on startup
+        self._on_settings_changed()
 
     def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register auto-play and random mode menu and buttons."""
@@ -171,12 +178,7 @@ class PlaybackNavigationPlugin:
         Returns:
             Duration in seconds or None
         """
-        current_file = self.context.player.current_file
-        if not current_file:
-            return None
-
-        track = self.context.database.tracks.get_by_filepath(current_file)
-        return track["duration_seconds"] if track else None
+        return self.context.get_current_track_duration()
 
     def _next_track(self) -> None:
         """Play next track in list."""
@@ -258,6 +260,36 @@ class PlaybackNavigationPlugin:
         """Cleanup on application exit. No cleanup needed for this plugin."""
         ...
 
+    def _on_settings_changed(self) -> None:
+        """Reload config when settings change."""
+        logging.info("[Playback Navigation] Settings changed, reloading config from database")
+
+        config = self.context.config.playback_navigation
+
+        # Reload seek_amount
+        config.seek_amount = self.context.get_setting(
+            "playback_navigation", "seek_amount", int, config.seek_amount
+        )
+        logging.debug(f"[Playback Navigation] seek_amount: {config.seek_amount}")
+
+        # Reload rapid_press_threshold (stored in ms in DB, config expects seconds)
+        threshold_ms = self.context.get_setting(
+            "playback_navigation",
+            "rapid_press_threshold",
+            int,
+            int(config.rapid_press_threshold * 1000),
+        )
+        config.rapid_press_threshold = threshold_ms / 1000.0
+        logging.debug(
+            f"[Playback Navigation] rapid_press_threshold: {config.rapid_press_threshold}"
+        )
+
+        # Reload max_seek_multiplier
+        config.max_seek_multiplier = self.context.get_setting(
+            "playback_navigation", "max_seek_multiplier", int, config.max_seek_multiplier
+        )
+        logging.debug(f"[Playback Navigation] max_seek_multiplier: {config.max_seek_multiplier}")
+
     def get_settings_schema(self) -> dict[str, Any]:
         """Return settings schema for configuration UI.
 
@@ -279,7 +311,9 @@ class PlaybackNavigationPlugin:
                 "min": 100,
                 "max": 2000,
                 "suffix": " ms",
-                "default": int(self.context.config.playback_navigation.rapid_press_threshold * 1000),
+                "default": int(
+                    self.context.config.playback_navigation.rapid_press_threshold * 1000
+                ),
             },
             "max_seek_multiplier": {
                 "label": "Max Seek Multiplier",

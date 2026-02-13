@@ -99,11 +99,21 @@ class Events:
     UI Events:
         WAVEFORM_CLEAR: Clear waveform display
             kwargs: None
+        WAVEFORM_WIDGET_READY: Waveform widget is initialized and available
+            kwargs: widget (Any) - The waveform widget instance
         POSITION_UPDATE: Playback position changed
             kwargs: position (float) - Position as ratio 0.0-1.0
         STATUS_MESSAGE: Display status message in status bar
             kwargs: message (str) - Message text
                     color (str, optional) - Hex color code (e.g., "#00FF00")
+
+    Loop Events:
+        LOOP_ACTIVATED: Loop section activated
+            kwargs: loop_start (float) - Start position in seconds
+                    loop_end (float) - End position in seconds
+                    filepath (Path) - Path of the current track
+        LOOP_DEACTIVATED: Loop section deactivated
+            kwargs: None
 
     Plugin Events:
         PLUGIN_SETTINGS_CHANGED: Plugin settings updated via conf_manager
@@ -138,8 +148,13 @@ class Events:
 
     # UI events
     WAVEFORM_CLEAR = "waveform_clear"  # kwargs: None
+    WAVEFORM_WIDGET_READY = "waveform_widget_ready"  # kwargs: widget (Any)
     POSITION_UPDATE = "position_update"  # kwargs: position (float)
     STATUS_MESSAGE = "status_message"  # kwargs: message (str), color (str, optional)
+
+    # Loop events
+    LOOP_ACTIVATED = "loop_activated"  # kwargs: loop_start, loop_end, filepath
+    LOOP_DEACTIVATED = "loop_deactivated"  # kwargs: None
 
     # Plugin events
     PLUGIN_SETTINGS_CHANGED = "plugin_settings_changed"  # kwargs: None
@@ -147,4 +162,9 @@ class Events:
     AUDIO_ANALYSIS_COMPLETE = "audio_analysis_complete"  # kwargs: track_id (int)
 
     # Capability events (plugins declare their capabilities)
-    POSITION_SEEKING_PROVIDED = "position_seeking_provided"  # kwargs: None
+    POSITION_SEEKING_PROVIDED = (
+        "position_seeking_provided"  # kwargs: None  # kwargs: None  # kwargs: None
+    )
+
+    # Genre filter events
+    GENRE_FILTER_CHANGED = "genre_filter_changed"  # kwargs: on_genres (set), off_genres (set)

@@ -43,6 +43,9 @@ class LoopPlayerPlugin:
         # Subscribe to settings changes
         self.context.subscribe(Events.PLUGIN_SETTINGS_CHANGED, self._on_settings_changed)
 
+        # Subscribe to waveform widget ready event (decoupled from waveform_visualizer)
+        self.context.subscribe(Events.WAVEFORM_WIDGET_READY, self._on_waveform_widget_ready)
+
         # Load settings from database at startup
         self._on_settings_changed()
 
@@ -82,18 +85,28 @@ class LoopPlayerPlugin:
             else:
                 layout.addWidget(self.loop_button)
 
-        # Add menu option in Playback menu
+        # Add menu options in Playback menu
         menu = ui_builder.get_or_create_menu("&Playback")
         ui_builder.add_menu_separator(menu)
+        ui_builder.add_menu_action(menu, "Toggle Loop", self._toggle_loop, shortcut="Ctrl+L")
         ui_builder.add_menu_action(
-            menu, "Toggle Loop", self._toggle_loop, shortcut="Ctrl+L"
+            menu,
+            "Move Loop Forward (Coarse)",
+            self._move_loop_coarse_forward,
+            shortcut="Ctrl+Right",
         )
-
-        # Get reference to waveform widget if available
-        if hasattr(main_window, "plugin_manager"):
-            waveform_plugin = main_window.plugin_manager.plugins.get("waveform_visualizer")
-            if waveform_plugin and hasattr(waveform_plugin, "waveform_widget"):
-                self.waveform_widget = waveform_plugin.waveform_widget
+        ui_builder.add_menu_action(
+            menu,
+            "Move Loop Backward (Coarse)",
+            self._move_loop_coarse_backward,
+            shortcut="Ctrl+Left",
+        )
+        ui_builder.add_menu_action(
+            menu, "Move Loop Forward (Fine)", self._move_loop_fine_forward, shortcut="Shift+Right"
+        )
+        ui_builder.add_menu_action(
+            menu, "Move Loop Backward (Fine)", self._move_loop_fine_backward, shortcut="Shift+Left"
+        )
 
     def _toggle_loop(self) -> None:
         """Toggle loop mode."""
@@ -106,16 +119,13 @@ class LoopPlayerPlugin:
                     self.loop_button.setChecked(False)
                 return
 
-            # Get track duration from database
-            track = self.context.database.tracks.get_by_filepath(player.current_file)
-
-            if not track or not track["duration_seconds"]:
+            # Get track duration
+            track_duration = self.context.get_current_track_duration()
+            if not track_duration:
                 logging.warning("[Loop Player] Cannot get track duration")
                 if self.loop_button:
                     self.loop_button.setChecked(False)
                 return
-
-            track_duration = track["duration_seconds"]
 
             # Get current position in seconds
             loop_duration = self.context.config.loop_player.duration
@@ -142,12 +152,23 @@ class LoopPlayerPlugin:
                 f"[Loop Player] Loop activated: {self.loop_start:.1f}s - {self.loop_end:.1f}s"
             )
 
+            # Emit loop activated event
+            self.context.emit(
+                Events.LOOP_ACTIVATED,
+                loop_start=self.loop_start,
+                loop_end=self.loop_end,
+                filepath=player.current_file,
+            )
+
         else:
             # Deactivate loop
             self.loop_active = False
             self.position_timer.stop()
             self._hide_loop_region()
             logging.info("[Loop Player] Loop deactivated")
+
+            # Emit loop deactivated event
+            self.context.emit(Events.LOOP_DEACTIVATED)
 
         self._update_button_style()
 
@@ -160,13 +181,11 @@ class LoopPlayerPlugin:
         if not player.is_playing():
             return
 
-        # Get track duration from database
-        track = self.context.database.tracks.get_by_filepath(player.current_file)
-
-        if not track or not track["duration_seconds"]:
+        # Get track duration
+        track_duration = self.context.get_current_track_duration()
+        if not track_duration:
             return
 
-        track_duration = track["duration_seconds"]
         current_pos = player.get_position() * track_duration
 
         # If we've passed the loop end, jump back to loop start
@@ -182,18 +201,16 @@ class LoopPlayerPlugin:
         try:
             import pyqtgraph as pg
 
-            # Convert seconds to waveform x coordinates
-            player = self.context.player
-            track = self.context.database.tracks.get_by_filepath(player.current_file)
-
-            if not track or not track["duration_seconds"]:
+            # Get track duration
+            track_duration = self.context.get_current_track_duration()
+            if not track_duration:
                 return
 
-            track_duration = track["duration_seconds"]
             waveform_length = self.waveform_widget.expected_length
             if waveform_length <= 0:
                 return
 
+            # Convert seconds to waveform x coordinates
             x_start = (self.loop_start / track_duration) * waveform_length
             x_end = (self.loop_end / track_duration) * waveform_length
 
@@ -217,6 +234,95 @@ class LoopPlayerPlugin:
             except Exception as e:
                 logging.error(f"[Loop Player] Error hiding loop region: {e}", exc_info=True)
 
+    def _move_loop(self, delta: float) -> None:
+        """Move loop position by delta seconds.
+
+        Args:
+            delta: Seconds to move (positive = forward, negative = backward)
+        """
+        if not self.loop_active:
+            return
+
+        player = self.context.player
+        if not player.current_file:
+            return
+
+        track_duration = self.context.get_current_track_duration()
+        if not track_duration:
+            return
+
+        loop_duration = self.loop_end - self.loop_start
+
+        # Calculate new positions
+        new_start = self.loop_start + delta
+        new_end = self.loop_end + delta
+
+        # Clamp to valid range
+        if new_start < 0:
+            new_start = 0
+            new_end = loop_duration
+        elif new_end > track_duration:
+            new_end = track_duration
+            new_start = track_duration - loop_duration
+
+        self.loop_start = new_start
+        self.loop_end = new_end
+
+        # Update visual region
+        self._update_loop_region()
+
+        # Notify other plugins of the new loop position
+        self.context.emit(
+            Events.LOOP_ACTIVATED,
+            loop_start=self.loop_start,
+            loop_end=self.loop_end,
+            filepath=player.current_file,
+        )
+
+        logging.debug(f"[Loop Player] Loop moved to {self.loop_start:.2f}s - {self.loop_end:.2f}s")
+
+    def _move_loop_coarse_forward(self) -> None:
+        """Move loop forward by coarse step."""
+        step = self.context.config.loop_player.coarse_step
+        self._move_loop(step)
+
+    def _move_loop_coarse_backward(self) -> None:
+        """Move loop backward by coarse step."""
+        step = self.context.config.loop_player.coarse_step
+        self._move_loop(-step)
+
+    def _move_loop_fine_forward(self) -> None:
+        """Move loop forward by fine step."""
+        step = self.context.config.loop_player.fine_step
+        self._move_loop(step)
+
+    def _move_loop_fine_backward(self) -> None:
+        """Move loop backward by fine step."""
+        step = self.context.config.loop_player.fine_step
+        self._move_loop(-step)
+
+    def _update_loop_region(self) -> None:
+        """Update loop region display on waveform."""
+        if not self.loop_region or not self.waveform_widget:
+            return
+
+        try:
+            track_duration = self.context.get_current_track_duration()
+            if not track_duration:
+                return
+
+            waveform_length = self.waveform_widget.expected_length
+            if waveform_length <= 0:
+                return
+
+            x_start = (self.loop_start / track_duration) * waveform_length
+            x_end = (self.loop_end / track_duration) * waveform_length
+
+            self.loop_region.setRegion([x_start, x_end])
+
+        except Exception as e:
+            logging.error(f"[Loop Player] Error updating loop region: {e}", exc_info=True)
+
     def _update_button_style(self) -> None:
         """Update button style based on loop state."""
         if not self.loop_button:
@@ -237,6 +343,15 @@ class LoopPlayerPlugin:
                 self.loop_button.setChecked(False)
             self._update_button_style()
 
+    def _on_waveform_widget_ready(self, widget: Any) -> None:
+        """Handle waveform widget ready event.
+
+        Args:
+            widget: The waveform widget instance.
+        """
+        self.waveform_widget = widget
+        logging.debug("[Loop Player] Waveform widget received via event")
+
     def activate(self, mode: str) -> None:
         """Activate plugin for mode."""
         pass
@@ -256,26 +371,28 @@ class LoopPlayerPlugin:
         """Reload config when settings change."""
         logging.info("[Loop Player] Settings changed, reloading config from database")
 
-        # Reload duration setting from database
-        db = self.context.database
-        duration_setting = db.conn.execute(
-            "SELECT setting_value FROM plugin_settings WHERE plugin_name = ? AND setting_key = ?",
-            ("loop_player", "duration"),
-        ).fetchone()
+        config = self.context.config.loop_player
 
-        if duration_setting:
-            try:
-                duration = float(duration_setting["setting_value"])
-                self.context.config.loop_player.duration = duration
-                logging.info(f"[Loop Player] Loop duration: {duration}s")
+        # Reload duration setting
+        duration = self.context.get_setting("loop_player", "duration", float, config.duration)
+        config.duration = duration
+        logging.debug(f"[Loop Player] Loop duration: {duration}s")
 
-                # Update button tooltip if button exists
-                if self.loop_button:
-                    self.loop_button.setToolTip(
-                        f"Loop section ({duration}s from current position)"
-                    )
-            except ValueError:
-                logging.error(f"[Loop Player] Invalid duration value: {duration_setting['setting_value']}")
+        # Update button tooltip if button exists
+        if self.loop_button:
+            self.loop_button.setToolTip(f"Loop section ({duration}s from current position)")
+
+        # Reload coarse_step setting
+        config.coarse_step = self.context.get_setting(
+            "loop_player", "coarse_step", float, config.coarse_step
+        )
+        logging.debug(f"[Loop Player] Coarse step: {config.coarse_step}s")
+
+        # Reload fine_step setting
+        config.fine_step = self.context.get_setting(
+            "loop_player", "fine_step", float, config.fine_step
+        )
+        logging.debug(f"[Loop Player] Fine step: {config.fine_step}s")
 
     def get_settings_schema(self) -> dict[str, Any]:
         """Return settings schema for configuration UI.
@@ -290,7 +407,21 @@ class LoopPlayerPlugin:
                 "default": self.context.config.loop_player.duration,
                 "min": 1.0,
                 "max": 300.0,
-            }
+            },
+            "coarse_step": {
+                "label": "Coarse Step (seconds) - Ctrl+Arrows",
+                "type": "float",
+                "default": self.context.config.loop_player.coarse_step,
+                "min": 0.1,
+                "max": 10.0,
+            },
+            "fine_step": {
+                "label": "Fine Step (seconds) - Shift+Arrows",
+                "type": "float",
+                "default": self.context.config.loop_player.fine_step,
+                "min": 0.01,
+                "max": 1.0,
+            },
         }
 
     def shutdown(self) -> None:

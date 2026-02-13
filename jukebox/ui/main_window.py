@@ -125,7 +125,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.track_list, stretch=1)
 
         # Connect to model's row_deleted signal (emitted after deletion is complete)
-        self.track_list.model().row_deleted.connect(self._on_row_deleted_complete)
+        self.track_list.track_model.row_deleted.connect(self._on_row_deleted_complete)
 
         # Player controls (no stretch - fixed height)
         self.controls = PlayerControls()
@@ -154,6 +154,7 @@ class MainWindow(QMainWindow):
 
         # Player feedback
         self.player.volume_changed.connect(self.controls.set_volume)
+        self.player.state_changed.connect(self._on_player_state_changed)
 
     def _register_shortcuts(self) -> None:
         """Register default keyboard shortcuts."""
@@ -255,16 +256,13 @@ class MainWindow(QMainWindow):
                 Path(track["filepath"]),
                 track["title"],
                 track["artist"],
-                track["genre"] if "genre" in track.keys() else None,
-                track["duration_seconds"] if "duration_seconds" in track.keys() else None,
+                track["genre"],
+                track["duration_seconds"],
             )
 
         # Restore selection of current playing track
         if current_track:
-            model = self.track_list.model()
-            row = model.find_row_by_filepath(current_track)
-            if row >= 0:
-                self.track_list.selectRow(row)
+            self.track_list.select_track_by_filepath(current_track)
 
     def _load_tracks_from_db(self) -> None:
         """Load all tracks from database for current mode."""
@@ -277,8 +275,8 @@ class MainWindow(QMainWindow):
                 Path(track["filepath"]),
                 track["title"],
                 track["artist"],
-                track["genre"] if "genre" in track.keys() else None,
-                track["duration_seconds"] if "duration_seconds" in track.keys() else None,
+                track["genre"],
+                track["duration_seconds"],
             )
 
     def _on_tracks_changed(self) -> None:
@@ -293,10 +291,7 @@ class MainWindow(QMainWindow):
 
         # Restore selection of current playing track
         if current_track:
-            model = self.track_list.model()
-            row = model.find_row_by_filepath(current_track)
-            if row >= 0:
-                self.track_list.selectRow(row)
+            self.track_list.select_track_by_filepath(current_track)
 
     def _on_track_deleted(self, filepath: Path) -> None:
         """Handle track deletion - stop current playback and determine next track.
@@ -309,8 +304,8 @@ class MainWindow(QMainWindow):
         # Check if the deleted file was currently playing
         was_deleted_file_playing = self.player.current_file and self.player.current_file == filepath
 
-        # Find the row that will be deleted
-        model = self.track_list.model()
+        # Find the row that will be deleted (use source model directly)
+        model = self.track_list.track_model
         deleted_row = model.find_row_by_filepath(filepath)
 
         logging.info(
@@ -320,7 +315,7 @@ class MainWindow(QMainWindow):
         # Stop current playback if the deleted file was playing
         if was_deleted_file_playing:
             self.player.stop()
-            self.position_timer.stop()
+            # Timer is managed by _on_player_state_changed
             logging.debug("[MainWindow] Stopped playback of deleted track")
 
             # Calculate next track to play BEFORE the model removes the row
@@ -377,12 +372,11 @@ class MainWindow(QMainWindow):
         delattr(self, "deleted_track_next_filepath")
 
         # Find the row of this filepath (it has shifted after deletion)
-        model = self.track_list.model()
-        row = model.find_row_by_filepath(next_filepath)
+        self.track_list.select_track_by_filepath(next_filepath)
+        row = self.track_list.track_model.find_row_by_filepath(next_filepath)
 
         if row >= 0:
             logging.debug(f"[MainWindow] Playing next track at row {row}: {next_filepath.name}")
-            self.track_list.selectRow(row)
             self._load_and_play(next_filepath)
         else:
             logging.error(f"[MainWindow] Could not find next filepath: {next_filepath}")
@@ -434,7 +428,7 @@ class MainWindow(QMainWindow):
 
             self.player.play()
             self.setWindowTitle(f"{self.config.ui.window_title} - {filepath.name}")
-            self.position_timer.start()
+            # Timer is managed by _on_player_state_changed
 
     def _on_play(self) -> None:
         """Handle play button click."""
@@ -445,27 +439,31 @@ class MainWindow(QMainWindow):
                 self.setWindowTitle(f"{self.config.ui.window_title} - {selected.name}")
 
         self.player.play()
-        self.position_timer.start()
+        # Timer is managed by _on_player_state_changed
 
     def _on_pause(self) -> None:
         """Handle pause button click."""
-        # Pause toggles play/pause in VLC
-        was_playing = self.player.is_playing()
         self.player.pause()
-
-        # If we were playing, we're now paused -> stop timer
-        # If we were paused, we're now playing -> start timer
-        if was_playing:
-            self.position_timer.stop()
-        else:
-            self.position_timer.start()
+        # Timer is managed by _on_player_state_changed
 
     def _on_stop(self) -> None:
         """Handle stop button click."""
         self.player.stop()
-        self.position_timer.stop()
-        # Emit for plugins (waveform cursor)
-        self.event_bus.emit(Events.POSITION_UPDATE, position=0.0)
+        # Timer and position reset are managed by _on_player_state_changed
+
+    def _on_player_state_changed(self, state: str) -> None:
+        """Handle player state changes (from any source, including plugins).
+
+        Centralizes position timer management - all play/pause/stop actions
+        trigger this via the player's state_changed signal.
+        """
+        if state == "playing":
+            self.position_timer.start()
+        elif state == "paused":
+            self.position_timer.stop()
+        elif state == "stopped":
+            self.position_timer.stop()
+            self.event_bus.emit(Events.POSITION_UPDATE, position=0.0)
 
     def _update_position(self) -> None:
         """Update position based on player position."""
@@ -570,8 +568,8 @@ class MainWindow(QMainWindow):
                     filepath,
                     track["title"],
                     track["artist"],
-                    track["genre"] if "genre" in track.keys() else None,
-                    track["duration_seconds"] if "duration_seconds" in track.keys() else None,
+                    track["genre"],
+                    track["duration_seconds"],
                 )
 
     def _get_current_mode(self) -> str:
@@ -588,11 +586,12 @@ class MainWindow(QMainWindow):
         """Handle mode change - reload track list for new mode.
 
         Note: Most mode change logic is handled by mode_switcher plugin.
-        This handler is for cases where mode_manager is used without the plugin.
+        This handler provides minimal functionality when the plugin is not loaded.
 
         Args:
             mode: New application mode
         """
-        # Only reload if mode_switcher plugin hasn't already done it
-        # (mode_switcher calls _load_tracks_from_db directly)
-        pass
+        # Only act if mode_switcher plugin is not loaded
+        if "mode_switcher" not in self.plugin_manager.plugins:
+            logging.info(f"[MainWindow] Mode changed to {mode.value} (no mode_switcher plugin)")
+            self._load_tracks_from_db()

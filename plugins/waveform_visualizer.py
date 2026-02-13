@@ -45,6 +45,12 @@ class WaveformVisualizerPlugin:
         self.context.subscribe(Events.TRACKS_ADDED, self._on_tracks_added)
         self.context.subscribe(Events.WAVEFORM_CLEAR, self._on_waveform_clear)
 
+        # Subscribe to settings changes
+        self.context.subscribe(Events.PLUGIN_SETTINGS_CHANGED, self._on_settings_changed)
+
+        # Load settings from DB on startup
+        self._on_settings_changed()
+
         # Auto-start batch waveform generation at startup
         # Use a timer to defer until after UI is fully loaded
         from PySide6.QtCore import QTimer
@@ -76,6 +82,9 @@ class WaveformVisualizerPlugin:
         # This allows MainWindow to skip adding a fallback position slider
         self.context.emit(Events.POSITION_SEEKING_PROVIDED)
 
+        # Notify other plugins that waveform widget is ready
+        self.context.emit(Events.WAVEFORM_WIDGET_READY, widget=self.waveform_widget)
+
         # Add menu for batch waveform generation
         menu = ui_builder.get_or_create_menu("&View")
         ui_builder.add_menu_separator(menu)
@@ -94,8 +103,25 @@ class WaveformVisualizerPlugin:
             self.waveform_widget.set_position(position)
 
     def _on_seek_requested(self, position: float) -> None:
-        """Handle seek request from waveform click."""
-        self.context.player.set_position(position)
+        """Handle seek request from waveform click.
+
+        If the player is stopped, start playback first then seek.
+        """
+        player = self.context.player
+        if not player.current_file:
+            return
+
+        was_playing = player.is_playing()
+
+        if not was_playing:
+            # Must start playback first, then seek (VLC ignores seek when stopped)
+            player.play()
+            # Small delay to let VLC start, then seek
+            from PySide6.QtCore import QTimer
+
+            QTimer.singleShot(50, lambda: player.set_position(position))
+        else:
+            player.set_position(position)
 
     def _on_track_loaded(self, track_id: int) -> None:
         """Display waveform from cache, or add to priority queue if not cached."""
@@ -297,6 +323,27 @@ class WaveformVisualizerPlugin:
             except (RuntimeError, TypeError):
                 pass
         # Don't set to None - keep it alive so orphan workers can finish
+
+    def _on_settings_changed(self) -> None:
+        """Reload config when settings change."""
+        logging.info("[Waveform] Settings changed, reloading config from database")
+
+        config = self.context.config.waveform
+
+        # Reload chunk_duration
+        config.chunk_duration = self.context.get_setting(
+            "waveform_visualizer", "chunk_duration", int, config.chunk_duration
+        )
+        logging.debug(f"[Waveform] chunk_duration: {config.chunk_duration}")
+
+        # Reload height
+        new_height = self.context.get_setting("waveform_visualizer", "height", int, config.height)
+        if new_height != config.height:
+            config.height = new_height
+            logging.debug(f"[Waveform] height: {config.height}")
+            # Update widget height if it exists
+            if self.waveform_widget:
+                self.waveform_widget.setFixedHeight(new_height)
 
     def get_settings_schema(self) -> dict[str, Any]:
         """Return settings schema for configuration UI.

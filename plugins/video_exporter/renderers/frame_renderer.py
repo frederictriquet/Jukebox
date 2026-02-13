@@ -1,0 +1,272 @@
+"""Frame renderer for compositing visual layers."""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
+from PIL import Image
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
+    from plugins.video_exporter.layers.base import BaseVisualLayer
+
+
+class FrameRenderer:
+    """Compositor for rendering frames from multiple visual layers."""
+
+    def __init__(
+        self,
+        width: int,
+        height: int,
+        fps: int,
+        audio: NDArray[np.floating],
+        sr: int,
+        duration: float,
+        layers_config: dict[str, bool],
+        track_metadata: dict[str, Any],
+        video_clips_folder: str = "",
+        vjing_mappings: dict[str, list[str]] | None = None,
+        vjing_preset: str = "",
+        vjing_presets: dict[str, list[str]] | None = None,
+        waveform_config: dict[str, Any] | None = None,
+        use_gpu: bool = True,
+        effect_intensities: dict[str, float] | None = None,
+        color_palette: str = "neon",
+        audio_sensitivity: dict[str, float] | None = None,
+        transitions_enabled: bool = True,
+        simultaneous_effects: int = 1,
+        use_all_effects: bool = False,
+        intro_video_path: str = "",
+    ) -> None:
+        """Initialize frame renderer.
+
+        Args:
+            width: Frame width in pixels.
+            height: Frame height in pixels.
+            fps: Frames per second.
+            audio: Audio samples as numpy array.
+            sr: Sample rate.
+            duration: Duration in seconds.
+            layers_config: Dictionary of layer_name -> enabled.
+            track_metadata: Track metadata dictionary.
+            video_clips_folder: Path to folder with video clips for background.
+            vjing_mappings: Genre letter to effects list mapping.
+            vjing_preset: Name of preset to use (empty = use genre mapping).
+            vjing_presets: Available presets {name: [effects]}.
+            waveform_config: Waveform layer configuration (height_ratio, colors).
+            use_gpu: Whether to enable GPU acceleration (disable for parallel rendering).
+            effect_intensities: Per-effect intensity overrides {effect_name: intensity}.
+            color_palette: Name of color palette for VJing effects.
+            audio_sensitivity: Per-band audio sensitivity {bass, mid, treble: 0.0-2.0}.
+            transitions_enabled: Enable smooth transitions/cycling between effects.
+            simultaneous_effects: Number of VJing effects visible at the same time (1-10).
+            use_all_effects: Use all available VJing effects regardless of genre/preset.
+            intro_video_path: Path to intro video to overlay on top (plays once).
+        """
+        self.width = width
+        self.height = height
+        self.fps = fps
+        self.audio = audio
+        self.sr = sr
+        self.duration = duration
+        self.track_metadata = track_metadata
+        self.video_clips_folder = video_clips_folder
+        self.vjing_mappings = vjing_mappings or {}
+        self.vjing_preset = vjing_preset
+        self.vjing_presets = vjing_presets or {}
+        self.waveform_config = waveform_config or {}
+        self.use_gpu = use_gpu
+        self.effect_intensities = effect_intensities or {}
+        self.color_palette = color_palette
+        self.audio_sensitivity = audio_sensitivity or {}
+        self.transitions_enabled = transitions_enabled
+        self.simultaneous_effects = simultaneous_effects
+        self.use_all_effects = use_all_effects
+        self.intro_video_path = intro_video_path
+
+        # Initialize enabled layers
+        self.layers: list[BaseVisualLayer] = []
+        self._init_layers(layers_config)
+
+        logging.info(f"[Frame Renderer] Initialized with {len(self.layers)} layers")
+
+    def _get_metadata(self, key: str, default: str = "") -> str:
+        """Get metadata value safely from sqlite3.Row or dict.
+
+        Args:
+            key: Metadata key to retrieve.
+            default: Default value if key not found.
+
+        Returns:
+            Metadata value or default.
+        """
+        try:
+            value = self.track_metadata[key]
+            return value if value else default
+        except (KeyError, IndexError, TypeError):
+            return default
+
+    def _init_layers(self, layers_config: dict[str, bool]) -> None:
+        """Initialize visual layers based on configuration.
+
+        Args:
+            layers_config: Dictionary of layer_name -> enabled.
+        """
+        # Common kwargs for all layers
+        common_kwargs = {
+            "width": self.width,
+            "height": self.height,
+            "fps": self.fps,
+            "audio": self.audio,
+            "sr": self.sr,
+            "duration": self.duration,
+        }
+
+        # Import layers lazily
+        if layers_config.get("video_background", False) and self.video_clips_folder:
+            try:
+                from plugins.video_exporter.layers.video_layer import VideoBackgroundLayer
+
+                layer = VideoBackgroundLayer(
+                    **common_kwargs,
+                    video_folder=self.video_clips_folder,
+                )
+                self.layers.append(layer)
+                logging.info("[Frame Renderer] Video background layer enabled")
+            except Exception as e:
+                logging.warning(f"[Frame Renderer] Failed to init video layer: {e}")
+
+        if layers_config.get("waveform", False):
+            try:
+                from plugins.video_exporter.layers.waveform_layer import WaveformLayer
+
+                layer = WaveformLayer(
+                    **common_kwargs,
+                    waveform_height_ratio=self.waveform_config.get("height_ratio", 0.3),
+                    bass_color=self.waveform_config.get("bass_color"),
+                    mid_color=self.waveform_config.get("mid_color"),
+                    treble_color=self.waveform_config.get("treble_color"),
+                    cursor_color=self.waveform_config.get("cursor_color"),
+                )
+                self.layers.append(layer)
+                logging.info("[Frame Renderer] Waveform layer enabled")
+            except Exception as e:
+                logging.warning(f"[Frame Renderer] Failed to init waveform layer: {e}")
+
+        if layers_config.get("dynamics", False):
+            try:
+                from plugins.video_exporter.layers.dynamics_layer import DynamicsLayer
+
+                layer = DynamicsLayer(**common_kwargs)
+                self.layers.append(layer)
+                logging.info("[Frame Renderer] Dynamics layer enabled")
+            except Exception as e:
+                logging.warning(f"[Frame Renderer] Failed to init dynamics layer: {e}")
+
+        if layers_config.get("vjing", False):
+            try:
+                from plugins.video_exporter.layers.vjing_layer import VJingLayer
+
+                # Get genre from metadata
+                genre = self._get_metadata("genre", "")
+                logging.info(
+                    f"[Frame Renderer] VJing: genre='{genre}', "
+                    f"preset='{self.vjing_preset}', mappings={self.vjing_mappings}"
+                )
+                layer = VJingLayer(
+                    **common_kwargs,
+                    genre=genre,
+                    effect_mappings=self.vjing_mappings,
+                    preset=self.vjing_preset,
+                    presets=self.vjing_presets,
+                    use_gpu=self.use_gpu,
+                    effect_intensities=self.effect_intensities,
+                    color_palette=self.color_palette,
+                    audio_sensitivity=self.audio_sensitivity,
+                    transitions_enabled=self.transitions_enabled,
+                    simultaneous_effects=self.simultaneous_effects,
+                    use_all_effects=self.use_all_effects,
+                )
+                self.layers.append(layer)
+                logging.info("[Frame Renderer] VJing layer enabled")
+            except Exception as e:
+                logging.warning(f"[Frame Renderer] Failed to init vjing layer: {e}")
+
+        if layers_config.get("text", False):
+            try:
+                from plugins.video_exporter.layers.text_layer import TextLayer
+
+                layer = TextLayer(
+                    **common_kwargs,
+                    artist=self._get_metadata("artist", "Unknown"),
+                    title=self._get_metadata("title", "Unknown"),
+                )
+                self.layers.append(layer)
+                logging.info("[Frame Renderer] Text layer enabled")
+            except Exception as e:
+                logging.warning(f"[Frame Renderer] Failed to init text layer: {e}")
+
+        # Intro overlay layer (plays once on top of everything)
+        if self.intro_video_path:
+            try:
+                from plugins.video_exporter.layers.intro_overlay_layer import IntroOverlayLayer
+
+                layer = IntroOverlayLayer(
+                    **common_kwargs,
+                    video_path=self.intro_video_path,
+                )
+                self.layers.append(layer)
+                logging.info("[Frame Renderer] Intro overlay layer enabled")
+            except Exception as e:
+                logging.warning(f"[Frame Renderer] Failed to init intro overlay layer: {e}")
+
+        # Sort by z-index
+        self.layers.sort(key=lambda layer: layer.z_index)
+
+
+    def prerender_gpu(self) -> int:
+        """Pre-render GPU effects for all layers that support it.
+
+        Call this method before starting parallel frame rendering to cache
+        GPU-accelerated effects. The GPU will be used sequentially, then
+        parallel workers can use the cached results.
+
+        Returns:
+            Total number of frames pre-rendered across all layers.
+        """
+        total_prerendered = 0
+        for layer in self.layers:
+            if hasattr(layer, "prerender_gpu_frames"):
+                count = layer.prerender_gpu_frames()
+                total_prerendered += count
+        return total_prerendered
+
+    def render_frame(self, frame_idx: int, time_pos: float) -> NDArray[np.uint8]:
+        """Render a single frame by compositing all layers.
+
+        Args:
+            frame_idx: Frame index.
+            time_pos: Time position in seconds.
+
+        Returns:
+            RGB frame as numpy array (height, width, 3).
+        """
+        # Start with black background
+        composite = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 255))
+
+        # Render and composite each layer
+        for layer in self.layers:
+            try:
+                layer_image = layer.render(frame_idx, time_pos)
+                if layer_image.mode != "RGBA":
+                    layer_image = layer_image.convert("RGBA")
+                composite = Image.alpha_composite(composite, layer_image)
+            except Exception as e:
+                logging.warning(f"[Frame Renderer] Layer {layer.__class__.__name__} failed: {e}")
+
+        # Convert to RGB numpy array
+        rgb = composite.convert("RGB")
+        return np.array(rgb, dtype=np.uint8)

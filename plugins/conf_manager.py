@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeyEvent, QKeySequence
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDoubleSpinBox,
     QFileDialog,
@@ -366,11 +367,12 @@ class ConfigDialog(QDialog):
                 {
                     "setting_key": {
                         "label": "Display Label",
-                        "type": "directory" | "shortcut" | "int" | "float" | "string" | "bool",
+                        "type": "directory" | "shortcut" | "int" | "float" | "string" | "bool" | "choice",
                         "default": default_value,
                         "min": min_value (for int/float),
                         "max": max_value (for int/float),
-                        "suffix": " seconds" (for int/float)
+                        "suffix": " seconds" (for int/float),
+                        "options": ["opt1", "opt2"] (for choice - list of values)
                     }
                 }
         """
@@ -398,6 +400,16 @@ class ConfigDialog(QDialog):
                 # List of structured items
                 item_schema = setting_config.get("item_schema", {})
                 input_widget = ListEditor(item_schema)
+            elif setting_type == "choice":
+                # Dropdown with predefined options
+                input_widget = QComboBox()
+                options = setting_config.get("options", [])
+                for option in options:
+                    # Support both simple strings and dict with label/value
+                    if isinstance(option, dict):
+                        input_widget.addItem(option.get("label", ""), option.get("value", ""))
+                    else:
+                        input_widget.addItem(str(option), str(option))
             elif setting_type == "bool":
                 input_widget = QCheckBox()
                 input_widget.setChecked(setting_config.get("default", False))
@@ -478,6 +490,16 @@ class ConfigDialog(QDialog):
                         # Use default from schema
                         default = setting_config.get("default", [])
                         input_widget.set_items(default)
+                elif isinstance(input_widget, QComboBox):
+                    # Find and select matching value
+                    index = input_widget.findData(value)
+                    if index >= 0:
+                        input_widget.setCurrentIndex(index)
+                    else:
+                        # Try by text if data not found
+                        index = input_widget.findText(value)
+                        if index >= 0:
+                            input_widget.setCurrentIndex(index)
                 elif isinstance(input_widget, QCheckBox):
                     # Parse boolean
                     bool_value = value.lower() in ("true", "1", "yes") if value else False
@@ -510,6 +532,9 @@ class ConfigDialog(QDialog):
 
                     items = input_widget.get_items()
                     value = json.dumps(items)
+                elif isinstance(input_widget, QComboBox):
+                    # Get selected value (use data if available, otherwise text)
+                    value = input_widget.currentData() or input_widget.currentText()
                 elif isinstance(input_widget, QCheckBox):
                     value = "true" if input_widget.isChecked() else "false"
                 elif isinstance(input_widget, (DirectoryInput, ShortcutInput, QLineEdit)):

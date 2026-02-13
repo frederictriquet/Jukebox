@@ -1,0 +1,330 @@
+# Roadmap VJing Effects - Video Exporter Plugin
+
+## Vue d'ensemble
+
+Cette roadmap définit le plan d'implémentation et d'amélioration des effets visuels VJing pour le plugin video_exporter. Les effets sont organisés par catégorie et priorité.
+
+---
+
+## Phase 1 : Fondations (✅ COMPLÉTÉ)
+
+### 1.1 Infrastructure audio
+- [x] Extraction énergie globale par frame
+- [x] Séparation basses/mids/aigus (filtres Butterworth)
+- [x] Détection de beats (onset detection sur basses)
+- [x] Pré-calcul FFT 32 bandes par frame
+- [x] Normalisation des données
+
+### 1.2 Architecture des effets
+- [x] Système de contexte (`ctx`) avec energy, bass, mid, treble, fft, is_beat
+- [x] Mapping genre → effet configurable
+- [x] Support multi-effets (genres multi-lettres)
+- [x] Liste `AVAILABLE_EFFECTS` pour documentation
+
+---
+
+## Phase 2 : Effets de base (✅ COMPLÉTÉ)
+
+### 2.1 Effets classiques
+| Effet | Status | Description |
+|-------|--------|-------------|
+| `wave` | ✅ | Vagues sinusoïdales fluides |
+| `neon` | ✅ | Formes néon pulsantes |
+| `vinyl` | ✅ | Sillons de vinyle rotatifs |
+| `particles` | ✅ | Particules colorées basiques |
+
+### 2.2 Effets rythmiques
+| Effet | Status | Description |
+|-------|--------|-------------|
+| `pulse` | ✅ | Cercles expansifs sur beats |
+| `strobe` | ✅ | Stroboscope intelligent |
+
+---
+
+## Phase 3 : Effets spectraux (✅ COMPLÉTÉ)
+
+| Effet | Status | Description |
+|-------|--------|-------------|
+| `fft_bars` | ✅ | Barres FFT verticales colorées |
+| `fft_rings` | ✅ | Anneaux concentriques FFT |
+| `bass_warp` | ✅ | Déformation polygonale par basses |
+
+---
+
+## Phase 4 : Systèmes de particules avancés (✅ COMPLÉTÉ)
+
+| Effet | Status | Description |
+|-------|--------|-------------|
+| `flow_field` | ✅ | Champ de flux pseudo-Perlin |
+| `explosion` | ✅ | Explosion sur beats forts |
+
+---
+
+## Phase 5 : Effets géométriques (✅ COMPLÉTÉ)
+
+| Effet | Status | Description |
+|-------|--------|-------------|
+| `kaleidoscope` | ✅ | Motifs kaléidoscopiques |
+| `lissajous` | ✅ | Courbes de Lissajous modulées |
+| `tunnel` | ✅ | Tunnel infini avec profondeur |
+| `spiral` | ✅ | Spirale animée colorée |
+
+---
+
+## Phase 6 : Post-processing (✅ COMPLÉTÉ)
+
+| Effet | Status | Description |
+|-------|--------|-------------|
+| `chromatic` | ✅ | Aberration chromatique RGB |
+| `glitch` | ✅ | Glitch + bruit digital |
+| `pixelate` | ✅ | Pixelisation dynamique |
+| `feedback` | ✅ | Traînées avec décroissance |
+
+---
+
+## Phase 7 : Effets naturels (✅ COMPLÉTÉ)
+
+| Effet | Status | Description |
+|-------|--------|-------------|
+| `fire` | ✅ | Flammes animées |
+| `water` | ✅ | Ondulations d'eau sur beats |
+| `aurora` | ✅ | Aurore boréale ondulante |
+
+---
+
+## Phase 8 : Améliorations futures (🔄 À FAIRE)
+
+### 8.1 Effets supplémentaires (Priorité Haute) ✅ COMPLÉTÉ
+| Effet | Status | Description | Complexité |
+|-------|--------|-------------|------------|
+| `fractal` | ✅ | Fractales Julia animées (modulées par audio) | Élevée |
+| `wormhole` | ✅ | Trou de ver avec distorsion spirale | Moyenne |
+| `plasma` | ✅ | Plasma coloré ondulant (sinus combinés) | Moyenne |
+| `matrix` | ✅ | Pluie de caractères style Matrix | Faible |
+| `radar` | ✅ | Balayage radar circulaire avec blips | Faible |
+
+### 8.2 Effets supplémentaires (Priorité Moyenne) ✅ COMPLÉTÉ
+| Effet | Status | Description | Complexité |
+|-------|--------|-------------|------------|
+| `starfield` | ✅ | Champ d'étoiles 3D avec perspective | Faible |
+| `lightning` | ✅ | Éclairs ramifiés sur beats | Moyenne |
+| `voronoi` | ✅ | Diagramme de Voronoï animé | Moyenne |
+| `metaballs` | ✅ | Métaballs fluides (blob effect) | Élevée |
+| `smoke` | ✅ | Simulation de fumée avec turbulence | Élevée |
+
+### 8.3 Améliorations techniques
+| Amélioration | Status | Description |
+|--------------|--------|-------------|
+| Présets d'effets | ✅ | Combinaisons pré-configurées (8 présets) |
+| Vrai bruit de Perlin | ✅ | Bibliothèque noise (pnoise2, snoise2) + fallback pseudo-noise |
+| Shaders GPU | ✅ | ModernGL (plasma, fractal, metaballs, wormhole, voronoi) |
+| Transitions entre effets | ✅ | Fondu crossfade entre effets (configurable: duration, cycle) |
+| LFO modulables | ✅ | 6 LFOs (slow, medium, fast, triangle, saw, random) |
+
+### 8.4 Configuration avancée ✅ COMPLÉTÉ
+| Feature | Status | Description |
+|---------|--------|-------------|
+| Intensité par effet | ✅ | Slider d'intensité individuel (global + 7 effets) |
+| Palette de couleurs | ✅ | 10 palettes (neon, fire, ice, nature, sunset, ocean, cosmic, retro, monochrome, rainbow) |
+| Sensibilité audio | ✅ | Sliders Bass/Mid/Treble (0-200%) |
+| Mode preview | ✅ | Preview temps réel avec Play/Pause et navigation |
+
+---
+
+## Mappings par défaut actuels
+
+Genres valides: D, C, P, T, H, G, I, A, W, B, F, R, L, U, O, N
+
+```python
+DEFAULT_MAPPINGS = {
+    "D": "aurora",       # Deep - chill, ambient
+    "C": "kaleidoscope", # Classic - elegant
+    "P": "strobe",       # Power - energetic
+    "T": "fractal",      # Trance - hypnotic, psychedelic
+    "H": "fire",         # House - groovy, warm
+    "G": "flow_field",   # Garden - natural
+    "I": "neon",         # Ibiza - club, colorful
+    "A": "wave",         # A Cappella - soft
+    "W": "plasma",       # Weed - chill, psychedelic
+    "B": "glitch",       # Banger - intense
+    "F": "particles",    # Fun - playful, festive
+    "R": "vinyl",        # Retro - vintage
+    "L": "lissajous",    # Loop - repetitive, hypnotic
+    "U": "wormhole",     # Unclassable - weird, experimental
+    "O": "flow_field",   # Organic - natural
+    "N": "wave",         # Namaste - zen, calm
+}
+```
+
+---
+
+## Notes techniques
+
+### Pilotage audio
+- **energy** : Énergie RMS globale (0-1)
+- **bass** : Énergie 20-250 Hz (0-1)
+- **mid** : Énergie 250-4000 Hz (0-1)
+- **treble** : Énergie 4000+ Hz (0-1)
+- **fft** : 32 bandes FFT normalisées
+- **is_beat** : Booléen, vrai sur les beats détectés
+
+### Fichiers concernés
+- `plugins/video_exporter/layers/vjing_layer.py` : Tous les effets (30+)
+- `plugins/video_exporter/layers/gpu_shaders.py` : Shaders GPU ModernGL (5 shaders)
+- `plugins/video_exporter/renderers/frame_renderer.py` : Compositeur de frames
+- `plugins/video_exporter/export_dialog.py` : Dialog d'export + EffectPreviewDialog
+- `plugins/video_exporter/export_worker.py` : Worker d'export parallélisé
+- `plugins/video_exporter/plugin.py` : Configuration et settings
+- `config/config.yaml` : Mappings VJing, presets
+
+### Système de preview
+- **Preview globale** (onglet Preview) : Tous les layers activés, résolution max 480p
+- **Preview par effet** (bouton 👁) : Effet seul via `EffectPreviewDialog`, 320x180 @ 30fps
+- Les previews utilisent : palette de couleurs, intensité, sensibilité audio, boucle audio courante
+- VJingLayer supporte preset `_single_effect` pour isoler un effet
+
+### Performance
+- Pré-calcul des données audio dans `_precompute()`
+- Effets à particules : limiter le nombre max
+- Éviter allocations mémoire dans `render()`
+- Feedback buffer : réutiliser l'image
+
+---
+
+## Changelog
+
+### v1.17 (2026-01-25)
+- Support palettes dynamiques dans les shaders GPU
+- Modification complète de `gpu_shaders.py` :
+  - Ajout `PALETTE_FUNCTIONS` GLSL avec `getPaletteColor()` et `getPaletteColorCycled()`
+  - Uniform `vec3 palette[5]` dans tous les shaders
+  - Interpolation des couleurs entre les 5 couleurs de palette
+  - Cycling temporel pour animation des couleurs
+- 5 shaders GPU mis à jour : plasma, fractal, metaballs, wormhole, voronoi
+- Méthode `render()` accepte maintenant paramètre `palette: list[tuple[int, int, int]]`
+- Normalisation automatique RGB (0-255) → vec3 (0.0-1.0) pour GLSL
+- `VJingLayer._render_gpu_effect()` passe la palette configurée
+- `VJingLayer.prerender_gpu_frames()` passe la palette configurée
+- Les previews individuelles et full preview utilisent GPU + palettes correctement
+
+### v1.16 (2026-01-25)
+- Fix: Toutes les previews d'effets utilisent maintenant la palette de couleurs configurée
+- Effets corrigés pour utiliser `self.color_palette` :
+  - `_create_fractal_palette` : génère un dégradé 256 couleurs à partir de la palette
+  - `_render_plasma` : interpolation couleurs de la palette
+  - `_render_wormhole` : interpolation couleurs de la palette
+  - `_render_fire` : dégradé à travers les couleurs de la palette
+  - `_render_metaballs` : interpolation couleurs de la palette
+  - `_render_smoke` : couleurs de la palette désaturées
+  - `_render_tunnel` : couleurs de la palette avec cycling
+  - `_render_spiral` : couleurs de la palette avec cycling
+  - `_render_radar` : couleurs primaire, secondaire et blip depuis la palette
+  - `_render_water` : couleurs de la palette pour les ripples
+  - `_draw_lightning_bolt` : couleurs core et glow depuis la palette
+  - `_render_strobe` : flash coloré basé sur la palette
+  - `_render_pulse` : anneaux colorés basés sur la palette
+  - `_render_starfield` : étoiles colorées depuis la palette
+  - `_render_fft_bars` : barres colorées selon la palette
+  - `_render_fft_rings` : anneaux colorés selon la palette
+- Ajout `color_idx` aux particules : `_spawn_star`, `_spawn_smoke_particle`
+- Fix bug: `self.intensity` → `self._current_intensity` dans `_render_fft_rings`
+
+### v1.15 (2026-01-25)
+- Ajout preview individuelle par effet (bouton 👁 à côté de chaque slider)
+- Classe `EffectPreviewDialog` dans export_dialog.py
+- Preview utilise l'effet seul avec palette, intensité et sensibilité audio configurées
+- Résolution 320x180 @ 30fps pour fluidité
+
+### v1.14 (2026-01-25)
+- Ajout mode preview temps réel dans le dialog
+- Onglet "Preview" avec affichage des frames, slider de navigation, Play/Pause
+- Résolution réduite (max 480p) pour fluidité
+- Lecture en boucle, nettoyage automatique des ressources
+
+### v1.13 (2026-01-25)
+- Ajout sensibilité audio par bande de fréquence
+- Sliders Bass/Mid/Treble (0-200%) dans le dialog
+- Paramètre `audio_sensitivity` dans VJingLayer
+- Multiplicateurs appliqués aux valeurs dans le contexte
+
+### v1.12 (2026-01-25)
+- Ajout système de palettes de couleurs
+- 10 palettes prédéfinies: neon, fire, ice, nature, sunset, ocean, cosmic, retro, monochrome, rainbow
+- Sélecteur de palette dans le dialog (onglet Layers)
+- Méthodes helper: `_get_palette_color()`, `_get_random_palette_color()`, `_get_palette_colors()`
+- Effets mis à jour pour utiliser les palettes: aurora, neon, particles, lissajous, voronoi, explosion, kaleidoscope, wave, bass_warp, flow_field
+
+### v1.11 (2026-01-25)
+- Ajout intensité par effet (sliders individuels dans le dialog)
+- Nouveau paramètre `effect_intensities` dans VJingLayer
+- Méthode `_get_intensity(effect_name)` pour récupérer l'intensité
+- `_current_intensity` mis à jour avant chaque effet
+- UI: slider global + sliders pour fractal, plasma, wormhole, voronoi, metaballs, fire, smoke
+
+### v1.10 (2026-01-25)
+- Fix crash GPU avec workers parallèles (OpenGL non thread-safe)
+- Système de pré-rendu GPU : frames GPU rendues séquentiellement avant les workers
+- Cache `_gpu_frame_cache` dans VJingLayer pour stocker les frames pré-rendues
+- Méthode `prerender_gpu_frames()` dans VJingLayer
+- Méthode `prerender_gpu()` dans FrameRenderer
+- Le GPU est utilisé efficacement, puis le compositing est parallélisé
+
+### v1.9 (2026-01-25)
+- Ajout shaders GPU avec ModernGL pour effets lourds
+- Module `gpu_shaders.py` avec 5 shaders GLSL
+- Effets accélérés: plasma, fractal, metaballs, wormhole, voronoi
+- ~2x plus rapide que le rendu CPU (3ms vs 6ms/frame)
+- Fallback automatique CPU si GPU non disponible
+- Paramètre `use_gpu=True` dans VJingLayer
+
+### v1.8 (2026-01-25)
+- Ajout bibliothèque `noise` pour vrai bruit de Perlin
+- Fonctions utilitaires: `perlin2d`, `simplex2d`, `fbm2d`, `turbulence2d`
+- Fallback pseudo-noise si bibliothèque non disponible
+- Ajout système LFO modulables (6 oscillateurs)
+- Classes `LFO` et `LFOWaveform` (sine, triangle, sawtooth, square, random)
+- Effets mis à jour: flow_field, smoke, fire, aurora, tunnel, spiral
+
+### v1.7 (2026-01-25)
+- Ajout transitions crossfade entre effets
+- Paramètres: `transition_duration` (2s), `effect_cycle_duration` (8s)
+- Correction bug alpha compositing dans `_render_with_transitions`
+
+### v1.6 (2026-01-25)
+- Ajout système de présets d'effets VJing
+- 8 présets disponibles: Chill, Energetic, Psychedelic, Nature, Retro, Space, Liquid, Geometric
+- Sélecteur de préset dans le dialog d'export
+- Les présets overrident les mappings de genre
+
+### v1.5 (2026-01-25)
+- Ajout effet `metaballs` (blobs fluides qui fusionnent, field function)
+- Ajout effet `smoke` (fumée avec particules et turbulence)
+- Suppression effet `glitch` (à la demande)
+- Total: 30 effets disponibles
+- Phase 8.2 complétée
+
+### v1.4 (2026-01-25)
+- Support multi-effets par genre (ex: `effects: ["fractal", "tunnel"]`)
+- Format config.yaml modifié: `effect` → `effects` (liste)
+- Rétrocompatibilité avec ancien format via `get_effects()`
+
+### v1.3 (2026-01-25)
+- Ajout effet `starfield` (champ d'étoiles 3D avec perspective et motion trails)
+- Ajout effet `lightning` (éclairs ramifiés récursifs sur beats)
+- Ajout effet `voronoi` (diagramme de Voronoï animé avec détection de bords)
+- Total: 29 effets disponibles
+
+### v1.2 (2026-01-25)
+- Ajout effet `radar` (balayage radar avec blips sur beats)
+- Ajout effet `plasma` (plasma ondulant multi-couleurs)
+- Ajout effet `wormhole` (tunnel spirale avec effet de profondeur)
+- Suppression effet `matrix` (à la demande)
+
+### v1.1 (2026-01-25)
+- Ajout effet `fractal` (Julia set animé)
+- Mapping: T (Trance) → fractal
+
+### v1.0 (2026-01-25)
+- Implémentation initiale de 22 effets
+- Système de contexte audio complet
+- Mappings par genre configurables

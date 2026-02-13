@@ -49,6 +49,50 @@ class JukeboxPlugin(Protocol):
         ...
 
 
+class BasePlugin:
+    """Base class for plugins with default implementations.
+
+    Plugins can inherit from this class to avoid implementing empty methods.
+    All lifecycle methods have no-op defaults.
+
+    Attributes:
+        name: Plugin identifier (must be overridden).
+        version: Plugin version string (must be overridden).
+        description: Human-readable description (must be overridden).
+        modes: List of modes where plugin is active. Defaults to all modes.
+        context: Plugin context, set during initialize().
+    """
+
+    name: str = "base_plugin"
+    version: str = "0.0.0"
+    description: str = "Base plugin class"
+    modes: list[str] = ["jukebox", "curating"]
+
+    def __init__(self) -> None:
+        """Initialize plugin instance."""
+        self.context: PluginContextProtocol | None = None
+
+    def initialize(self, context: PluginContextProtocol) -> None:
+        """Called when plugin is loaded. Override to add initialization logic."""
+        self.context = context
+
+    def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
+        """Register UI elements. Override to add UI components."""
+        pass
+
+    def activate(self, mode: str) -> None:
+        """Called when entering a mode where this plugin is active."""
+        pass
+
+    def deactivate(self, mode: str) -> None:
+        """Called when leaving a mode where this plugin is active."""
+        pass
+
+    def shutdown(self) -> None:
+        """Called when application closes. Override for cleanup."""
+        pass
+
+
 class PluginContext:
     """Context provided to plugins.
 
@@ -81,6 +125,57 @@ class PluginContext:
         if self.event_bus:
             self.event_bus.subscribe(event, callback)
 
+    def get_setting(
+        self,
+        plugin_name: str,
+        key: str,
+        value_type: type,
+        default: Any = None,
+    ) -> Any:
+        """Get a plugin setting with automatic type conversion.
+
+        Retrieves a setting from the database and converts it to the specified type.
+        Handles errors gracefully by returning the default value.
+
+        Args:
+            plugin_name: Name of the plugin.
+            key: Setting key.
+            value_type: Target type (int, float, bool, str).
+            default: Default value if setting not found or conversion fails.
+
+        Returns:
+            The setting value converted to value_type, or default on failure.
+        """
+        value = self.database.settings.get(plugin_name, key)
+
+        if value is None:
+            return default
+
+        try:
+            if value_type is bool:
+                return value.lower() in ("true", "1", "yes")
+            return value_type(value)
+        except (ValueError, AttributeError):
+            logging.warning(f"[{plugin_name}] Invalid {key} value: {value}, using default")
+            return default
+
+    def get_current_track_duration(self) -> float | None:
+        """Get the duration of the currently loaded track.
+
+        Convenience method that retrieves the current track from database
+        and returns its duration.
+
+        Returns:
+            Duration in seconds, or None if no track loaded or duration unavailable.
+        """
+        if not self.player.current_file:
+            return None
+        track = self.database.tracks.get_by_filepath(self.player.current_file)
+        if not track or not track["duration_seconds"]:
+            return None
+        duration: float = track["duration_seconds"]
+        return duration
+
 
 class PluginManager:
     """Manage plugins lifecycle."""
@@ -93,11 +188,27 @@ class PluginManager:
         self.current_mode: str | None = None
 
     def discover_plugins(self) -> list[str]:
-        """Discover available plugins."""
+        """Discover available plugins.
+
+        Supports both single-file plugins (*.py) and package plugins (directories with __init__.py).
+        """
         if not self.plugins_dir.exists():
             return []
 
-        return [f.stem for f in self.plugins_dir.glob("*.py") if not f.stem.startswith("_")]
+        plugins = []
+
+        # Find single-file plugins (*.py)
+        for f in self.plugins_dir.glob("*.py"):
+            if not f.stem.startswith("_"):
+                plugins.append(f.stem)
+
+        # Find package plugins (directories with __init__.py)
+        for d in self.plugins_dir.iterdir():
+            if d.is_dir() and not d.name.startswith("_") and (d / "__init__.py").exists():
+                if d.name not in plugins:  # Avoid duplicates
+                    plugins.append(d.name)
+
+        return plugins
 
     def load_plugin(self, plugin_name: str) -> bool:
         """Load a plugin."""

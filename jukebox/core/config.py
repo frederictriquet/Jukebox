@@ -65,6 +65,8 @@ class LoopPlayerConfig(BaseModel):
     """Loop player configuration."""
 
     duration: float = Field(gt=0, default=30.0)
+    coarse_step: float = Field(gt=0, default=1.0)  # Seconds for Ctrl+Arrow
+    fine_step: float = Field(gt=0, default=0.1)  # Seconds for Shift+Arrow
 
 
 class WaveformConfig(BaseModel):
@@ -140,6 +142,69 @@ class FileManagerConfig(BaseModel):
     trash_key: str = "Delete"
 
 
+class VJingEffectMappingConfig(BaseModel):
+    """Configuration for VJing effect mapping by genre letter."""
+
+    letter: str
+    effects: list[str] = []  # List of effects for this genre letter
+
+    # Support legacy single effect format
+    effect: str | None = None  # Deprecated: use effects instead
+
+    def get_effects(self) -> list[str]:
+        """Get effects list, supporting both old and new format."""
+        if self.effects:
+            return self.effects
+        if self.effect:
+            return [self.effect]
+        return []
+
+
+class VJingPresetConfig(BaseModel):
+    """Configuration for a VJing effects preset."""
+
+    name: str  # Display name
+    effects: list[str]  # List of effects in this preset
+    description: str = ""  # Optional description
+
+
+class VideoExporterConfig(BaseModel):
+    """Video exporter configuration."""
+
+    default_resolution: str = "1080p"  # 1080p, 720p, square_1080, square_720, vertical
+    default_fps: int = Field(ge=15, le=60, default=30)
+    output_directory: str = "~/Videos/Jukebox"
+    video_clips_folder: str = ""
+    intro_video_path: str = ""  # Overlay video that plays once on top
+    # Layer defaults
+    waveform_enabled: bool = True
+    text_enabled: bool = True
+    dynamics_enabled: bool = True
+    vjing_enabled: bool = False
+    video_background_enabled: bool = False
+    # Waveform layer settings
+    waveform_height_ratio: float = Field(ge=0.1, le=0.8, default=0.3)
+    waveform_bass_color: str = "#0066FF"  # Blue
+    waveform_mid_color: str = "#00FF00"  # Green
+    waveform_treble_color: str = "#FFFFFF"  # White
+    waveform_cursor_color: str = "#FFFFFF"  # White
+    # VJing effect mappings
+    vjing_mappings: list[VJingEffectMappingConfig] = [
+        VJingEffectMappingConfig(letter="E", effect="strobe"),
+        VJingEffectMappingConfig(letter="T", effect="glitch"),
+        VJingEffectMappingConfig(letter="H", effect="fire"),
+        VJingEffectMappingConfig(letter="R", effect="vinyl"),
+        VJingEffectMappingConfig(letter="J", effect="neon"),
+        VJingEffectMappingConfig(letter="C", effect="particles"),
+        VJingEffectMappingConfig(letter="A", effect="wave"),
+    ]
+    # VJing presets (predefined effect combinations)
+    vjing_presets: list[VJingPresetConfig] = []
+    vjing_default_preset: str = ""  # Empty = use genre mappings
+    # VJing simultaneous effects (how many effects are visible at once)
+    vjing_simultaneous_effects: int = Field(ge=1, le=10, default=1)
+
+
 class PluginsConfig(BaseModel):
     """Plugins configuration."""
 
@@ -168,6 +233,7 @@ class JukeboxConfig(BaseModel):
     metadata_editor: MetadataEditorConfig = Field(default_factory=MetadataEditorConfig)
     genre_editor: GenreEditorConfig = Field(default_factory=GenreEditorConfig)
     file_manager: FileManagerConfig = Field(default_factory=FileManagerConfig)
+    video_exporter: VideoExporterConfig = Field(default_factory=VideoExporterConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     logging: LoggingConfig
 

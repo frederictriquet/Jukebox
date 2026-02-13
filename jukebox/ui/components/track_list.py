@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt, Signal
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import QMenu, QTableView
 
@@ -396,9 +396,9 @@ class TrackList(QTableView):
         """
         super().__init__(parent)
 
-        # Set model
-        model = TrackListModel(database, event_bus, config, mode)
-        self.setModel(model)
+        # Set model - store reference for direct access
+        self._track_model = TrackListModel(database, event_bus, config, mode)
+        self.setModel(self._track_model)
 
         # Table configuration
         self.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
@@ -431,6 +431,44 @@ class TrackList(QTableView):
         # Playlists for context menu
         self.playlists: list[Any] = []
 
+    @property
+    def track_model(self) -> TrackListModel:
+        """Get the underlying TrackListModel (bypassing any proxy)."""
+        return self._track_model
+
+    def set_proxy_model(self, proxy: QSortFilterProxyModel) -> None:
+        """Insert a proxy model between the source model and the view.
+
+        Args:
+            proxy: The proxy model to insert
+        """
+        proxy.setSourceModel(self._track_model)
+        self.setModel(proxy)
+
+    def remove_proxy_model(self) -> None:
+        """Remove any proxy model and restore direct source model."""
+        self.setModel(self._track_model)
+
+    def select_track_by_filepath(self, filepath: Path) -> None:
+        """Select a track by its filepath, handling proxy mapping if needed.
+
+        Args:
+            filepath: Path of the track to select
+        """
+        source_row = self._track_model.find_row_by_filepath(filepath)
+        if source_row < 0:
+            return
+
+        model = self.model()
+        if isinstance(model, QSortFilterProxyModel):
+            # Map source row to proxy row
+            source_index = self._track_model.index(source_row, 0)
+            proxy_index = model.mapFromSource(source_index)
+            if proxy_index.isValid():
+                self.selectRow(proxy_index.row())
+        else:
+            self.selectRow(source_row)
+
     def add_track(
         self,
         filepath: Path,
@@ -448,9 +486,7 @@ class TrackList(QTableView):
             genre: Track genre (optional)
             duration_seconds: Track duration in seconds (optional)
         """
-        model = self.model()
-        if isinstance(model, TrackListModel):
-            model.add_track(filepath, title, artist, genre, duration_seconds)
+        self._track_model.add_track(filepath, title, artist, genre, duration_seconds)
 
     def add_tracks(self, filepaths: list[Path]) -> None:
         """Add multiple tracks.
@@ -463,20 +499,15 @@ class TrackList(QTableView):
 
     def clear_tracks(self) -> None:
         """Clear all tracks."""
-        model = self.model()
-        if isinstance(model, TrackListModel):
-            model.clear()
+        self._track_model.clear()
 
     def count(self) -> int:
-        """Get number of tracks in the list.
+        """Get number of visible tracks in the list.
 
         Returns:
-            Number of tracks
+            Number of tracks (filtered if proxy is active)
         """
-        model = self.model()
-        if isinstance(model, TrackListModel):
-            return model.rowCount()
-        return 0
+        return self.model().rowCount()
 
     def item(self, row: int) -> Any:
         """Get item at row (for compatibility with tests).
@@ -487,10 +518,9 @@ class TrackList(QTableView):
         Returns:
             Object with text() method returning the display text
         """
-        model = self.model()
-        if isinstance(model, TrackListModel) and 0 <= row < model.rowCount():
+        if 0 <= row < self._track_model.rowCount():
             # Return a simple object with text() method
-            track = model.tracks[row]
+            track = self._track_model.tracks[row]
 
             class _Item:
                 def __init__(self, track_data: dict[str, Any]) -> None:
@@ -509,14 +539,13 @@ class TrackList(QTableView):
             return _Item(track)
         return None
 
-    def setCurrentRow(self, row: int) -> None:
+    def setCurrentRow(self, row: int) -> None:  # noqa: N802
         """Select row by index (for compatibility with tests).
 
         Args:
             row: Row index to select
         """
-        model = self.model()
-        if isinstance(model, TrackListModel) and 0 <= row < model.rowCount():
+        if 0 <= row < self.model().rowCount():
             self.selectRow(row)
 
     def get_selected_track(self) -> Path | None:
@@ -540,9 +569,7 @@ class TrackList(QTableView):
         Args:
             mode: Application mode ("jukebox" or "curating")
         """
-        model = self.model()
-        if isinstance(model, TrackListModel):
-            model.set_mode(mode)
+        self._track_model.set_mode(mode)
 
     def _on_row_clicked(self, index: QModelIndex) -> None:
         """Handle row click."""
@@ -651,7 +678,7 @@ class TrackList(QTableView):
         current_row = current_index.row() if current_index.isValid() else -1
 
         model = self.model()
-        if isinstance(model, TrackListModel) and current_row < model.rowCount() - 1:
+        if current_row < model.rowCount() - 1:
             next_row = current_row + 1
             self.selectRow(next_row)
             # Emit signal

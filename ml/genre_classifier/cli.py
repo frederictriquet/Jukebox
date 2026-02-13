@@ -2,6 +2,8 @@
 """Command-line interface for genre classifier."""
 
 import argparse
+import os
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -21,7 +23,11 @@ def cmd_stats(args: argparse.Namespace) -> int:
     print("=== Dataset Statistics ===")
     print(f"Total tracks: {stats['total_tracks']}")
     print(f"Tracks with genre: {stats['tracks_with_genre']}")
-    print(f"Tracks with analysis: {stats['tracks_with_analysis']}")
+    print(f"Tracks with basic analysis: {stats['tracks_with_analysis']}")
+    print(f"Tracks with ML features: {stats['tracks_with_ml_features']}")
+    missing_ml = stats['tracks_with_analysis'] - stats['tracks_with_ml_features']
+    if missing_ml > 0:
+        print(f"  → {missing_ml} tracks need ML analysis (run: analyze)")
     print(f"Usable for training: {stats['usable_for_training']}")
     print(f"Unique genres: {stats['unique_genres']}")
     print(f"Excluded genres: {', '.join(stats['excluded_genres'])}")
@@ -163,6 +169,162 @@ def cmd_info(args: argparse.Namespace) -> int:
     return 0
 
 
+
+def _analyze_track(args: tuple[int, str]) -> tuple[int, str, dict | None, str | None]:
+    """Analyze a single track (worker function for multiprocessing).
+
+    Args:
+        args: Tuple of (track_id, filepath)
+
+    Returns:
+        Tuple of (track_id, filepath, features_dict or None, error_message or None)
+    """
+    from plugins.audio_analyzer import analyze_audio_file
+
+    track_id, filepath = args
+    try:
+        features = analyze_audio_file(filepath, extract_ml_features=True)
+        return (track_id, filepath, features, None)
+    except Exception as e:
+        return (track_id, filepath, None, str(e))
+
+
+def _save_analysis(db_path: Path, track_id: int, features: dict) -> None:
+    """Save analysis results to database.
+
+    Args:
+        db_path: Path to database
+        track_id: Track ID
+        features: Analysis features dict
+    """
+    conn = sqlite3.connect(db_path)
+
+    columns = list(features.keys())
+    placeholders = ", ".join(["?"] * (len(columns) + 1))
+    col_names = ", ".join(["track_id"] + columns)
+    values = [track_id] + list(features.values())
+
+    conn.execute(f"""
+        INSERT OR REPLACE INTO audio_analysis ({col_names})
+        VALUES ({placeholders})
+    """, values)
+    conn.commit()
+    conn.close()
+
+def cmd_analyze(args: argparse.Namespace) -> int:
+    """Analyze tracks that don't have audio analysis yet."""
+    import time
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    db_path = args.database
+    if not db_path.exists():
+        print(f"Error: Database not found: {db_path}", file=sys.stderr)
+        return 1
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+
+    # Get tracks without analysis
+    params: list = []
+    if args.force:
+        # Re-analyze all tracks
+        query = "SELECT id, filepath FROM tracks"
+        if args.mode:
+            query += " WHERE mode = ?"
+            params.append(args.mode)
+        if args.limit:
+            query += f" LIMIT {args.limit}"
+        cursor = conn.execute(query, params)
+    else:
+        # Only tracks without ML features
+        query = """
+            SELECT t.id, t.filepath
+            FROM tracks t
+            LEFT JOIN audio_analysis a ON t.id = a.track_id
+            WHERE (a.track_id IS NULL OR a.rms_mean IS NULL)
+        """
+        if args.mode:
+            query += " AND t.mode = ?"
+            params.append(args.mode)
+        if args.limit:
+            query += f" LIMIT {args.limit}"
+        cursor = conn.execute(query, params)
+
+    tracks = [(row["id"], row["filepath"]) for row in cursor.fetchall()]
+    conn.close()
+
+    total = len(tracks)
+    if total == 0:
+        print("All tracks are already analyzed.")
+        return 0
+
+    # Filter out missing files
+    valid_tracks = []
+    for track_id, filepath in tracks:
+        if Path(filepath).exists():
+            valid_tracks.append((track_id, filepath))
+        elif args.verbose:
+            print(f"SKIP (file not found): {filepath}")
+
+    if not valid_tracks:
+        print("No valid tracks to analyze (files not found).")
+        return 1
+
+    print(f"Analyzing {len(valid_tracks)} tracks with {args.workers} workers...")
+    start_time = time.time()
+    success = 0
+    errors = 0
+
+    with ProcessPoolExecutor(max_workers=args.workers) as executor:
+        # Submit all tasks
+        futures = {
+            executor.submit(_analyze_track, track): track
+            for track in valid_tracks
+        }
+
+        # Process results as they complete
+        for future in as_completed(futures):
+            track_id, filepath, features, error = future.result()
+            filename = Path(filepath).name
+
+            if features:
+                # Save to database
+                _save_analysis(db_path, track_id, features)
+                success += 1
+                if args.verbose:
+                    print(f"✓ {filename}")
+            else:
+                errors += 1
+                if args.verbose:
+                    print(f"✗ {filename}: {error}")
+
+            # Progress update
+            processed = success + errors
+            if processed % 10 == 0 or processed == len(valid_tracks):
+                elapsed = time.time() - start_time
+                rate = processed / elapsed if elapsed > 0 else 0
+                remaining = (len(valid_tracks) - processed) / rate if rate > 0 else 0
+                print(
+                    f"Progress: {processed}/{len(valid_tracks)} "
+                    f"({success} ok, {errors} errors) "
+                    f"- {rate:.1f} tracks/sec "
+                    f"- ETA: {remaining/60:.1f} min",
+                    end="\r",
+                )
+
+    print()  # New line after progress
+    elapsed = time.time() - start_time
+
+    print()
+    print(f"Completed in {elapsed:.1f} seconds ({elapsed/60:.1f} minutes)")
+    print(f"  Analyzed: {success}")
+    print(f"  Errors: {errors}")
+    if elapsed > 0:
+        print(f"  Rate: {len(valid_tracks)/elapsed:.2f} tracks/second")
+
+    return 0 if errors == 0 else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -256,6 +418,41 @@ def main(argv: list[str] | None = None) -> int:
         help="Path to trained model file",
     )
     info_parser.set_defaults(func=cmd_info)
+
+    # analyze command
+    analyze_parser = subparsers.add_parser("analyze", help="Analyze tracks (extract ML features)")
+    analyze_parser.add_argument(
+        "--force",
+        "-f",
+        action="store_true",
+        help="Re-analyze all tracks (even already analyzed)",
+    )
+    analyze_parser.add_argument(
+        "--mode",
+        "-m",
+        choices=["jukebox", "curating"],
+        help="Only analyze tracks in this mode",
+    )
+    analyze_parser.add_argument(
+        "--workers",
+        "-w",
+        type=int,
+        default=max(1, (os.cpu_count() or 4) - 1),
+        help=f"Number of parallel workers (default: {max(1, (os.cpu_count() or 4) - 1)})",
+    )
+    analyze_parser.add_argument(
+        "--limit",
+        "-l",
+        type=int,
+        help="Limit to N tracks (for testing)",
+    )
+    analyze_parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Show detailed progress for each track",
+    )
+    analyze_parser.set_defaults(func=cmd_analyze)
 
     args = parser.parse_args(argv)
 

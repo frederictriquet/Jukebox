@@ -175,6 +175,8 @@ class LoopPlayerConfigProtocol(Protocol):
     """Protocol for loop player configuration."""
 
     duration: float
+    coarse_step: float
+    fine_step: float
 
 
 class MetadataEditorConfigProtocol(Protocol):
@@ -187,6 +189,27 @@ class GenreEditorConfigProtocol(Protocol):
     """Protocol for genre editor configuration."""
 
     codes: list[Any]
+
+
+class VideoExporterConfigProtocol(Protocol):
+    """Protocol for video exporter configuration."""
+
+    default_resolution: str
+    default_fps: int
+    output_directory: str
+    video_clips_folder: str
+    intro_video_path: str
+    waveform_enabled: bool
+    text_enabled: bool
+    dynamics_enabled: bool
+    vjing_enabled: bool
+    video_background_enabled: bool
+    waveform_height_ratio: float
+    waveform_bass_color: str
+    waveform_mid_color: str
+    waveform_treble_color: str
+    waveform_cursor_color: str
+    vjing_mappings: list[Any]
 
 
 class ShortcutsConfigProtocol(Protocol):
@@ -208,6 +231,7 @@ class JukeboxConfigProtocol(Protocol):
     metadata_editor: MetadataEditorConfigProtocol
     genre_editor: GenreEditorConfigProtocol
     shortcuts: ShortcutsConfigProtocol
+    video_exporter: VideoExporterConfigProtocol
 
 
 # ============================================================================
@@ -276,3 +300,17 @@ class PluginContextProtocol(Protocol):
 
     def emit(self, event: str, **data: Any) -> None: ...
     def subscribe(self, event: str, callback: Callable[..., None]) -> None: ...
+
+    def get_setting(
+        self,
+        plugin_name: str,
+        key: str,
+        value_type: type,
+        default: Any = None,
+    ) -> Any:
+        """Get a plugin setting with automatic type conversion."""
+        ...
+
+    def get_current_track_duration(self) -> float | None:
+        """Get the duration of the currently loaded track."""
+        ...

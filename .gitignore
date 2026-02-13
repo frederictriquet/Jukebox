@@ -67,3 +67,5 @@ Thumbs.db
 jukebox.log
 .jukebox/
 .grepai/
+.serena/memories/
+.serena/workflow-*.md
