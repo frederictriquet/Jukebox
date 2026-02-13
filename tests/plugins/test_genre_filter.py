@@ -1,10 +1,8 @@
 """Tests for genre filter plugin."""
 
-from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
-import pytest
-from PySide6.QtCore import QModelIndex, Qt
+from PySide6.QtCore import QModelIndex
 
 from plugins.genre_filter import (
     GenreFilterButton,
@@ -133,17 +131,17 @@ class TestGenreFilterProxyModelLogic:
         proxy._off_genres = set()
 
         tracks = [
-            {"genre": "H-W"},      # Has H - pass
-            {"genre": "T"},        # No H - fail
-            {"genre": "H-P-*3"},   # Has H - pass
+            {"genre": "H-W"},  # Has H - pass
+            {"genre": "T"},  # No H - fail
+            {"genre": "H-P-*3"},  # Has H - pass
         ]
 
         with patch.object(proxy, "sourceModel") as mock_source:
             mock_source.return_value.tracks = tracks
 
-            assert proxy.filterAcceptsRow(0, QModelIndex()) is True   # H-W
+            assert proxy.filterAcceptsRow(0, QModelIndex()) is True  # H-W
             assert proxy.filterAcceptsRow(1, QModelIndex()) is False  # T
-            assert proxy.filterAcceptsRow(2, QModelIndex()) is True   # H-P-*3
+            assert proxy.filterAcceptsRow(2, QModelIndex()) is True  # H-P-*3
 
     def test_filter_logic_off_genre(self, qapp) -> None:  # type: ignore
         """Test OFF genre filter logic."""
@@ -152,17 +150,17 @@ class TestGenreFilterProxyModelLogic:
         proxy._off_genres = {"W"}
 
         tracks = [
-            {"genre": "H-W"},      # Has W - fail
-            {"genre": "T"},        # No W - pass
-            {"genre": "D-P"},      # No W - pass
+            {"genre": "H-W"},  # Has W - fail
+            {"genre": "T"},  # No W - pass
+            {"genre": "D-P"},  # No W - pass
         ]
 
         with patch.object(proxy, "sourceModel") as mock_source:
             mock_source.return_value.tracks = tracks
 
             assert proxy.filterAcceptsRow(0, QModelIndex()) is False  # H-W
-            assert proxy.filterAcceptsRow(1, QModelIndex()) is True   # T
-            assert proxy.filterAcceptsRow(2, QModelIndex()) is True   # D-P
+            assert proxy.filterAcceptsRow(1, QModelIndex()) is True  # T
+            assert proxy.filterAcceptsRow(2, QModelIndex()) is True  # D-P
 
     def test_filter_logic_multiple_on(self, qapp) -> None:  # type: ignore
         """Test ON multiple genres (AND logic)."""
@@ -171,19 +169,19 @@ class TestGenreFilterProxyModelLogic:
         proxy._off_genres = set()
 
         tracks = [
-            {"genre": "H-W"},      # Has both - pass
-            {"genre": "H"},        # Has H only - fail
-            {"genre": "W"},        # Has W only - fail
-            {"genre": "H-W-T"},    # Has both + T - pass
+            {"genre": "H-W"},  # Has both - pass
+            {"genre": "H"},  # Has H only - fail
+            {"genre": "W"},  # Has W only - fail
+            {"genre": "H-W-T"},  # Has both + T - pass
         ]
 
         with patch.object(proxy, "sourceModel") as mock_source:
             mock_source.return_value.tracks = tracks
 
-            assert proxy.filterAcceptsRow(0, QModelIndex()) is True   # H-W
+            assert proxy.filterAcceptsRow(0, QModelIndex()) is True  # H-W
             assert proxy.filterAcceptsRow(1, QModelIndex()) is False  # H only
             assert proxy.filterAcceptsRow(2, QModelIndex()) is False  # W only
-            assert proxy.filterAcceptsRow(3, QModelIndex()) is True   # H-W-T
+            assert proxy.filterAcceptsRow(3, QModelIndex()) is True  # H-W-T
 
     def test_filter_logic_combined(self, qapp) -> None:  # type: ignore
         """Test combined ON and OFF genres."""
@@ -192,19 +190,19 @@ class TestGenreFilterProxyModelLogic:
         proxy._off_genres = {"W"}
 
         tracks = [
-            {"genre": "H-T"},      # Has H, no W - pass
-            {"genre": "H-W"},      # Has H and W - fail
-            {"genre": "T"},        # No H - fail
-            {"genre": "H-D"},      # Has H, no W - pass
+            {"genre": "H-T"},  # Has H, no W - pass
+            {"genre": "H-W"},  # Has H and W - fail
+            {"genre": "T"},  # No H - fail
+            {"genre": "H-D"},  # Has H, no W - pass
         ]
 
         with patch.object(proxy, "sourceModel") as mock_source:
             mock_source.return_value.tracks = tracks
 
-            assert proxy.filterAcceptsRow(0, QModelIndex()) is True   # H-T
+            assert proxy.filterAcceptsRow(0, QModelIndex()) is True  # H-T
             assert proxy.filterAcceptsRow(1, QModelIndex()) is False  # H-W
             assert proxy.filterAcceptsRow(2, QModelIndex()) is False  # T
-            assert proxy.filterAcceptsRow(3, QModelIndex()) is True   # H-D
+            assert proxy.filterAcceptsRow(3, QModelIndex()) is True  # H-D
 
     def test_filter_logic_rating_stars_ignored(self, qapp) -> None:  # type: ignore
         """Test that rating stars (*N) are ignored."""
@@ -213,17 +211,17 @@ class TestGenreFilterProxyModelLogic:
         proxy._off_genres = set()
 
         tracks = [
-            {"genre": "H-*3"},     # H with rating - pass
-            {"genre": "*5"},       # Only rating - fail
-            {"genre": "H-W-*4"},   # H-W with rating - pass
+            {"genre": "H-*3"},  # H with rating - pass
+            {"genre": "*5"},  # Only rating - fail
+            {"genre": "H-W-*4"},  # H-W with rating - pass
         ]
 
         with patch.object(proxy, "sourceModel") as mock_source:
             mock_source.return_value.tracks = tracks
 
-            assert proxy.filterAcceptsRow(0, QModelIndex()) is True   # H-*3
+            assert proxy.filterAcceptsRow(0, QModelIndex()) is True  # H-*3
             assert proxy.filterAcceptsRow(1, QModelIndex()) is False  # *5
-            assert proxy.filterAcceptsRow(2, QModelIndex()) is True   # H-W-*4
+            assert proxy.filterAcceptsRow(2, QModelIndex()) is True  # H-W-*4
 
     def test_filter_logic_empty_genre(self, qapp) -> None:  # type: ignore
         """Test handling of empty/None genre."""
@@ -379,9 +377,7 @@ class TestGenreFilterPlugin:
 
         plugin.container.setVisible.assert_called_once_with(True)
 
-    def test_deactivate_hides_container_and_clears_filter(
-        self, qapp  # type: ignore
-    ) -> None:
+    def test_deactivate_hides_container_and_clears_filter(self, qapp) -> None:  # type: ignore
         """Test deactivate() hides container and clears filter."""
         plugin = GenreFilterPlugin()
         plugin.container = Mock()
@@ -398,15 +394,14 @@ class TestGenreFilterPlugin:
         """Test shutdown() removes proxy model."""
         plugin = GenreFilterPlugin()
         mock_track_list = Mock()
-        mock_context = Mock()
-        mock_context.app.track_list = mock_track_list
-        plugin.context = mock_context
+        plugin._track_list = mock_track_list
         plugin.proxy = Mock()
         plugin.buttons = [Mock(), Mock()]
 
         plugin.shutdown()
 
         mock_track_list.remove_proxy_model.assert_called_once()
+        assert plugin._track_list is None
         assert plugin.proxy is None
         assert plugin.buttons == []
 

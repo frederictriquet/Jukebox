@@ -1,7 +1,6 @@
 """Tests for track list widget."""
 
 from pathlib import Path
-from unittest.mock import Mock
 
 from PySide6.QtCore import QSortFilterProxyModel
 
