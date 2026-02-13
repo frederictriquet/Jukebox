@@ -85,10 +85,7 @@ class GenreFilterProxyModel(QSortFilterProxyModel):
         role: int = Qt.ItemDataRole.DisplayRole,
     ) -> Any:
         """Override vertical header to show proxy row numbers."""
-        if (
-            role == Qt.ItemDataRole.DisplayRole
-            and orientation == Qt.Orientation.Vertical
-        ):
+        if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Vertical:
             return f"{section + 1}/{self.rowCount()}"
         return super().headerData(section, orientation, role)
 
