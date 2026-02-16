@@ -1,8 +1,9 @@
 """Tests for cue maker exporter module."""
 
-import pytest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+import pytest
 
 from plugins.cue_maker.exporter import CueExporter
 from plugins.cue_maker.model import CueEntry, CueSheet, EntryStatus

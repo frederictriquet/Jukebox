@@ -1,6 +1,5 @@
 """Tests for cue maker model module."""
 
-import pytest
 
 from plugins.cue_maker.model import CueEntry, CueSheet, EntryStatus
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from plugins.cue_maker.model import CueSheet, EntryStatus
+from plugins.cue_maker.model import CueSheet
 
 logger = logging.getLogger(__name__)
 

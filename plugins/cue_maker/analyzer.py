@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 
@@ -55,7 +54,7 @@ class AnalyzeWorker(QThread):
         Emits error signal if analysis fails.
         """
         try:
-            from shazamix.fingerprint import FingerprintDB, Fingerprinter
+            from shazamix.fingerprint import FingerprintDB, Fingerprinter  # type: ignore[attr-defined]
             from shazamix.matcher import Matcher
 
             logger.info("[Analyzer] Starting analysis of %s", self.mix_path)
