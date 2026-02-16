@@ -255,6 +255,7 @@ plugins:
     - genre_editor
     - genre_filter
     - genre_suggester
+    - directory_navigator
     - file_manager
     - video_exporter
     - conf_manager

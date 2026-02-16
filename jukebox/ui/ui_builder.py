@@ -121,6 +121,16 @@ class UIBuilder:
         self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
         self.plugin_widgets.append(dock)
 
+    def add_left_sidebar_widget(self, widget: QWidget, title: str) -> None:
+        """Add widget to left sidebar (dock widget) and track it."""
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QDockWidget
+
+        dock = QDockWidget(title, self.main_window)
+        dock.setWidget(widget)
+        self.main_window.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)
+        self.plugin_widgets.append(dock)
+
     def add_bottom_widget(self, widget: QWidget) -> None:
         """Add widget at bottom of main layout and track it."""
         # Access main layout and add widget at bottom
