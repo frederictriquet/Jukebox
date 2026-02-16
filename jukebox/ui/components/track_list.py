@@ -263,7 +263,9 @@ class TrackListModel(QAbstractTableModel):
                 return f"{section + 1}/{len(self.tracks)}"
         return None
 
-    def data(self, index: QModelIndex | QPersistentModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
+    def data(
+        self, index: QModelIndex | QPersistentModelIndex, role: int = Qt.ItemDataRole.DisplayRole
+    ) -> Any:
         """Get data for index and role."""
         if not index.isValid() or index.row() >= len(self.tracks):
             return None
