@@ -119,8 +119,7 @@ class CueMakerPlugin:
             QMessageBox.warning(
                 self.main_widget,
                 "Configuration",
-                "No shazamix database path configured.\n"
-                "Set shazamix_db_path in config.yaml.",
+                "No shazamix database path configured.\n" "Set shazamix_db_path in config.yaml.",
             )
             return
 

@@ -36,15 +36,11 @@ class CueTableModel(QAbstractTableModel):
         """Access the underlying cue sheet."""
         return self._sheet
 
-    def rowCount(
-        self, parent: _INDEX_TYPE | None = None
-    ) -> int:
+    def rowCount(self, parent: _INDEX_TYPE | None = None) -> int:
         """Return number of entries."""
         return len(self._sheet.entries)
 
-    def columnCount(
-        self, parent: _INDEX_TYPE | None = None
-    ) -> int:
+    def columnCount(self, parent: _INDEX_TYPE | None = None) -> int:
         """Return number of columns."""
         return len(COLUMN_HEADERS)
 

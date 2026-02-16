@@ -307,9 +307,7 @@ class CueMakerWidget(QWidget):
                 from plugins.cue_maker.exporter import CueExporter
 
                 CueExporter.export(self.model.sheet, filepath)
-                QMessageBox.information(
-                    self, "Export", f"CUE file exported to:\n{filepath}"
-                )
+                QMessageBox.information(self, "Export", f"CUE file exported to:\n{filepath}")
                 logger.info("[Cue Maker] Exported to %s", filepath)
             except (ValueError, OSError) as e:
                 QMessageBox.critical(self, "Export Error", str(e))
