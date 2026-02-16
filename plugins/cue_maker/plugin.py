@@ -5,10 +5,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from PySide6.QtWidgets import QWidget
-
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
+    from plugins.cue_maker.analyzer import AnalyzeWorker
+    from plugins.cue_maker.widgets.cue_maker_widget import CueMakerWidget
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,8 @@ class CueMakerPlugin:
     def __init__(self) -> None:
         """Initialize plugin state."""
         self.context: PluginContextProtocol | None = None
-        self.main_widget: QWidget | None = None
+        self.main_widget: CueMakerWidget | None = None
+        self._analyzer: AnalyzeWorker | None = None
 
     def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin with application context.
@@ -48,19 +49,23 @@ class CueMakerPlugin:
     def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register UI elements.
 
-        Creates the main cue maker widget and adds it to the main window.
+        Creates the main cue maker widget and adds it to the bottom of the main window.
         The widget is hidden by default and shown when entering cue_maker mode.
 
         Args:
             ui_builder: UI builder for adding UI elements
         """
-        # TODO: Create CueMakerWidget
-        # self.main_widget = CueMakerWidget(self.context)
-        # ui_builder.add_bottom_widget(self.main_widget)
+        from plugins.cue_maker.widgets.cue_maker_widget import CueMakerWidget
 
-        # Hide initially (activate() will show it)
-        # if self.main_widget:
-        #     self.main_widget.setVisible(False)
+        assert self.context is not None
+        self.main_widget = CueMakerWidget(self.context)
+        ui_builder.add_bottom_widget(self.main_widget)
+
+        # Hide initially - activate() will show it when entering cue_maker mode
+        self.main_widget.setVisible(False)
+
+        # Connect signals
+        self.main_widget.analyze_requested.connect(self._on_analyze)
 
         logger.info("[Cue Maker] UI registered")
 
@@ -86,6 +91,46 @@ class CueMakerPlugin:
 
     def shutdown(self) -> None:
         """Cleanup resources when plugin is unloaded."""
+        if self._analyzer and self._analyzer.isRunning():
+            self._analyzer.quit()
+            self._analyzer.wait(3000)
+        self._analyzer = None
         self.main_widget = None
         self.context = None
         logger.info("[Cue Maker] Plugin shut down")
+
+    # --- Analysis ---
+
+    def _on_analyze(self) -> None:
+        """Start shazamix analysis of the loaded mix."""
+        if not self.main_widget or not self.context:
+            return
+
+        mix_path = self.main_widget.model.sheet.mix_filepath
+        if not mix_path:
+            return
+
+        # Get database path from config
+        db_path = getattr(self.context.config, "shazamix_db_path", "")
+        if not db_path:
+            logger.warning("[Cue Maker] No shazamix database path configured")
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(
+                self.main_widget,
+                "Configuration",
+                "No shazamix database path configured.\n"
+                "Set shazamix_db_path in config.yaml.",
+            )
+            return
+
+        from plugins.cue_maker.analyzer import AnalyzeWorker
+
+        self._analyzer = AnalyzeWorker(mix_path, db_path)
+        self._analyzer.progress.connect(self.main_widget.set_analysis_progress)
+        self._analyzer.finished.connect(self.main_widget.on_analysis_complete)
+        self._analyzer.error.connect(self.main_widget.on_analysis_error)
+
+        self.main_widget.analyze_btn.setEnabled(False)
+        self._analyzer.start()
+        logger.info("[Cue Maker] Analysis started for %s", mix_path)

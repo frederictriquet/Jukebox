@@ -54,7 +54,10 @@ class AnalyzeWorker(QThread):
         Emits error signal if analysis fails.
         """
         try:
-            from shazamix.fingerprint import FingerprintDB, Fingerprinter  # type: ignore[attr-defined]
+            from shazamix.fingerprint import (  # type: ignore[attr-defined]
+                FingerprintDB,
+                Fingerprinter,
+            )
             from shazamix.matcher import Matcher
 
             logger.info("[Analyzer] Starting analysis of %s", self.mix_path)
