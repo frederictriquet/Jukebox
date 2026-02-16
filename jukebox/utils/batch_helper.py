@@ -101,11 +101,11 @@ class BatchProcessingHelper:
             if needs:
                 items_to_process.append((track_id, filepath))
                 if log_status:
-                    logging.info(f"  Track {track_id}: {filename} - NEEDS PROCESSING")
+                    logging.debug(f"  Track {track_id}: {filename} - NEEDS PROCESSING")
             else:
                 already_processed += 1
                 if log_status:
-                    logging.info(f"  Track {track_id}: {filename} - already processed")
+                    logging.debug(f"  Track {track_id}: {filename} - already processed")
 
         return items_to_process, already_processed
 

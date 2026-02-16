@@ -7,7 +7,7 @@ format which is safe and cannot execute code.
 
 import io
 import logging
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -69,6 +69,6 @@ def deserialize_waveform(data: bytes) -> dict[str, np.ndarray]:
                 "[WaveformSerializer] Loaded legacy pickle data. "
                 "Regenerate waveforms to upgrade to secure format."
             )
-            return result
+            return cast(dict[str, np.ndarray], result)
         except Exception as e:
             raise ValueError(f"Invalid waveform data: {e}") from e

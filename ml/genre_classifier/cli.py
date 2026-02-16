@@ -2,6 +2,7 @@
 """Command-line interface for genre classifier."""
 
 import argparse
+import asyncio
 import os
 import sqlite3
 import sys
@@ -211,6 +212,25 @@ def _save_analysis(db_path: Path, track_id: int, features: dict) -> None:
     conn.commit()
     conn.close()
 
+def _notify_analyze_done(success: int, errors: int, elapsed: float) -> None:
+    """Send a Telegram notification when analysis is done."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        return
+
+    from femtologger import FemtoLogger, TelegramTransport
+
+    logger = FemtoLogger(transports=[TelegramTransport(token=token, chat_id=chat_id)])
+    level = "info" if errors == 0 else "warn"
+
+    asyncio.run(
+        getattr(logger, level)(
+            f"Analyse terminee: {success} tracks en {elapsed:.0f}s ({errors} erreurs)"
+        )
+    )
+
+
 def cmd_analyze(args: argparse.Namespace) -> int:
     """Analyze tracks that don't have audio analysis yet."""
     import time
@@ -321,6 +341,9 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     print(f"  Errors: {errors}")
     if elapsed > 0:
         print(f"  Rate: {len(valid_tracks)/elapsed:.2f} tracks/second")
+
+    # Notify via Telegram
+    _notify_analyze_done(success=success, errors=errors, elapsed=elapsed)
 
     return 0 if errors == 0 else 1
 

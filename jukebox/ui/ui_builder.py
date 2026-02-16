@@ -71,7 +71,7 @@ class UIBuilder:
                     self.shared_menus[name] = menu
                     if menu not in self.plugin_menus:
                         self.plugin_menus.append(menu)
-                    return menu
+                    return cast(QMenu, menu)
 
         # Create new menu and track it
         menu = cast(QMenu, menubar.addMenu(name))
@@ -119,6 +119,16 @@ class UIBuilder:
         dock = QDockWidget(title, self.main_window)
         dock.setWidget(widget)
         self.main_window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+        self.plugin_widgets.append(dock)
+
+    def add_left_sidebar_widget(self, widget: QWidget, title: str) -> None:
+        """Add widget to left sidebar (dock widget) and track it."""
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QDockWidget
+
+        dock = QDockWidget(title, self.main_window)
+        dock.setWidget(widget)
+        self.main_window.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)
         self.plugin_widgets.append(dock)
 
     def add_bottom_widget(self, widget: QWidget) -> None:

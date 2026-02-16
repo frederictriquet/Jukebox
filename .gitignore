@@ -51,6 +51,7 @@ build/
 # Configuration
 *.log
 .env
+.envrc
 config.local.yaml
 
 # Database

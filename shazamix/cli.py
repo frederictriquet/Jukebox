@@ -11,6 +11,7 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import os
 import sys
 import time
@@ -18,6 +19,20 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 from .database import FingerprintDB, DEFAULT_DB_PATH
+
+
+def _notify_done(message: str, has_errors: bool = False) -> None:
+    """Send a Telegram notification when a long task is done."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        return
+
+    from femtologger import FemtoLogger, TelegramTransport
+
+    logger = FemtoLogger(transports=[TelegramTransport(token=token, chat_id=chat_id)])
+    level = "warn" if has_errors else "info"
+    asyncio.run(getattr(logger, level)(message))
 
 
 def cmd_stats(args: argparse.Namespace) -> int:
@@ -128,6 +143,11 @@ def cmd_index(args: argparse.Namespace) -> int:
     print(f"  Indexed: {indexed}")
     print(f"  Errors: {errors}")
 
+    _notify_done(
+        f"Indexation terminee: {indexed} tracks en {elapsed:.0f}s ({errors} erreurs)",
+        has_errors=errors > 0,
+    )
+
     return 0
 
 
@@ -234,6 +254,10 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         with open(args.output, "w") as f:
             f.write(cue_text)
         print(f"Cue sheet saved to: {args.output}")
+
+    _notify_done(
+        f"Analyse mix terminee: {len(matches)} tracks identifiees en {elapsed:.0f}s",
+    )
 
     return 0
 
