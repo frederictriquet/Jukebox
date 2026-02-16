@@ -1,17 +1,15 @@
 """Data loader for extracting training data from Jukebox database."""
 
-import re
 import sqlite3
 from pathlib import Path
 
 import pandas as pd
 
-
 # Default database path
 DEFAULT_DB_PATH = Path.home() / ".jukebox" / "jukebox.db"
 
 # Genres to exclude from training (personal/subjective tags that can't be learned from audio)
-EXCLUDED_GENRES = {"C", "R", "L"}
+EXCLUDED_GENRES = {"A", "C", "F", "L", "R", "U"}
 
 # All ML feature columns from audio_analysis table
 ML_FEATURE_COLUMNS = [
@@ -93,24 +91,24 @@ def parse_genres(
     genre_str: str | None,
     exclude: set[str] | None = None,
 ) -> set[str]:
-    """Parse genre string into a set of individual genres.
+    """Parse genre string into a set of individual genre codes.
 
-    The genre format uses:
-    - Letters/words for genre names (e.g., "H", "Rock", "Jazz")
-    - Hyphens (-) as separators between genres
-    - Digits and stars (★, ☆, *) are ignored (ratings)
+    Valid genre format: single uppercase letters separated by hyphens,
+    optionally followed by a rating (e.g. "D-H-*5", "B-G-H-P-*5").
+    Raw ID3 tags (e.g. "Dub Electronica", "House;Electro") are ignored.
 
     Examples:
-        "H-L-W 3★" -> {"H", "W"} (with default exclusions)
-        "Rock-Jazz 4★" -> {"Rock", "Jazz"}
-        "Electronic" -> {"Electronic"}
+        "H-W-*3" -> {"H", "W"} (with default exclusions)
+        "D-H-*5" -> {"D", "H"}
+        "A-F-U" -> set() (all excluded with default exclusions)
+        "Dub Electronica" -> set() (not a valid genre format)
 
     Args:
         genre_str: Raw genre string from database
         exclude: Set of genres to exclude (defaults to EXCLUDED_GENRES)
 
     Returns:
-        Set of genre strings (empty set if invalid)
+        Set of single-letter genre codes (empty set if invalid)
     """
     if not genre_str or not isinstance(genre_str, str):
         return set()
@@ -118,14 +116,9 @@ def parse_genres(
     if exclude is None:
         exclude = EXCLUDED_GENRES
 
-    # Remove digits, stars, and extra whitespace
-    cleaned = re.sub(r"[0-9★☆*]", "", genre_str)
-
-    # Split by hyphens and clean each part
-    parts = [p.strip() for p in cleaned.split("-")]
-
-    # Filter out empty strings and excluded genres
-    genres = {p for p in parts if p and p not in exclude}
+    # Split by hyphens and keep only single uppercase letters
+    parts = genre_str.split("-")
+    genres = {p for p in parts if len(p) == 1 and p.isupper() and p not in exclude}
 
     return genres
 
@@ -206,13 +199,12 @@ def load_training_data(
             genre_counts[g] = genre_counts.get(g, 0) + 1
 
     # Filter to genres with sufficient samples
-    valid_genres = sorted([g for g, count in genre_counts.items()
-                          if count >= min_samples_per_genre])
+    valid_genres = sorted(
+        [g for g, count in genre_counts.items() if count >= min_samples_per_genre]
+    )
 
     if not valid_genres:
-        raise ValueError(
-            f"No genres with at least {min_samples_per_genre} samples found"
-        )
+        raise ValueError(f"No genres with at least {min_samples_per_genre} samples found")
 
     # Create binary label matrix
     labels_data = []
@@ -297,9 +289,7 @@ def get_dataset_stats(db_path: Path | str = DEFAULT_DB_PATH) -> dict:
     ).fetchone()[0]
 
     # Tracks with basic analysis (any entry in audio_analysis)
-    tracks_with_analysis = conn.execute(
-        "SELECT COUNT(*) FROM audio_analysis"
-    ).fetchone()[0]
+    tracks_with_analysis = conn.execute("SELECT COUNT(*) FROM audio_analysis").fetchone()[0]
 
     # Tracks with ML features (rms_mean is not null)
     tracks_with_ml_features = conn.execute(

@@ -20,7 +20,7 @@ class GenreEditorPlugin(ShortcutMixin):
     name = "genre_editor"
     version = "1.0.0"
     description = "Genre editor with code-based system"
-    modes = ["curating"]  # Only active in curating mode
+    modes = ["jukebox", "curating"]
 
     def __init__(self) -> None:
         """Initialize plugin."""

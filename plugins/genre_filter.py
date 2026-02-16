@@ -187,9 +187,15 @@ class GenreFilterButton(QPushButton):
     """
 
     _STYLES = {
-        GenreFilterState.INDIFFERENT: "background-color: #555; color: #aaa;",
-        GenreFilterState.ON: "background-color: #2d7a2d; color: white;",
-        GenreFilterState.OFF: "background-color: #7a2d2d; color: white;",
+        GenreFilterState.INDIFFERENT: (
+            "background-color: #555; color: #aaa; font-weight: bold; font-size: 13px;"
+        ),
+        GenreFilterState.ON: (
+            "background-color: #2d7a2d; color: white; font-weight: bold; font-size: 13px;"
+        ),
+        GenreFilterState.OFF: (
+            "background-color: #7a2d2d; color: white; font-weight: bold; font-size: 13px;"
+        ),
     }
 
     def __init__(self, code: str, name: str, parent: Any = None) -> None:
@@ -204,7 +210,7 @@ class GenreFilterButton(QPushButton):
         self.code = code
         self.genre_name = name
         self.state = GenreFilterState.INDIFFERENT
-        self.setFixedSize(28, 22)
+        self.setFixedSize(32, 26)
         self.setToolTip(name)
         self._apply_style()
         self.clicked.connect(self._cycle)

@@ -432,11 +432,15 @@ class MainWindow(QMainWindow):
 
     def _on_play(self) -> None:
         """Handle play button click."""
-        # If no track loaded, load selected track
+        # If no track loaded, load selected or first track
         if self.player.current_file is None:
             selected = self.track_list.get_selected_track()
-            if selected and self.player.load(selected):
-                self.setWindowTitle(f"{self.config.ui.window_title} - {selected.name}")
+            if selected is None and self.track_list.model().rowCount() > 0:
+                self.track_list.selectRow(0)
+                selected = self.track_list.get_selected_track()
+            if selected:
+                self._load_and_play(selected)
+                return
 
         self.player.play()
         # Timer is managed by _on_player_state_changed
