@@ -169,6 +169,8 @@ class DirectoryNavigatorPlugin:
         self.dock: QWidget | None = None
 
         context.subscribe(Events.TRACKS_ADDED, self._rebuild_tree)
+        context.subscribe(Events.TRACK_DELETED, self._on_track_changed)
+        context.subscribe(Events.TRACK_METADATA_UPDATED, self._on_track_changed)
 
     def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register left sidebar widget.
@@ -192,12 +194,15 @@ class DirectoryNavigatorPlugin:
         self._rebuild_tree()
 
     def activate(self, mode: str) -> None:
-        """Show directory tree when entering jukebox mode."""
+        """Show directory tree when entering jukebox mode.
+
+        Also rebuilds the tree to reflect changes made in curating mode.
+        """
         if self.widget:
-            # The dock widget is the parent of our widget
             dock = self.widget.parent()
             if dock:
                 dock.setVisible(True)
+            self._rebuild_tree()
         logger.debug("[Directory Navigator] Activated for %s mode", mode)
 
     def deactivate(self, mode: str) -> None:
@@ -207,6 +212,10 @@ class DirectoryNavigatorPlugin:
             if dock:
                 dock.setVisible(False)
         logger.debug("[Directory Navigator] Deactivated for %s mode", mode)
+
+    def _on_track_changed(self, **kwargs) -> None:  # type: ignore[no-untyped-def]
+        """Handle track deletion or metadata update - rebuild tree."""
+        self._rebuild_tree()
 
     def _rebuild_tree(self) -> None:
         """Rebuild the directory tree from database."""
