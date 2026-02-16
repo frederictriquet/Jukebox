@@ -204,9 +204,13 @@ class PluginManager:
 
         # Find package plugins (directories with __init__.py)
         for d in self.plugins_dir.iterdir():
-            if d.is_dir() and not d.name.startswith("_") and (d / "__init__.py").exists():
-                if d.name not in plugins:  # Avoid duplicates
-                    plugins.append(d.name)
+            if (
+                d.is_dir()
+                and not d.name.startswith("_")
+                and (d / "__init__.py").exists()
+                and d.name not in plugins
+            ):
+                plugins.append(d.name)
 
         return plugins
 

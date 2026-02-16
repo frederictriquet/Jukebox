@@ -210,7 +210,7 @@ class GenreFilterButton(QPushButton):
         self.code = code
         self.genre_name = name
         self.state = GenreFilterState.INDIFFERENT
-        self.setFixedSize(32, 26)
+        self.setFixedSize(28, 22)
         self.setToolTip(name)
         self._apply_style()
         self.clicked.connect(self._cycle)

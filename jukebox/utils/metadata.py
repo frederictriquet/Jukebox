@@ -65,7 +65,7 @@ class MetadataExtractor:
             raise
         except Exception as e:
             logging.error(f"Error extracting metadata from {filepath}: {e}", exc_info=True)
-            raise ValueError(f"Failed to extract metadata from {filepath}: {e}")
+            raise ValueError(f"Failed to extract metadata from {filepath}: {e}") from e
 
     @staticmethod
     def _extract_tags(audio: Any) -> dict[str, Any]:

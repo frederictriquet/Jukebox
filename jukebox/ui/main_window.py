@@ -51,6 +51,9 @@ class MainWindow(QMainWindow):
         self.database.connect()
         self.database.initialize_schema()
 
+        # Mode manager (may be overridden by mode_switcher plugin)
+        self.mode_manager: ModeManager | None = None
+
         # Audio player
         self.player = AudioPlayer()
 
@@ -171,7 +174,10 @@ class MainWindow(QMainWindow):
         self.shortcut_manager.register(shortcuts.volume_down, self._decrease_volume)
 
         # Application
-        self.shortcut_manager.register(shortcuts.quit, self.close)
+        def _quit() -> None:
+            self.close()
+
+        self.shortcut_manager.register(shortcuts.quit, _quit)
         self.shortcut_manager.register(shortcuts.focus_search, lambda: self.search_bar.setFocus())
 
     def _toggle_play_pause(self) -> None:
@@ -559,6 +565,9 @@ class MainWindow(QMainWindow):
             filepaths: List of track filepaths to load
         """
         self.track_list.clear_tracks()
+
+        if self.database.conn is None:
+            return
 
         # Load track data from database for each filepath
         for filepath in filepaths:

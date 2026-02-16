@@ -335,7 +335,7 @@ class BatchProcessor(QObject):
                     if signal_name in qt_internal_signals:
                         continue
                     # Disconnect custom signals only
-                    signal_name_str = signal_name.decode()
+                    signal_name_str = bytes(signal_name).decode()
                     if hasattr(self.current_worker, signal_name_str):
                         signal_obj = getattr(self.current_worker, signal_name_str)
                         try:

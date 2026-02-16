@@ -3,7 +3,14 @@
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt, Signal
+from PySide6.QtCore import (
+    QAbstractTableModel,
+    QModelIndex,
+    QPersistentModelIndex,
+    QSortFilterProxyModel,
+    Qt,
+    Signal,
+)
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import QMenu, QTableView
 
@@ -236,11 +243,11 @@ class TrackListModel(QAbstractTableModel):
         # Emit signal so MainWindow can safely query the updated model
         self.row_deleted.emit(deleted_row_index)
 
-    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
+    def rowCount(self, parent: QModelIndex | QPersistentModelIndex | None = None) -> int:
         """Get number of rows."""
         return len(self.tracks)
 
-    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
+    def columnCount(self, parent: QModelIndex | QPersistentModelIndex | None = None) -> int:
         """Get number of columns."""
         return len(COLUMNS)
 
@@ -256,7 +263,7 @@ class TrackListModel(QAbstractTableModel):
                 return f"{section + 1}/{len(self.tracks)}"
         return None
 
-    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
+    def data(self, index: QModelIndex | QPersistentModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
         """Get data for index and role."""
         if not index.isValid() or index.row() >= len(self.tracks):
             return None
@@ -532,9 +539,9 @@ class TrackList(QTableView):
                     if artist and title:
                         return f"{artist} - {title}"
                     elif title:
-                        return title
+                        return str(title)
                     else:
-                        return self._track["filepath"].name
+                        return str(self._track["filepath"].name)
 
             return _Item(track)
         return None
@@ -556,7 +563,9 @@ class TrackList(QTableView):
         """
         index = self.selectionModel().currentIndex()
         if index.isValid():
-            return self.model().data(index, Qt.ItemDataRole.UserRole)
+            result = self.model().data(index, Qt.ItemDataRole.UserRole)
+            if isinstance(result, Path):
+                return result
         return None
 
     def set_playlists(self, playlists: list[Any]) -> None:

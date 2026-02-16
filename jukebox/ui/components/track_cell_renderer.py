@@ -137,8 +137,8 @@ class Styler:
         """Background color."""
         return None  # Use theme default
 
-    def decoration(self, data: Any, track: dict[str, Any]) -> QColor | None:
-        """Decoration (color indicator)."""
+    def decoration(self, data: Any, track: dict[str, Any]) -> QColor | QPixmap | None:
+        """Decoration (color indicator or pixmap)."""
         return None
 
     def alignment(self, data: Any, track: dict[str, Any]) -> Qt.AlignmentFlag | None:
@@ -179,18 +179,18 @@ class FilenameStyler(Styler):
             if artist and title:
                 return f"{artist} - {title}"
             elif title:
-                return title
+                return str(title)
             else:
-                return track["filepath"].name
+                return str(track["filepath"].name)
         else:
             # Curating mode: show filename
-            return track["filepath"].name
+            return str(track["filepath"].name)
 
     def tooltip(self, data: Any, track: dict[str, Any]) -> str:
         """Show tooltip based on mode."""
         if self.mode == "jukebox":
             # Jukebox mode: show filename in tooltip
-            return track["filepath"].name
+            return str(track["filepath"].name)
         else:
             # Curating mode: show full path in tooltip
             return str(track["filepath"])
@@ -225,7 +225,7 @@ class GenreStyler(Styler):
         # Validate genre format - show first chars if invalid
         if not self._is_valid_genre(data):
             # Show first 20 characters of invalid genre
-            return data[:20] if len(data) > 20 else data
+            return str(data[:20]) if len(data) > 20 else str(data)
 
         # Parse genre (format: "C-D-P-*3")
         parts = data.split("-") if data else []

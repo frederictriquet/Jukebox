@@ -71,7 +71,7 @@ class UIBuilder:
                     self.shared_menus[name] = menu
                     if menu not in self.plugin_menus:
                         self.plugin_menus.append(menu)
-                    return menu
+                    return cast(QMenu, menu)
 
         # Create new menu and track it
         menu = cast(QMenu, menubar.addMenu(name))
