@@ -18,7 +18,7 @@ class StatusBarPlugin:
     name = "status_bar"
     version = "1.0.0"
     description = "Status bar for system messages"
-    modes = ["jukebox", "curating"]  # Active in all modes
+    modes = ["jukebox", "curating", "cue_maker"]  # Active in all modes
 
     # Class variable to share status bar across plugins
     _status_bar: QStatusBar | None = None

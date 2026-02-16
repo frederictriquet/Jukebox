@@ -168,3 +168,11 @@ class Events:
 
     # Genre filter events
     GENRE_FILTER_CHANGED = "genre_filter_changed"  # kwargs: on_genres (set), off_genres (set)
+
+    # Cue Maker events
+    CUE_MIX_LOADED = "cue_mix_loaded"  # kwargs: filepath (str)
+    CUE_ANALYSIS_STARTED = "cue_analysis_started"  # kwargs: filepath (str)
+    CUE_ANALYSIS_PROGRESS = "cue_analysis_progress"  # kwargs: current (int), total (int), message (str)
+    CUE_ANALYSIS_COMPLETE = "cue_analysis_complete"  # kwargs: entries (list)
+    CUE_ENTRY_UPDATED = "cue_entry_updated"  # kwargs: index (int)
+    CUE_EXPORTED = "cue_exported"  # kwargs: output_path (str)

@@ -260,6 +260,7 @@ plugins:
     - video_exporter
     - conf_manager
     - status_bar
+    - cue_maker
 
 logging:
   level: "INFO"
