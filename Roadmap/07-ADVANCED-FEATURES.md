@@ -436,6 +436,83 @@ Genre codes defined in `config.genre_editor.codes` (shared with genre_editor plu
 
 ---
 
+## 7.8 Directory Navigator Plugin (En Cours)
+
+### 7.8.1 Overview
+Interactive directory navigation for jukebox mode. Allows users to browse and filter the track list by directory tree (left sidebar). Complements genre_filter by providing organization-based filtering.
+
+### 7.8.2 Architecture
+- **Tree Model** : QStandardItemModel parsing DB to show only directories containing tracks
+- **Placement** : Left Dock Widget (via new `add_left_sidebar_widget` in UIBuilder)
+- **Filtering** : Event `LOAD_TRACK_LIST` emitting filtered filepaths (pattern reused from playlists_plugin)
+- **Virtual Nodes** : "Directories" + "Playlists" root nodes for organization
+- **Combination** : Filters compose with genre_filter (proxy applies after LOAD_TRACK_LIST)
+
+### 7.8.3 Features
+- Recursive directory tree display (shows all subdirectories)
+- Single-click filtering: shows all tracks from directory (recursive)
+- Track count badges per directory
+- Virtual "Playlists" node (integration with playlists_plugin)
+- Combines with genre_filter and search (separate concerns)
+- Reset search on directory selection (accepted trade-off)
+
+### 7.8.4 Files
+- `plugins/directory_navigator.py` - Plugin implementation
+- `tests/plugins/test_directory_navigator.py` - Unit tests
+- `jukebox/ui/ui_builder.py` - Add `add_left_sidebar_widget()` method
+- ADR-001 documentation in SERENA
+
+### 7.8.5 ADR
+- **ADR-001** : Documented decision for tree model, placement, filtration pattern
+- Rationale: QStandardItemModel (simple), LeftDock (UX), LOAD_TRACK_LIST (established pattern)
+- Trade-offs: Core modification minimal (1 method), search reset accepted
+
+---
+
+## Checklist Phase 7 (continued)
+
+### Pi Optimization (Jours 4-5)
+- [ ] Détection Pi
+- [ ] Settings optimisés
+- [ ] Tests sur Pi
+- [ ] Performance validée
+
+### Performance (Jours 5-6)
+- [ ] Profiling
+- [ ] Bottlenecks identifiés
+- [ ] Optimisations appliquées
+- [ ] Benchmarks
+
+### Documentation (Jour 7)
+- [ ] User guide
+- [ ] Keyboard shortcuts
+- [ ] Troubleshooting
+- [ ] Screenshots
+
+### Genre Filter Plugin (Jours 7+)
+- [x] Plugin créé avec QSortFilterProxyModel
+- [x] 3-state buttons (INDIFFERENT/ON/OFF)
+- [x] Filtering logic: ON=AND, OFF=exclusion
+- [x] Toolbar integration with genre buttons
+- [x] Event emission (GENRE_FILTER_CHANGED)
+- [x] TrackList proxy model support
+- [x] MainWindow integration (track_model distinction)
+- [x] 26 unit tests (full coverage)
+- [x] Documentation (inline + README plugin + CHANGELOG)
+- [x] Capitalisation (3 patterns/standards)
+
+### Directory Navigator Plugin (Terminé ✅)
+- [x] **DONE** - Complété 2026-02-15, prêt pour merge
+- [x] UIBuilder: add `add_left_sidebar_widget()` method
+- [x] Plugin implementation (tree model + directory filtering)
+- [x] Integration with LOAD_TRACK_LIST event
+- [x] Support for virtual Playlists node
+- [x] Unit tests (29 tests, 100% pass rate)
+- [x] Documentation (inline + README plugin + CLAUDE.md)
+- [x] Capitalisation (3 patterns créés dans SERENA)
+
+---
+
 ## Prochaine Phase
 
 ➡️ [Phase 8 - Distribution & Release](08-DISTRIBUTION-RELEASE.md)

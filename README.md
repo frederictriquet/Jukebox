@@ -105,6 +105,26 @@ Jukebox features an extensible plugin system. Plugins can add UI elements, respo
 
 ### Available Plugins
 
+#### Directory Navigator
+Navigate and filter tracks by directory structure in jukebox mode.
+
+- **Status**: ✅ Stable
+- **Mode**: Jukebox
+- **Description**: Adds a tree view in the left sidebar showing the hierarchical structure of your music directories with track counts. Click on directories, playlists, or "All Tracks" to filter the track list.
+- **Features**:
+  - Hierarchical directory tree with automatic common prefix detection
+  - Recursive filtering (shows all tracks in subdirectories)
+  - Playlist integration
+  - Real-time track count updates
+- **Documentation**: See [plugins/README_directory_navigator.md](plugins/README_directory_navigator.md)
+
+Enable in `config/config.yaml`:
+```yaml
+plugins:
+  enabled:
+    - directory_navigator
+```
+
 #### Genre Filter
 Filter tracks by genre in jukebox mode with interactive toggle buttons.
 

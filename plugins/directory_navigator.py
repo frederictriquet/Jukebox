@@ -1,7 +1,42 @@
-"""Directory Navigator Plugin - Tree-based directory browsing for track navigation."""
+"""Directory Navigator Plugin - Tree-based directory browsing for track navigation.
+
+This plugin adds a directory tree view in the left sidebar (jukebox mode only) that
+displays the hierarchical structure of directories containing tracks, along with
+playlists. Clicking on a directory, playlist, or "All Tracks" filters the main
+track list to show only matching tracks.
+
+Usage:
+    Enable the plugin in config/config.yaml under plugins.enabled:
+        plugins:
+          enabled:
+            - directory_navigator
+
+    The plugin activates automatically when switching to jukebox mode.
+    Click on any tree node to filter the track list.
+
+Architecture:
+    - DirectoryTreeWidget: Qt tree view widget showing directory structure
+    - DirectoryNavigatorPlugin: Plugin entry point and lifecycle manager
+
+Tree Structure:
+    The tree displays three top-level sections:
+    - "All Tracks (N)": Shows all tracks when clicked
+    - "Directories": Hierarchical view of directories with track counts
+    - "Playlists (N)": List of playlists with track counts (if any exist)
+
+Events:
+    - Subscribes to: TRACKS_ADDED, TRACK_DELETED, TRACK_METADATA_UPDATED
+    - Emits: LOAD_TRACK_LIST (with filepaths to display)
+
+Filtering:
+    The plugin works transparently with other filters (genre filter, search).
+    It emits LOAD_TRACK_LIST events which replace the current track list,
+    and other filters then apply on top of that base list.
+"""
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QStandardItem, QStandardItemModel
@@ -39,7 +74,7 @@ class DirectoryTreeWidget(QWidget):
         layout.addWidget(self.tree_view)
         self.setLayout(layout)
 
-    def build_tree(self, filepaths: list[str], playlists: list[dict]) -> None:
+    def build_tree(self, filepaths: list[str], playlists: list[dict[str, Any]]) -> None:
         """Build the directory tree from database filepaths and playlists.
 
         Args:
@@ -184,7 +219,7 @@ class DirectoryNavigatorPlugin:
 
         # Hide dock initially - activate() will show it for jukebox mode
         dock = self.widget.parent()
-        if dock:
+        if dock and hasattr(dock, "setVisible"):
             dock.setVisible(False)
 
         # Connect tree click
@@ -200,7 +235,7 @@ class DirectoryNavigatorPlugin:
         """
         if self.widget:
             dock = self.widget.parent()
-            if dock:
+            if dock and hasattr(dock, "setVisible"):
                 dock.setVisible(True)
             self._rebuild_tree()
         logger.debug("[Directory Navigator] Activated for %s mode", mode)
@@ -209,7 +244,7 @@ class DirectoryNavigatorPlugin:
         """Hide directory tree when leaving jukebox mode."""
         if self.widget:
             dock = self.widget.parent()
-            if dock:
+            if dock and hasattr(dock, "setVisible"):
                 dock.setVisible(False)
         logger.debug("[Directory Navigator] Deactivated for %s mode", mode)
 
@@ -225,11 +260,11 @@ class DirectoryNavigatorPlugin:
         db = self.context.database
 
         # Get all filepaths
-        rows = db.conn.execute("SELECT filepath FROM tracks").fetchall()
+        rows = db.conn.execute("SELECT filepath FROM tracks").fetchall()  # type: ignore[attr-defined]
         filepaths = [row["filepath"] for row in rows]
 
         # Get playlists with track counts
-        playlist_rows = db.conn.execute(
+        playlist_rows = db.conn.execute(  # type: ignore[attr-defined]
             """
             SELECT p.id, p.name, COUNT(pt.track_id) as track_count
             FROM playlists p
@@ -267,12 +302,12 @@ class DirectoryNavigatorPlugin:
 
         if node_type == "all_tracks":
             # Show all tracks - emit with all filepaths
-            rows = db.conn.execute("SELECT filepath FROM tracks").fetchall()
+            rows = db.conn.execute("SELECT filepath FROM tracks").fetchall()  # type: ignore[attr-defined]
             filepaths = [Path(row["filepath"]) for row in rows]
 
         elif node_type == "directory":
             # Filter by directory (recursive: LIKE 'path%')
-            rows = db.conn.execute(
+            rows = db.conn.execute(  # type: ignore[attr-defined]
                 "SELECT filepath FROM tracks WHERE filepath LIKE ?",
                 (path_data + "/%",),
             ).fetchall()
@@ -281,7 +316,7 @@ class DirectoryNavigatorPlugin:
         elif node_type == "playlist":
             # Load playlist tracks
             playlist_id = int(path_data.split(":")[1])
-            rows = db.conn.execute(
+            rows = db.conn.execute(  # type: ignore[attr-defined]
                 """
                 SELECT t.filepath
                 FROM tracks t

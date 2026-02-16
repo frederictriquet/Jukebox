@@ -131,6 +131,7 @@ class MyPlugin:
 - `add_menu_action(menu, text, callback, shortcut=None)` - Add action to menu
 - `add_toolbar_widget(widget)` - Add widget to plugin toolbar
 - `add_sidebar_widget(widget, title)` - Add dock widget to right sidebar
+- `add_left_sidebar_widget(widget, title)` - Add dock widget to left sidebar
 - `add_bottom_widget(widget)` - Add widget at bottom of main layout
 
 **Standard Events** (in `jukebox/core/event_bus.py`):
@@ -138,7 +139,10 @@ class MyPlugin:
 - `TRACK_PLAYING` - Playback started
 - `TRACK_STOPPED` - Playback stopped
 - `TRACKS_ADDED` - Tracks added to library
+- `TRACK_DELETED` - Track deleted from library
+- `TRACK_METADATA_UPDATED` - Track metadata changed
 - `SEARCH_PERFORMED` - Search executed
+- `LOAD_TRACK_LIST` - Replace track list with new filepaths
 
 ### Key Files
 
