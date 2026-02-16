@@ -71,7 +71,7 @@ def test_build_tree_single_level(qapp) -> None:  # type: ignore
     music_dir = dir_node.child(0)
     assert "music" in music_dir.text()
     assert "(3)" in music_dir.text()
-    assert music_dir.data(ROLE_PATH) == "/music"
+    assert music_dir.data(ROLE_PATH) == str(Path("/music"))
     assert music_dir.data(ROLE_NODE_TYPE) == "directory"
 
 
