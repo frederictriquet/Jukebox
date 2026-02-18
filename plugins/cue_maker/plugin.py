@@ -228,10 +228,21 @@ class CueMakerPlugin:
             self.main_widget.setVisible(False)
 
         # Remove widgets from drawer layout before restoring
+        # This includes search_bar, track_list, controls, and waveform_widget
         for w in [app.search_bar, app.track_list, app.controls]:
             w.setParent(None)
         if self.main_widget:
             self.main_widget.setParent(None)
+
+        # Remove waveform widget from drawer (was added in activate)
+        waveform_plugin = app.plugin_manager.plugins.get("waveform_visualizer")
+        if (
+            waveform_plugin
+            and hasattr(waveform_plugin, "waveform_widget")
+            and waveform_plugin.waveform_widget
+        ):
+            waveform_plugin.waveform_widget.setParent(None)
+            self._saved_bottom_widgets.append(waveform_plugin.waveform_widget)
 
         # Restore navigator widget to its dock
         nav_plugin = app.plugin_manager.plugins.get("directory_navigator")
