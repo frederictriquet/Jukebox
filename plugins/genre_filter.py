@@ -438,9 +438,9 @@ class GenreFilterPlugin:
     def activate(self, mode: str) -> None:
         """Activate plugin when switching to jukebox or cue_maker mode.
 
-        Shows the filter buttons (except in cue_maker mode where they appear
-        in the drawer instead) and re-applies the current filter state.
-        Creates the container if it doesn't exist yet (first activation).
+        In cue_maker mode: removes buttons from toolbar (shown in drawer instead).
+        In jukebox/curating mode: adds buttons back to toolbar.
+        Re-applies the current filter state.
 
         Args:
             mode: Mode name ("jukebox" or "cue_maker")
@@ -449,16 +449,20 @@ class GenreFilterPlugin:
         if not self.container and self.context:
             self._create_container()
 
-        if self.container:
-            # Hide buttons in cue_maker mode (shown in drawer instead)
+        if self.container and self.context:
+            app = self.context.app
+            toolbar = getattr(app.main_window, "_plugin_toolbar", None)
+
             if mode == "cue_maker":
-                self.container.setVisible(False)
+                # Remove from toolbar (will be shown in drawer instead)
+                if toolbar and self.container.parent() == toolbar:
+                    self.container.setParent(None)
             else:
+                # Add back to toolbar if not already there
+                if toolbar and self.container.parent() != toolbar:
+                    toolbar.addWidget(self.container)
                 self.container.setVisible(True)
-            # Force parent to update layout after visibility change
-            parent = self.container.parent()
-            if parent:
-                parent.update()
+
         # Re-apply current filter
         self._on_filter_changed()
         logging.debug("[Genre Filter] Activated for %s mode", mode)
