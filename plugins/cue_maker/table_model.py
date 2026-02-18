@@ -12,7 +12,12 @@ from PySide6.QtCore import (
     Qt,
 )
 
-from plugins.cue_maker.constants import COLUMN_HEADERS, TableColumn
+from plugins.cue_maker.constants import (
+    COLUMN_HEADERS,
+    INDICATOR_GAP,
+    INDICATOR_OVERLAP,
+    TableColumn,
+)
 from plugins.cue_maker.model import CueEntry, CueSheet, EntryStatus
 
 logger = logging.getLogger(__name__)
@@ -80,7 +85,7 @@ class CueTableModel(QAbstractTableModel):
     def _display_data(self, entry: CueEntry, col: int) -> str:
         """Return formatted display string for a cell."""
         if col == TableColumn.OVERLAP:
-            return "⚠️" if self._has_overlap(entry) else ""
+            return self._entry_status_indicator(entry)
         if col == TableColumn.TIME:
             return entry.to_display_time()
         if col == TableColumn.ARTIST:
@@ -88,23 +93,51 @@ class CueTableModel(QAbstractTableModel):
         if col == TableColumn.TITLE:
             return entry.title
         if col == TableColumn.CONFIDENCE:
+            if entry.status == EntryStatus.MANUAL:
+                return "Manual"
             return f"{entry.confidence:.0%}"
         if col == TableColumn.DURATION:
             return entry.duration_to_display()
+        if col == TableColumn.ACTIONS:
+            return ""
         return ""
 
-    def _has_overlap(self, entry: CueEntry) -> bool:
-        """Check if entry's interval overlaps with any other entry."""
+    def _entry_status_indicator(self, entry: CueEntry) -> str:
+        """Return status indicator for entry: overlap, gap, or empty.
+
+        Returns:
+            INDICATOR_OVERLAP if entry overlaps another entry,
+            INDICATOR_GAP if there is a gap with a neighbor,
+            empty string if clean.
+        """
+        entries = self._sheet.entries
+        idx = entries.index(entry)
         start = entry.start_time_ms
         end = start + entry.duration_ms
-        for other in self._sheet.entries:
+
+        # Check overlap with any other entry
+        for other in entries:
             if other is entry:
                 continue
             other_start = other.start_time_ms
             other_end = other_start + other.duration_ms
             if start < other_end and end > other_start:
-                return True
-        return False
+                return INDICATOR_OVERLAP
+
+        # Check gap with previous neighbor
+        if idx > 0:
+            prev = entries[idx - 1]
+            prev_end = prev.start_time_ms + prev.duration_ms
+            if prev_end < start:
+                return INDICATOR_GAP
+
+        # Check gap with next neighbor
+        if idx < len(entries) - 1:
+            nxt = entries[idx + 1]
+            if end < nxt.start_time_ms:
+                return INDICATOR_GAP
+
+        return ""
 
     def _raw_data(self, entry: CueEntry, col: int) -> int | float | str | None:
         """Return raw data for programmatic access."""
@@ -184,7 +217,7 @@ class CueTableModel(QAbstractTableModel):
             start_time_ms=start_time_ms,
             artist=artist,
             title=title,
-            confidence=1.0,
+            confidence=0.0,
             duration_ms=0,
             status=EntryStatus.MANUAL,
         )
@@ -202,6 +235,32 @@ class CueTableModel(QAbstractTableModel):
             self.beginRemoveRows(QModelIndex(), row, row)
             self._sheet.remove_entry(row)
             self.endRemoveRows()
+
+    def update_duration(self, row: int, duration_ms: int) -> None:
+        """Update duration of entry at row and refresh all rows.
+
+        Changing one entry's duration can affect overlap/gap indicators
+        on neighboring entries, so we refresh the entire model.
+        """
+        if 0 <= row < len(self._sheet.entries):
+            self._sheet.update_duration(row, duration_ms)
+            self._emit_all_data_changed()
+
+    def update_start_time(self, row: int, start_time_ms: int) -> None:
+        """Update start time of entry at row (in ms) and re-sort.
+
+        Works directly in milliseconds to avoid MM:SS precision loss.
+        """
+        if 0 <= row < len(self._sheet.entries):
+            self._sheet.update_timestamp(row, start_time_ms)
+            self.layoutChanged.emit()
+
+    def _emit_all_data_changed(self) -> None:
+        """Emit dataChanged for all rows (e.g. after overlap/gap status changes)."""
+        if self._sheet.entries:
+            top_left = self.index(0, 0)
+            bottom_right = self.index(len(self._sheet.entries) - 1, self.columnCount() - 1)
+            self.dataChanged.emit(top_left, bottom_right)
 
     def get_entry(self, row: int) -> CueEntry | None:
         """Get entry at row, or None if invalid."""

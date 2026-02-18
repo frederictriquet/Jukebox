@@ -22,7 +22,7 @@ class WaveformVisualizerPlugin:
     name = "waveform_visualizer"
     version = "1.0.0"
     description = "Display track waveforms"
-    modes = ["jukebox", "curating"]  # Active in both modes (waveform always visible)
+    modes = ["jukebox", "curating", "cue_maker"]  # Active in all modes (waveform always visible)
 
     # Class variable to keep batch processor alive (contains orphan workers)
     _batch_processor: Any = None

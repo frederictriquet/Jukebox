@@ -51,14 +51,7 @@ class TestCueMakerWidget:
         assert widget.mix_path_label is not None
         assert widget.load_btn is not None
         assert widget.analyze_btn is not None
-        assert widget.add_entry_btn is not None
         assert widget.export_btn is not None
-
-        # Entry editor
-        assert widget.time_input is not None
-        assert widget.artist_input is not None
-        assert widget.title_input is not None
-        assert widget.delete_btn is not None
 
     def test_initial_state(self, qapp, mock_context) -> None:  # type: ignore
         """Test widget initial state."""
@@ -69,11 +62,6 @@ class TestCueMakerWidget:
 
         # Export button disabled until confirmed entries
         assert widget.export_btn.isEnabled() is False
-
-        # Editor disabled until row selected
-        assert widget.time_input.isEnabled() is False
-        assert widget.artist_input.isEnabled() is False
-        assert widget.title_input.isEnabled() is False
 
     def test_mix_load_requested_signal(self, qapp, qtbot, mock_context) -> None:  # type: ignore
         """Test mix_load_requested signal emitted on file selection."""
@@ -149,100 +137,6 @@ class TestCueMakerWidget:
         assert widget.progress_bar.isVisible() is True
         assert widget.progress_bar.value() == 50
         assert widget.progress_bar.maximum() == 100
-
-    def test_add_manual_entry(self, qapp, mock_context) -> None:  # type: ignore
-        """Test _on_add_manual_entry adds entry to model."""
-        widget = CueMakerWidget(mock_context)
-
-        widget._on_add_manual_entry()
-
-        assert widget.model.rowCount() == 1
-        entry = widget.model.get_entry(0)
-        assert entry is not None
-        assert entry.status == EntryStatus.MANUAL
-
-    def test_row_selection_enables_editor(self, qapp, mock_context) -> None:  # type: ignore
-        """Test selecting row enables editor fields."""
-        widget = CueMakerWidget(mock_context)
-        widget.model.load_entries([CueEntry(60000, "Artist", "Title", 0.9, 180000)])
-
-        # Simulate row selection
-        idx = widget.model.index(0, 0)
-        widget._on_row_selected(idx, Mock())
-
-        assert widget.time_input.isEnabled() is True
-        assert widget.artist_input.isEnabled() is True
-        assert widget.title_input.isEnabled() is True
-        assert widget.time_input.text() == "01:00"
-        assert widget.artist_input.text() == "Artist"
-        assert widget.title_input.text() == "Title"
-
-    def test_row_deselection_disables_editor(self, qapp, mock_context) -> None:  # type: ignore
-        """Test deselecting row disables editor fields."""
-        widget = CueMakerWidget(mock_context)
-        widget.model.load_entries([CueEntry(60000, "Artist", "Title", 0.9, 180000)])
-
-        # Select then deselect
-        idx = widget.model.index(0, 0)
-        widget._on_row_selected(idx, Mock())
-        assert widget.time_input.isEnabled() is True
-
-        invalid_idx = Mock()
-        invalid_idx.isValid.return_value = False
-        widget._on_row_selected(invalid_idx, Mock())
-
-        assert widget.time_input.isEnabled() is False
-        assert widget.artist_input.isEnabled() is False
-
-    def test_time_edited_updates_model(self, qapp, mock_context) -> None:  # type: ignore
-        """Test _on_time_edited updates entry time."""
-        widget = CueMakerWidget(mock_context)
-        widget.model.load_entries([CueEntry(60000, "A", "T", 0.9, 180000)])
-
-        # Select row
-        widget._selected_row = 0
-        widget.time_input.setText("02:30")
-        widget._on_time_edited()
-
-        assert widget.model.sheet.entries[0].start_time_ms == 150000
-
-    def test_artist_edited_updates_model(self, qapp, mock_context) -> None:  # type: ignore
-        """Test _on_artist_edited updates entry artist."""
-        widget = CueMakerWidget(mock_context)
-        widget.model.load_entries([CueEntry(60000, "Old", "T", 0.9, 180000)])
-
-        widget._selected_row = 0
-        widget.artist_input.setText("New Artist")
-        widget._on_artist_edited()
-
-        assert widget.model.sheet.entries[0].artist == "New Artist"
-
-    def test_title_edited_updates_model(self, qapp, mock_context) -> None:  # type: ignore
-        """Test _on_title_edited updates entry title."""
-        widget = CueMakerWidget(mock_context)
-        widget.model.load_entries([CueEntry(60000, "A", "Old", 0.9, 180000)])
-
-        widget._selected_row = 0
-        widget.title_input.setText("New Title")
-        widget._on_title_edited()
-
-        assert widget.model.sheet.entries[0].title == "New Title"
-
-    def test_delete_entry(self, qapp, mock_context) -> None:  # type: ignore
-        """Test _on_delete_entry removes entry."""
-        widget = CueMakerWidget(mock_context)
-        widget.model.load_entries(
-            [
-                CueEntry(30000, "A1", "T1", 0.9, 180000),
-                CueEntry(60000, "A2", "T2", 0.9, 180000),
-            ]
-        )
-
-        widget._selected_row = 0
-        widget._on_delete_entry()
-
-        assert widget.model.rowCount() == 1
-        assert widget.model.sheet.entries[0].artist == "A2"
 
     def test_export_with_no_entries(self, qapp, mock_context) -> None:  # type: ignore
         """Test _on_export warns when no entries exist."""

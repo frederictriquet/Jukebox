@@ -112,15 +112,16 @@ class TestCueEntry:
         assert entry.duration_to_display() == "04:00"
 
     def test_duration_to_display_fractional_seconds(self) -> None:
-        """Test duration with fractional seconds truncates."""
+        """Test duration with fractional seconds rounds to nearest second."""
         entry = CueEntry(
             start_time_ms=0,
             artist="Artist",
             title="Title",
             confidence=1.0,
-            duration_ms=185999,  # 3:05.999
+            duration_ms=185999,  # 3:05.999 → rounds to 186000 (3:06)
         )
-        assert entry.duration_to_display() == "03:05"
+        assert entry.duration_ms == 186000
+        assert entry.duration_to_display() == "03:06"
 
 
 class TestCueSheet:
@@ -318,3 +319,23 @@ class TestCueSheet:
         sheet.clear()
 
         assert len(sheet.entries) == 0
+
+    def test_update_duration_valid(self) -> None:
+        """Test updating duration at valid index."""
+        sheet = CueSheet()
+        entry = CueEntry(60000, "Artist", "Title", 0.9, 180000)
+        sheet.add_entry(entry)
+
+        sheet.update_duration(0, 240000)
+
+        assert sheet.entries[0].duration_ms == 240000
+
+    def test_update_duration_invalid_index(self) -> None:
+        """Test updating duration with invalid index does nothing."""
+        sheet = CueSheet()
+        entry = CueEntry(60000, "Artist", "Title", 0.9, 180000)
+        sheet.add_entry(entry)
+
+        sheet.update_duration(10, 240000)
+
+        assert sheet.entries[0].duration_ms == 180000  # Unchanged

@@ -154,3 +154,71 @@ def save_waveform_cache(mix_path: str, waveform: dict[str, np.ndarray]) -> None:
         logger.info("[Cache] Saved waveform for %s", mix_path)
     except Exception:
         logger.warning("[Cache] Failed to save waveform cache for %s", mix_path, exc_info=True)
+
+
+def _entries_cache_file(mix_path: str) -> Path:
+    """Return the entries cache file path for a given mix."""
+    return CACHE_DIR / f"{_cache_key(mix_path)}_entries.json"
+
+
+def save_entries_cache(mix_path: str, entries: list) -> None:
+    """Save cue entries to disk cache as JSON."""
+    try:
+        import json
+
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        data = [
+            {
+                "start_time_ms": e.start_time_ms,
+                "artist": e.artist,
+                "title": e.title,
+                "confidence": e.confidence,
+                "duration_ms": e.duration_ms,
+                "status": e.status.value,
+                "filepath": e.filepath,
+                "track_id": e.track_id,
+                "time_stretch_ratio": e.time_stretch_ratio,
+            }
+            for e in entries
+        ]
+        path = _entries_cache_file(mix_path)
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        logger.info("[Cache] Saved %d entries for %s", len(entries), mix_path)
+    except Exception:
+        logger.warning("[Cache] Failed to save entries cache for %s", mix_path, exc_info=True)
+
+
+def load_cached_entries(mix_path: str) -> list | None:
+    """Load cached cue entries for a mix, or None if not cached."""
+    try:
+        path = _entries_cache_file(mix_path)
+    except OSError:
+        return None
+    if not path.exists():
+        return None
+
+    try:
+        import json
+
+        from plugins.cue_maker.model import CueEntry, EntryStatus
+
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        entries = [
+            CueEntry(
+                start_time_ms=d["start_time_ms"],
+                artist=d["artist"],
+                title=d["title"],
+                confidence=d["confidence"],
+                duration_ms=d["duration_ms"],
+                status=EntryStatus(d["status"]),
+                filepath=d.get("filepath", ""),
+                track_id=d.get("track_id"),
+                time_stretch_ratio=d.get("time_stretch_ratio", 1.0),
+            )
+            for d in raw
+        ]
+        logger.info("[Cache] Loaded %d cached entries for %s", len(entries), mix_path)
+        return entries
+    except Exception:
+        logger.warning("[Cache] Failed to read entries cache for %s", mix_path, exc_info=True)
+        return None

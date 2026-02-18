@@ -455,6 +455,10 @@ class GenreFilterPlugin:
                 self.container.setVisible(False)
             else:
                 self.container.setVisible(True)
+            # Force parent to update layout after visibility change
+            parent = self.container.parent()
+            if parent:
+                parent.update()
         # Re-apply current filter
         self._on_filter_changed()
         logging.debug("[Genre Filter] Activated for %s mode", mode)

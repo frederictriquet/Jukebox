@@ -7,30 +7,348 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pyqtgraph as pg
-from PySide6.QtCore import QModelIndex, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QAbstractTableModel,
+    QEvent,
+    QModelIndex,
+    QPoint,
+    QRect,
+    QSize,
+    Qt,
+    QTimer,
+    Signal,
+)
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QDragEnterEvent,
+    QDropEvent,
+    QKeySequence,
+    QPainter,
+    QPen,
+    QPolygon,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QLineEdit,
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTableView,
     QVBoxLayout,
     QWidget,
 )
 
 from jukebox.core.event_bus import Events
-from plugins.cue_maker.constants import TableColumn
+from plugins.cue_maker.constants import (
+    ACTION_DELETE,
+    ACTION_INSERT,
+    ACTION_SNAP_NEXT,
+    ACTION_SNAP_PREV,
+    TableColumn,
+)
 from plugins.cue_maker.table_model import CueTableModel
 
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol
 
 logger = logging.getLogger(__name__)
+
+# Action definitions: (icon, tooltip)
+_ACTIONS = [
+    (ACTION_DELETE, "Delete entry"),
+    (ACTION_INSERT, "Insert entry after"),
+]
+_ACTION_ICON_WIDTH = 22
+
+_HANDLE_TOLERANCE = 6
+_MIN_DURATION_MS = 1000
+_SNAP_THRESHOLD_PX = 5
+
+
+class CueTimingBar(QWidget):
+    """Draggable timing bar showing start/end handles for the selected cue entry."""
+
+    start_changed = Signal(int)
+    end_changed = Signal(int)
+    region_changed = Signal(int, int)  # (start_ms, end_ms) emitted during region drag
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedHeight(24)
+        self.setMouseTracking(True)
+
+        self._mix_duration_ms: int = 0
+        self._start_ms: int = 0
+        self._end_ms: int = 0
+        self._has_entry: bool = False
+        self._dragging: str | None = None  # "start", "end", or "region"
+        self._drag_offset_ms: int = 0  # offset from click to start_ms in region drag
+        self._snap_points: list[int] = []
+
+    # -- Public API --
+
+    def set_mix_duration(self, duration_ms: int) -> None:
+        """Set total mix duration in milliseconds."""
+        self._mix_duration_ms = max(0, duration_ms)
+        self.update()
+
+    def set_entry(self, start_ms: int, end_ms: int) -> None:
+        """Show handles for the given entry timing."""
+        self._start_ms = start_ms
+        self._end_ms = end_ms
+        self._has_entry = True
+        self.update()
+
+    def clear_entry(self) -> None:
+        """Hide handles (no entry selected)."""
+        self._has_entry = False
+        self._dragging = None
+        self._snap_points: list[int] = []
+        self.update()
+
+    def set_snap_points(self, points: list[int]) -> None:
+        """Set magnetic snap points (neighboring entry boundaries in ms)."""
+        self._snap_points = points
+
+    # -- Coordinate conversion --
+
+    def _ms_to_x(self, ms: int) -> float:
+        if self._mix_duration_ms <= 0:
+            return 0.0
+        return (ms / self._mix_duration_ms) * self.width()
+
+    def _snap_ms(self, ms: int) -> int:
+        """Snap ms to the nearest snap point if within pixel threshold."""
+        for sp in self._snap_points:
+            if abs(self._ms_to_x(ms) - self._ms_to_x(sp)) <= _SNAP_THRESHOLD_PX:
+                return sp
+        return ms
+
+    def _x_to_ms(self, x: float) -> int:
+        if self.width() <= 0:
+            return 0
+        return int((x / self.width()) * self._mix_duration_ms)
+
+    # -- Paint --
+
+    def paintEvent(self, event: QEvent) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+
+        # Background bar
+        painter.fillRect(0, 0, w, h, QColor(50, 50, 50))
+
+        if not self._has_entry or self._mix_duration_ms <= 0:
+            painter.end()
+            return
+
+        x_start = self._ms_to_x(self._start_ms)
+        x_end = self._ms_to_x(self._end_ms)
+
+        # Highlighted region between handles
+        painter.fillRect(
+            QRect(int(x_start), 0, int(x_end - x_start), h),
+            QColor(100, 180, 255, 60),
+        )
+
+        # Draw snap point guides
+        if self._dragging and self._snap_points:
+            snap_pen = QPen(QColor(255, 255, 255, 80), 1, Qt.PenStyle.DotLine)
+            painter.setPen(snap_pen)
+            for sp in self._snap_points:
+                sx = int(self._ms_to_x(sp))
+                painter.drawLine(sx, 0, sx, h)
+
+        # Draw handles
+        self._draw_handle(painter, x_start, QColor(80, 140, 255), h)
+        self._draw_handle(painter, x_end, QColor(255, 160, 50), h)
+
+        painter.end()
+
+    def _draw_handle(self, painter: QPainter, x: float, color: QColor, h: int) -> None:
+        """Draw a vertical line + triangle marker at x."""
+        ix = int(x)
+        pen = QPen(color, 2)
+        painter.setPen(pen)
+        painter.drawLine(ix, 0, ix, h)
+
+        # Small triangle at top
+        triangle = QPolygon([QPoint(ix - 4, 0), QPoint(ix + 4, 0), QPoint(ix, 6)])
+        painter.setBrush(QBrush(color))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawPolygon(triangle)
+
+    # -- Hit testing --
+
+    def _hit_test(self, x: float) -> str | None:
+        """Return 'start', 'end', 'region', or None based on click position."""
+        x_start = self._ms_to_x(self._start_ms)
+        x_end = self._ms_to_x(self._end_ms)
+        if abs(x - x_start) <= _HANDLE_TOLERANCE:
+            return "start"
+        if abs(x - x_end) <= _HANDLE_TOLERANCE:
+            return "end"
+        if x_start < x < x_end:
+            return "region"
+        return None
+
+    # -- Mouse interaction --
+
+    def mousePressEvent(self, event: QEvent) -> None:  # noqa: N802
+        if not self._has_entry or event.button() != Qt.MouseButton.LeftButton:
+            return
+        x = event.position().x()
+        hit = self._hit_test(x)
+        self._dragging = hit
+        if hit == "region":
+            self._drag_offset_ms = self._x_to_ms(x) - self._start_ms
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+
+    def mouseMoveEvent(self, event: QEvent) -> None:  # noqa: N802
+        if self._dragging is None:
+            # Update cursor hint
+            if self._has_entry:
+                hit = self._hit_test(event.position().x())
+                if hit in ("start", "end"):
+                    self.setCursor(Qt.CursorShape.SizeHorCursor)
+                elif hit == "region":
+                    self.setCursor(Qt.CursorShape.OpenHandCursor)
+                else:
+                    self.setCursor(Qt.CursorShape.ArrowCursor)
+            return
+
+        ms = self._x_to_ms(event.position().x())
+
+        if self._dragging == "start":
+            ms = self._snap_ms(ms)
+            ms = max(0, min(ms, self._end_ms - _MIN_DURATION_MS))
+            if ms != self._start_ms:
+                self._start_ms = ms
+                self.update()
+                self.start_changed.emit(ms)
+        elif self._dragging == "end":
+            ms = self._snap_ms(ms)
+            ms = max(self._start_ms + _MIN_DURATION_MS, min(ms, self._mix_duration_ms))
+            if ms != self._end_ms:
+                self._end_ms = ms
+                self.update()
+                self.end_changed.emit(ms)
+        elif self._dragging == "region":
+            duration = self._end_ms - self._start_ms
+            new_start = ms - self._drag_offset_ms
+            new_start = self._snap_ms(new_start)
+            # Clamp so the region stays within [0, mix_duration]
+            new_start = max(0, min(new_start, self._mix_duration_ms - duration))
+            new_end = new_start + duration
+            if new_start != self._start_ms:
+                self._start_ms = new_start
+                self._end_ms = new_end
+                self.update()
+                self.region_changed.emit(new_start, new_end)
+
+    def mouseReleaseEvent(self, event: QEvent) -> None:  # noqa: N802
+        if self._dragging == "region":
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self._dragging = None
+
+
+class ActionsDelegate(QStyledItemDelegate):
+    """Delegate that renders clickable action icons in the actions column."""
+
+    action_triggered = Signal(int, int)  # row, action_index
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+
+    def paint(
+        self,
+        painter: QPainter,
+        option: QStyleOptionViewItem,
+        index: QModelIndex,
+    ) -> None:
+        """Paint action icons horizontally in the cell."""
+        painter.save()
+        painter.setRenderHint(painter.RenderHint.Antialiasing)
+
+        # Draw selection/alternate background
+        if option.state & QStyle.StateFlag.State_Selected:
+            painter.fillRect(option.rect, option.palette.highlight())
+            painter.setPen(option.palette.highlightedText().color())
+        else:
+            painter.setPen(option.palette.text().color())
+
+        font = painter.font()
+        font.setPointSize(11)
+        painter.setFont(font)
+
+        x = option.rect.left() + 2
+        y = option.rect.top()
+        h = option.rect.height()
+
+        for icon, _tooltip in _ACTIONS:
+            icon_rect = QRect(x, y, _ACTION_ICON_WIDTH, h)
+            painter.drawText(icon_rect, Qt.AlignmentFlag.AlignCenter, icon)
+            x += _ACTION_ICON_WIDTH
+
+        painter.restore()
+
+    def editorEvent(  # noqa: N802
+        self,
+        event: QEvent,
+        model: QAbstractTableModel,
+        option: QStyleOptionViewItem,
+        index: QModelIndex,
+    ) -> bool:
+        """Handle mouse clicks on action icons."""
+        if event.type() != QEvent.Type.MouseButtonRelease:
+            return False
+
+        x_click = event.position().x() - option.rect.left() - 2  # type: ignore[union-attr]
+        action_idx = int(x_click // _ACTION_ICON_WIDTH)
+
+        if 0 <= action_idx < len(_ACTIONS):
+            self.action_triggered.emit(index.row(), action_idx)
+            return True
+        return False
+
+    def helpEvent(  # noqa: N802
+        self,
+        event: QEvent,
+        view: QTableView,
+        option: QStyleOptionViewItem,
+        index: QModelIndex,
+    ) -> bool:
+        """Show tooltip for action icon under the cursor."""
+        if event.type() != QEvent.Type.ToolTip:
+            return super().helpEvent(event, view, option, index)
+
+        x_hover = event.pos().x() - option.rect.left() - 2  # type: ignore[union-attr]
+        action_idx = int(x_hover // _ACTION_ICON_WIDTH)
+
+        if 0 <= action_idx < len(_ACTIONS):
+            from PySide6.QtWidgets import QToolTip
+
+            QToolTip.showText(
+                event.globalPos(),  # type: ignore[union-attr]
+                _ACTIONS[action_idx][1],
+                view,
+            )
+            return True
+        return super().helpEvent(event, view, option, index)
+
+    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:  # noqa: N802
+        """Return size hint based on number of actions."""
+        width = len(_ACTIONS) * _ACTION_ICON_WIDTH + 4
+        return QSize(width, option.rect.height() if option.rect.height() > 0 else 24)
 
 
 class CueMakerWidget(QWidget):
@@ -68,6 +386,8 @@ class CueMakerWidget(QWidget):
         self._init_ui()
         self._connect_signals()
         self._connect_player_events()
+        # Accept drag and drop
+        self.setAcceptDrops(True)
 
     def _init_ui(self) -> None:
         """Build the complete UI layout."""
@@ -82,6 +402,10 @@ class CueMakerWidget(QWidget):
         self.waveform_widget = self._create_waveform()
         layout.addWidget(self.waveform_widget)
 
+        # --- Timing bar (draggable start/end handles) ---
+        self.timing_bar = CueTimingBar(self)
+        layout.addWidget(self.timing_bar)
+
         # --- Middle: Table + Progress ---
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
@@ -90,9 +414,6 @@ class CueMakerWidget(QWidget):
 
         self.table_view = self._create_table()
         layout.addWidget(self.table_view, stretch=1)
-
-        # --- Bottom: Entry editor ---
-        layout.addWidget(self._create_entry_editor())
 
         self.setLayout(layout)
 
@@ -131,11 +452,6 @@ class CueMakerWidget(QWidget):
         self.analyze_btn.clicked.connect(self.analyze_requested.emit)
         h.addWidget(self.analyze_btn)
 
-        self.add_entry_btn = QPushButton("+ Add Entry")
-        self.add_entry_btn.setToolTip("Add a manual cue entry")
-        self.add_entry_btn.clicked.connect(self._on_add_manual_entry)
-        h.addWidget(self.add_entry_btn)
-
         self.export_btn = QPushButton("Export CUE")
         self.export_btn.setToolTip("Export cue sheet to .cue file")
         self.export_btn.setEnabled(False)
@@ -170,6 +486,11 @@ class CueMakerWidget(QWidget):
         table.verticalHeader().setVisible(False)
         table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
 
+        # Actions delegate
+        self._actions_delegate = ActionsDelegate(table)
+        self._actions_delegate.action_triggered.connect(self._on_action_triggered)
+        table.setItemDelegateForColumn(TableColumn.ACTIONS, self._actions_delegate)
+
         # Column sizing
         header = table.horizontalHeader()
         header.setSectionResizeMode(TableColumn.OVERLAP, QHeaderView.ResizeMode.Fixed)
@@ -178,55 +499,19 @@ class CueMakerWidget(QWidget):
         header.setSectionResizeMode(TableColumn.TITLE, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(TableColumn.CONFIDENCE, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(TableColumn.DURATION, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(TableColumn.ACTIONS, QHeaderView.ResizeMode.Fixed)
 
         table.setColumnWidth(TableColumn.OVERLAP, 30)
         table.setColumnWidth(TableColumn.TIME, 60)
         table.setColumnWidth(TableColumn.CONFIDENCE, 80)
         table.setColumnWidth(TableColumn.DURATION, 60)
+        actions_width = len(_ACTIONS) * _ACTION_ICON_WIDTH + 4
+        table.setColumnWidth(TableColumn.ACTIONS, actions_width)
 
         # Selection change
         table.selectionModel().currentRowChanged.connect(self._on_row_selected)
 
         return table
-
-    def _create_entry_editor(self) -> QWidget:
-        """Create the bottom entry editor panel."""
-        group = QGroupBox("Entry Editor")
-        h = QHBoxLayout()
-        h.setContentsMargins(4, 4, 4, 4)
-
-        # Time input
-        h.addWidget(QLabel("Time:"))
-        self.time_input = QLineEdit()
-        self.time_input.setPlaceholderText("MM:SS")
-        self.time_input.setMaximumWidth(70)
-        self.time_input.editingFinished.connect(self._on_time_edited)
-        h.addWidget(self.time_input)
-
-        # Artist input
-        h.addWidget(QLabel("Artist:"))
-        self.artist_input = QLineEdit()
-        self.artist_input.setPlaceholderText("Artist name")
-        self.artist_input.editingFinished.connect(self._on_artist_edited)
-        h.addWidget(self.artist_input)
-
-        # Title input
-        h.addWidget(QLabel("Title:"))
-        self.title_input = QLineEdit()
-        self.title_input.setPlaceholderText("Track title")
-        self.title_input.editingFinished.connect(self._on_title_edited)
-        h.addWidget(self.title_input)
-
-        self.delete_btn = QPushButton("Delete")
-        self.delete_btn.setToolTip("Remove entry from list")
-        self.delete_btn.clicked.connect(self._on_delete_entry)
-        h.addWidget(self.delete_btn)
-
-        group.setLayout(h)
-
-        # Disable until selection
-        self._set_editor_enabled(False)
-        return group
 
     def _connect_signals(self) -> None:
         """Connect model signals."""
@@ -234,6 +519,9 @@ class CueMakerWidget(QWidget):
         self.model.dataChanged.connect(self._update_export_button)
         self.model.rowsInserted.connect(self._update_export_button)
         self.model.rowsRemoved.connect(self._update_export_button)
+        self.timing_bar.start_changed.connect(self._on_timing_bar_start_changed)
+        self.timing_bar.end_changed.connect(self._on_timing_bar_end_changed)
+        self.timing_bar.region_changed.connect(self._on_timing_bar_region_changed)
 
     def _connect_player_events(self) -> None:
         """Connect to player and event bus for mix playback."""
@@ -241,6 +529,51 @@ class CueMakerWidget(QWidget):
         self.context.subscribe(Events.TRACK_LOADED, self._on_track_loaded_from_library)
         self.context.subscribe(Events.MIX_POSITION_UPDATE, self._on_mix_position_update)
         self.waveform_widget.position_clicked.connect(self._on_waveform_seek)
+
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # type: ignore
+        """Accept drag events for audio files."""
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            # Check if any URL is an audio file
+            for url in urls:
+                path = url.toLocalFile()
+                if path.lower().endswith(('.mp3', '.flac', '.wav', '.aiff', '.aif', '.ogg', '.m4a')):
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+
+    def dropEvent(self, event: QDropEvent) -> None:  # type: ignore
+        """Handle dropped audio files."""
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            # Load the first audio file dropped
+            for url in urls:
+                path = url.toLocalFile()
+                if path.lower().endswith(('.mp3', '.flac', '.wav', '.aiff', '.aif', '.ogg', '.m4a')):
+                    self._load_mix_file(path)
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+
+    def _load_mix_file(self, filepath: str) -> None:
+        """Load a mix file (used by both Load button and drag-drop)."""
+        self.mix_path_label.setText(Path(filepath).name)
+        self.mix_path_label.setStyleSheet("")
+        self.model.set_metadata(filepath, Path(filepath).stem, "")
+        self.analyze_btn.setEnabled(True)
+        self.play_btn.setEnabled(True)
+        self.mix_load_requested.emit(filepath)
+        self._start_waveform_generation(filepath)
+
+        # Load cached entries if available
+        from plugins.cue_maker.cache import load_cached_entries
+
+        cached_entries = load_cached_entries(filepath)
+        if cached_entries:
+            self.model.load_entries(cached_entries)
+
+        logger.info("[Cue Maker] Mix loaded: %s", filepath)
 
     # --- Playback slots ---
 
@@ -350,14 +683,7 @@ class CueMakerWidget(QWidget):
             "Audio Files (*.mp3 *.flac *.wav *.aiff *.aif *.ogg *.m4a);;All Files (*)",
         )
         if filepath:
-            self.mix_path_label.setText(Path(filepath).name)
-            self.mix_path_label.setStyleSheet("")
-            self.model.set_metadata(filepath, Path(filepath).stem, "")
-            self.analyze_btn.setEnabled(True)
-            self.play_btn.setEnabled(True)
-            self.mix_load_requested.emit(filepath)
-            self._start_waveform_generation(filepath)
-            logger.info("[Cue Maker] Mix loaded: %s", filepath)
+            self._load_mix_file(filepath)
 
     def _start_waveform_generation(self, filepath: str) -> None:
         """Start background waveform generation for the mix, or load from cache."""
@@ -378,6 +704,7 @@ class CueMakerWidget(QWidget):
         if cached is not None:
             self.waveform_widget.display_waveform(cached)
             self._mix_duration_s = len(cached["bass"]) * 2048 / 11025
+            self.timing_bar.set_mix_duration(int(self._mix_duration_s * 1000))
             logger.info("[Cue Maker] Loaded waveform from cache for %s", filepath)
             return
 
@@ -411,6 +738,7 @@ class CueMakerWidget(QWidget):
         """Handle waveform generation complete and save to cache."""
         waveform_data = result.get("waveform_data")
         self._mix_duration_s = result.get("duration", 0.0)
+        self.timing_bar.set_mix_duration(int(self._mix_duration_s * 1000))
         if waveform_data:
             self.waveform_widget.display_waveform(waveform_data)
 
@@ -432,21 +760,139 @@ class CueMakerWidget(QWidget):
         logger.warning("[Cue Maker] Waveform generation failed: %s", error_message)
 
     def _on_row_selected(self, current: QModelIndex, _previous: QModelIndex) -> None:
-        """Update editor when table row selection changes."""
+        """Update timing bar / highlight when table row selection changes."""
         if not current.isValid():
             self._selected_row = -1
-            self._set_editor_enabled(False)
+            self.timing_bar.clear_entry()
             self._update_highlight_region()
             return
 
         self._selected_row = current.row()
-        entry = self.model.get_entry(self._selected_row)
-        if entry:
-            self._set_editor_enabled(True)
-            self.time_input.setText(entry.to_display_time())
-            self.artist_input.setText(entry.artist)
-            self.title_input.setText(entry.title)
+        self._refresh_editor_fields()
         self._update_highlight_region()
+
+    def _refresh_editor_fields(self) -> None:
+        """Re-read current selection and update timing bar / highlight."""
+        row = self.table_view.currentIndex().row()
+        if row < 0:
+            row = self._selected_row
+        if row < 0:
+            self.timing_bar.clear_entry()
+            return
+        self._selected_row = row
+        entry = self.model.get_entry(row)
+        if entry:
+            end_ms = entry.start_time_ms + entry.duration_ms
+            self.timing_bar.set_entry(entry.start_time_ms, end_ms)
+            # Build snap points from neighboring entry boundaries
+            snap_points: list[int] = []
+            prev = self.model.get_entry(row - 1)
+            if prev:
+                snap_points.append(prev.start_time_ms + prev.duration_ms)
+            nxt = self.model.get_entry(row + 1)
+            if nxt:
+                snap_points.append(nxt.start_time_ms)
+            self.timing_bar.set_snap_points(snap_points)
+        self._update_highlight_region()
+
+    def _on_action_triggered(self, row: int, action_index: int) -> None:
+        """Dispatch action from the actions column delegate."""
+        # Select the row first
+        self.table_view.setCurrentIndex(self.model.index(row, 0))
+        if action_index == 0:
+            self._on_delete_entry()
+        elif action_index == 1:
+            self._on_insert_entry_after()
+
+    def _on_delete_entry(self) -> None:
+        """Delete the selected entry."""
+        row = self.table_view.currentIndex().row()
+        if row >= 0:
+            self.model.remove_entry(row)
+            self._selected_row = -1
+
+    def _on_insert_entry_after(self) -> None:
+        """Insert a new manual entry after the selected entry."""
+        row = self.table_view.currentIndex().row()
+        if row < 0:
+            return
+        entry = self.model.get_entry(row)
+        if entry is None:
+            return
+        # Place at end of current entry
+        new_start = entry.start_time_ms + entry.duration_ms
+        next_entry = self.model.get_entry(row + 1)
+        if next_entry is not None and new_start >= next_entry.start_time_ms:
+            new_start = next_entry.start_time_ms - 1000
+        if new_start <= entry.start_time_ms:
+            new_start = entry.start_time_ms + 1000
+        self.model.add_manual_entry(new_start, "", "")
+        # Select the newly inserted entry (identity search after re-sort)
+        new_start_rounded = round(new_start / 1000) * 1000
+        for i in range(self.model.rowCount()):
+            e = self.model.get_entry(i)
+            if e and e.start_time_ms == new_start_rounded and e.artist == "" and e.title == "":
+                self.table_view.setCurrentIndex(self.model.index(i, 0))
+                break
+
+    def _on_timing_bar_start_changed(self, ms: int) -> None:
+        """Handle drag of the start handle on the timing bar."""
+        if self._selected_row < 0:
+            return
+        entry = self.model.get_entry(self._selected_row)
+        if entry is None:
+            return
+        # Keep end fixed: compute new duration after start moves
+        end_ms = entry.start_time_ms + entry.duration_ms
+        idx = self.model.index(self._selected_row, TableColumn.TIME)
+        minutes = (ms // 1000) // 60
+        seconds = (ms // 1000) % 60
+        self.model.setData(idx, f"{minutes:02d}:{seconds:02d}", Qt.ItemDataRole.EditRole)
+        # Re-sort may have moved the entry — find it again
+        for i in range(self.model.rowCount()):
+            if self.model.get_entry(i) is entry:
+                self.table_view.setCurrentIndex(self.model.index(i, 0))
+                new_duration = end_ms - entry.start_time_ms
+                if new_duration > 0:
+                    self.model.update_duration(i, new_duration)
+                break
+        self._refresh_editor_fields()
+
+    def _on_timing_bar_end_changed(self, ms: int) -> None:
+        """Handle drag of the end handle on the timing bar."""
+        if self._selected_row < 0:
+            return
+        entry = self.model.get_entry(self._selected_row)
+        if entry is None:
+            return
+        new_duration = ms - entry.start_time_ms
+        if new_duration <= 0:
+            return
+        self.model.update_duration(self._selected_row, new_duration)
+        self._refresh_editor_fields()
+
+    def _on_timing_bar_region_changed(self, start_ms: int, end_ms: int) -> None:
+        """Handle drag of the entire region — update start and duration atomically."""
+        if self._selected_row < 0:
+            return
+        entry = self.model.get_entry(self._selected_row)
+        if entry is None:
+            return
+        duration_ms = end_ms - start_ms
+        if duration_ms <= 0:
+            return
+        # Update start time via setData (triggers re-sort)
+        idx = self.model.index(self._selected_row, TableColumn.TIME)
+        minutes = (start_ms // 1000) // 60
+        seconds = (start_ms // 1000) % 60
+        self.model.setData(idx, f"{minutes:02d}:{seconds:02d}", Qt.ItemDataRole.EditRole)
+        # Find entry after re-sort and set the exact duration
+        for i in range(self.model.rowCount()):
+            if self.model.get_entry(i) is entry:
+                self.table_view.setCurrentIndex(self.model.index(i, 0))
+                self.model.update_duration(i, duration_ms)
+                break
+        self._refresh_editor_fields()
 
     def _update_highlight_region(self) -> None:
         """Update the highlight region on the waveform for the selected cue entry."""
@@ -500,43 +946,6 @@ class CueMakerWidget(QWidget):
         )
         self.waveform_widget.plot_widget.addItem(self._highlight_region)
 
-    def _on_time_edited(self) -> None:
-        """Apply time edit from input field."""
-        if self._selected_row < 0:
-            return
-        idx = self.model.index(self._selected_row, TableColumn.TIME)
-        self.model.setData(idx, self.time_input.text(), Qt.ItemDataRole.EditRole)
-
-    def _on_artist_edited(self) -> None:
-        """Apply artist edit from input field."""
-        if self._selected_row < 0:
-            return
-        idx = self.model.index(self._selected_row, TableColumn.ARTIST)
-        self.model.setData(idx, self.artist_input.text(), Qt.ItemDataRole.EditRole)
-
-    def _on_title_edited(self) -> None:
-        """Apply title edit from input field."""
-        if self._selected_row < 0:
-            return
-        idx = self.model.index(self._selected_row, TableColumn.TITLE)
-        self.model.setData(idx, self.title_input.text(), Qt.ItemDataRole.EditRole)
-
-    def _on_delete_entry(self) -> None:
-        """Delete the selected entry."""
-        if self._selected_row >= 0:
-            self.model.remove_entry(self._selected_row)
-            self._selected_row = -1
-            self._set_editor_enabled(False)
-
-    def _on_add_manual_entry(self) -> None:
-        """Add a new manual entry at time 00:00."""
-        self.model.add_manual_entry(0, "", "")
-        # Select the newly added row
-        last_row = self.model.rowCount() - 1
-        if last_row >= 0:
-            idx = self.model.index(0, 0)  # Time 0 will be first after sort
-            self.table_view.setCurrentIndex(idx)
-
     def _on_export(self) -> None:
         """Export cue sheet to file."""
         if not self.model.has_confirmed_entries():
@@ -563,17 +972,6 @@ class CueMakerWidget(QWidget):
                 logger.info("[Cue Maker] Exported to %s", filepath)
             except (ValueError, OSError) as e:
                 QMessageBox.critical(self, "Export Error", str(e))
-
-    def _set_editor_enabled(self, enabled: bool) -> None:
-        """Enable/disable entry editor controls."""
-        self.time_input.setEnabled(enabled)
-        self.artist_input.setEnabled(enabled)
-        self.title_input.setEnabled(enabled)
-        self.delete_btn.setEnabled(enabled)
-        if not enabled:
-            self.time_input.clear()
-            self.artist_input.clear()
-            self.title_input.clear()
 
     def _update_export_button(self) -> None:
         """Enable export button when confirmed entries exist."""

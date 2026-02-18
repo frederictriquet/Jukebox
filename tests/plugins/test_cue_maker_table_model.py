@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import QModelIndex, Qt
 
-from plugins.cue_maker.constants import TableColumn
+from plugins.cue_maker.constants import INDICATOR_GAP, INDICATOR_OVERLAP, TableColumn
 from plugins.cue_maker.model import CueEntry, EntryStatus
 from plugins.cue_maker.table_model import CueTableModel
 
@@ -14,7 +14,7 @@ class TestCueTableModel:
         """Test model initializes with empty sheet."""
         model = CueTableModel()
         assert model.rowCount() == 0
-        assert model.columnCount() == 6
+        assert model.columnCount() == 7
         assert model.sheet is not None
         assert len(model.sheet.entries) == 0
 
@@ -33,7 +33,7 @@ class TestCueTableModel:
     def test_column_count(self, qapp) -> None:  # type: ignore
         """Test columnCount returns 7 columns."""
         model = CueTableModel()
-        assert model.columnCount() == 6
+        assert model.columnCount() == 7
 
     def test_header_data_horizontal(self, qapp) -> None:  # type: ignore
         """Test horizontal headers."""
@@ -45,6 +45,7 @@ class TestCueTableModel:
             "Title",
             "Confidence",
             "Duration",
+            "",
         ]
         for col, expected in enumerate(headers):
             result = model.headerData(col, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
@@ -229,7 +230,7 @@ class TestCueTableModel:
         assert model.sheet.entries[0].artist == "Manual Artist"
         assert model.sheet.entries[0].title == "Manual Title"
         assert model.sheet.entries[0].status == EntryStatus.MANUAL
-        assert model.sheet.entries[0].confidence == 1.0
+        assert model.sheet.entries[0].confidence == 0.0
 
     def test_remove_entry_valid(self, qapp) -> None:  # type: ignore
         """Test remove_entry removes entry at index."""
@@ -304,3 +305,69 @@ class TestCueTableModel:
         """Test has_confirmed_entries returns False when empty."""
         model = CueTableModel()
         assert model.has_confirmed_entries() is False
+
+    def test_entry_status_indicator_overlap(self, qapp) -> None:  # type: ignore
+        """Test _entry_status_indicator returns overlap indicator for overlapping entries."""
+        model = CueTableModel()
+        # Entry 1: 0-180s, Entry 2: 120-300s (overlap at 120-180s)
+        entries = [
+            CueEntry(0, "A1", "T1", 0.9, 180000),
+            CueEntry(120000, "A2", "T2", 0.85, 180000),
+        ]
+        model.load_entries(entries)
+
+        idx = model.index(0, TableColumn.OVERLAP)
+        assert model.data(idx, Qt.ItemDataRole.DisplayRole) == INDICATOR_OVERLAP
+        idx1 = model.index(1, TableColumn.OVERLAP)
+        assert model.data(idx1, Qt.ItemDataRole.DisplayRole) == INDICATOR_OVERLAP
+
+    def test_entry_status_indicator_gap(self, qapp) -> None:  # type: ignore
+        """Test _entry_status_indicator returns gap indicator when there is a gap."""
+        model = CueTableModel()
+        # Entry 1: 0-120s, Entry 2: 180-300s (gap from 120-180s)
+        entries = [
+            CueEntry(0, "A1", "T1", 0.9, 120000),
+            CueEntry(180000, "A2", "T2", 0.85, 120000),
+        ]
+        model.load_entries(entries)
+
+        # First entry has gap with next
+        idx0 = model.index(0, TableColumn.OVERLAP)
+        assert model.data(idx0, Qt.ItemDataRole.DisplayRole) == INDICATOR_GAP
+
+        # Second entry has gap with previous
+        idx1 = model.index(1, TableColumn.OVERLAP)
+        assert model.data(idx1, Qt.ItemDataRole.DisplayRole) == INDICATOR_GAP
+
+    def test_entry_status_indicator_clean(self, qapp) -> None:  # type: ignore
+        """Test _entry_status_indicator returns empty for contiguous entries."""
+        model = CueTableModel()
+        # Entry 1: 0-120s, Entry 2: 120-240s (perfectly contiguous)
+        entries = [
+            CueEntry(0, "A1", "T1", 0.9, 120000),
+            CueEntry(120000, "A2", "T2", 0.85, 120000),
+        ]
+        model.load_entries(entries)
+
+        idx0 = model.index(0, TableColumn.OVERLAP)
+        assert model.data(idx0, Qt.ItemDataRole.DisplayRole) == ""
+        idx1 = model.index(1, TableColumn.OVERLAP)
+        assert model.data(idx1, Qt.ItemDataRole.DisplayRole) == ""
+
+    def test_update_duration(self, qapp) -> None:  # type: ignore
+        """Test update_duration modifies entry duration and emits dataChanged."""
+        model = CueTableModel()
+        model.load_entries([CueEntry(0, "A", "T", 1.0, 180000)])
+
+        model.update_duration(0, 240000)
+
+        assert model.sheet.entries[0].duration_ms == 240000
+
+    def test_update_duration_invalid_row(self, qapp) -> None:  # type: ignore
+        """Test update_duration with invalid row does nothing."""
+        model = CueTableModel()
+        model.load_entries([CueEntry(0, "A", "T", 1.0, 180000)])
+
+        model.update_duration(10, 240000)
+
+        assert model.sheet.entries[0].duration_ms == 180000  # Unchanged

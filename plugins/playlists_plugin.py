@@ -35,13 +35,6 @@ class PlaylistsPlugin:
 
     def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register UI."""
-        # Add toolbar button
-        from PySide6.QtWidgets import QPushButton
-
-        btn = QPushButton("Playlists...")
-        btn.clicked.connect(self._show_playlists)
-        ui_builder.add_toolbar_widget(btn)
-
         # Load existing playlists into context menu
         self._update_context_menu()
 
