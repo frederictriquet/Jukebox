@@ -169,11 +169,9 @@ class CueMakerPlugin:
         search_layout.addWidget(app.search_bar)
 
         # Add genre filter buttons below search bar
-        genre_filter_plugin = app.plugin_manager.plugins.get("genre_filter")
-        if genre_filter_plugin and hasattr(genre_filter_plugin, "_make_button_container"):
-            self._drawer_genre_buttons = genre_filter_plugin._make_button_container(
-                genre_filter_plugin._on_filter_changed
-            )
+        search_filter_plugin = app.plugin_manager.plugins.get("search_and_filter")
+        if search_filter_plugin and hasattr(search_filter_plugin, "get_button_container"):
+            self._drawer_genre_buttons = search_filter_plugin.get_button_container()
             search_layout.addWidget(self._drawer_genre_buttons, stretch=0)
 
         right_layout.addWidget(search_container, stretch=0)

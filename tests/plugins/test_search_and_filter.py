@@ -1,12 +1,12 @@
-"""Tests for genre filter plugin."""
+"""Tests for search and filter plugin."""
 
 from unittest.mock import Mock, patch
 
 from PySide6.QtCore import QModelIndex
 
-from plugins.genre_filter import (
+from plugins.search_and_filter import (
     GenreFilterButton,
-    GenreFilterPlugin,
+    SearchAndFilterPlugin,
     GenreFilterProxyModel,
     GenreFilterState,
 )
@@ -94,7 +94,7 @@ class TestGenreFilterProxyModelLogic:
         """Test setting empty filter."""
         proxy = GenreFilterProxyModel()
 
-        proxy.set_filter(set(), set())
+        proxy.set_genre_filter(set(), set())
 
         assert proxy._on_genres == set()
         assert proxy._off_genres == set()
@@ -103,7 +103,7 @@ class TestGenreFilterProxyModelLogic:
         """Test setting filter with genres."""
         proxy = GenreFilterProxyModel()
 
-        proxy.set_filter({"H", "T"}, {"W"})
+        proxy.set_genre_filter({"H", "T"}, {"W"})
 
         assert proxy._on_genres == {"H", "T"}
         assert proxy._off_genres == {"W"}
@@ -254,30 +254,30 @@ class TestGenreFilterProxyModelLogic:
             assert proxy.filterAcceptsRow(999, QModelIndex()) is True
 
 
-class TestGenreFilterPlugin:
-    """Test GenreFilterPlugin."""
+class TestSearchAndFilterPlugin:
+    """Test SearchAndFilterPlugin."""
 
     def test_plugin_attributes(self) -> None:
         """Test plugin has required attributes."""
-        plugin = GenreFilterPlugin()
+        plugin = SearchAndFilterPlugin()
 
-        assert plugin.name == "genre_filter"
+        assert plugin.name == "search_and_filter"
         assert plugin.version == "1.0.0"
-        assert plugin.description == "Filter tracks by genre with toggle buttons"
+        assert plugin.description == "Centralized search and genre filter management"
         assert plugin.modes == ["jukebox", "cue_maker"]
 
     def test_initialization(self) -> None:
         """Test plugin initializes correctly."""
-        plugin = GenreFilterPlugin()
+        plugin = SearchAndFilterPlugin()
 
         assert plugin.context is None
         assert plugin.proxy is None
-        assert plugin.buttons == []
-        assert plugin.container is None
+        assert plugin.genre_buttons == []
+        assert plugin.toolbar_container is None
 
     def test_initialize_subscribes_to_events(self) -> None:
         """Test initialize subscribes to TRACKS_ADDED event."""
-        plugin = GenreFilterPlugin()
+        plugin = SearchAndFilterPlugin()
         mock_context = Mock()
 
         plugin.initialize(mock_context)
@@ -289,7 +289,7 @@ class TestGenreFilterPlugin:
 
     def test_register_ui_creates_buttons(self, qapp) -> None:  # type: ignore
         """Test register_ui creates filter buttons."""
-        plugin = GenreFilterPlugin()
+        plugin = SearchAndFilterPlugin()
 
         # Create objects with string attributes (Qt methods like setToolTip need str)
         class CodeConfig:
@@ -314,14 +314,14 @@ class TestGenreFilterPlugin:
         plugin.register_ui(mock_ui_builder)
 
         # Verify buttons created and sorted
-        assert len(plugin.buttons) == 3
-        assert plugin.buttons[0].code == "D"  # Alphabetically sorted
-        assert plugin.buttons[1].code == "H"
-        assert plugin.buttons[2].code == "T"
+        assert len(plugin.genre_buttons) == 3
+        assert plugin.genre_buttons[0].code == "D"  # Alphabetically sorted
+        assert plugin.genre_buttons[1].code == "H"
+        assert plugin.genre_buttons[2].code == "T"
 
         # Verify container added
         mock_ui_builder.add_toolbar_widget.assert_called_once()
-        assert plugin.container is not None
+        assert plugin.toolbar_container is not None
 
         # Verify proxy created
         assert plugin.proxy is not None
@@ -329,7 +329,7 @@ class TestGenreFilterPlugin:
 
     def test_on_filter_changed_updates_proxy(self, qapp) -> None:  # type: ignore
         """Test _on_filter_changed collects states and updates proxy."""
-        plugin = GenreFilterPlugin()
+        plugin = SearchAndFilterPlugin()
         plugin.proxy = GenreFilterProxyModel()
         mock_context = Mock()
         plugin.context = mock_context
@@ -341,7 +341,7 @@ class TestGenreFilterPlugin:
         btn3 = GenreFilterButton("T", "Trance")
         btn3.state = GenreFilterState.INDIFFERENT
 
-        plugin.buttons = [btn1, btn2, btn3]
+        plugin.genre_buttons = [btn1, btn2, btn3]
 
         plugin._on_filter_changed()
 
@@ -358,7 +358,7 @@ class TestGenreFilterPlugin:
 
     def test_on_tracks_added_invalidates_filter(self, qapp) -> None:  # type: ignore
         """Test _on_tracks_added invalidates filter."""
-        plugin = GenreFilterPlugin()
+        plugin = SearchAndFilterPlugin()
         mock_proxy = Mock()
         plugin.proxy = mock_proxy
 
@@ -368,15 +368,15 @@ class TestGenreFilterPlugin:
 
     def test_activate_re_applies_filter(self, qapp) -> None:  # type: ignore
         """Test activate() re-applies the filter."""
-        plugin = GenreFilterPlugin()
+        plugin = SearchAndFilterPlugin()
         plugin.proxy = GenreFilterProxyModel()
         mock_context = Mock()
         plugin.context = mock_context
 
         btn = GenreFilterButton("H", "House")
         btn.state = GenreFilterState.ON
-        plugin.buttons = [btn]
-        plugin.container = Mock()  # Set container so _create_container isn't called
+        plugin.genre_buttons = [btn]
+        plugin.toolbar_container = Mock()  # Set container so _create_container isn't called
 
         plugin.activate("jukebox")
 
@@ -385,9 +385,9 @@ class TestGenreFilterPlugin:
 
     def test_deactivate_clears_filter(self, qapp) -> None:  # type: ignore
         """Test deactivate() clears the filter."""
-        plugin = GenreFilterPlugin()
+        plugin = SearchAndFilterPlugin()
         plugin.proxy = GenreFilterProxyModel()
-        plugin.proxy.set_filter({"H"}, {"W"})
+        plugin.proxy.set_genre_filter({"H"}, {"W"})
 
         plugin.deactivate("curating")
 
@@ -397,28 +397,28 @@ class TestGenreFilterPlugin:
 
     def test_shutdown_removes_proxy(self) -> None:
         """Test shutdown() removes proxy model."""
-        plugin = GenreFilterPlugin()
+        plugin = SearchAndFilterPlugin()
         mock_track_list = Mock()
         plugin._track_list = mock_track_list
         plugin.proxy = Mock()
-        plugin.buttons = [Mock(), Mock()]
+        plugin.genre_buttons = [Mock(), Mock()]
 
         plugin.shutdown()
 
         mock_track_list.remove_proxy_model.assert_called_once()
         assert plugin._track_list is None
         assert plugin.proxy is None
-        assert plugin.buttons == []
+        assert plugin.genre_buttons == []
 
     def test_buttons_emit_signal_on_click(self, qapp) -> None:  # type: ignore
         """Test clicking buttons triggers filter update."""
-        plugin = GenreFilterPlugin()
+        plugin = SearchAndFilterPlugin()
         plugin.proxy = GenreFilterProxyModel()
         mock_context = Mock()
         plugin.context = mock_context
 
         button = GenreFilterButton("H", "House")
-        plugin.buttons = [button]
+        plugin.genre_buttons = [button]
 
         button.clicked.connect(plugin._on_filter_changed)
         button.click()
