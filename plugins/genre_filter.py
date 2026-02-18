@@ -436,47 +436,29 @@ class GenreFilterPlugin:
             self.proxy.invalidateFilter()
 
     def activate(self, mode: str) -> None:
-        """Activate plugin when switching to jukebox or cue_maker mode.
+        """Activate plugin when switching modes.
 
-        In cue_maker mode: removes buttons from toolbar (shown in drawer instead).
-        In jukebox/curating mode: adds buttons back to toolbar.
         Re-applies the current filter state.
 
         Args:
-            mode: Mode name ("jukebox" or "cue_maker")
+            mode: Mode name ("jukebox", "cue_maker", or "curating")
         """
         # Create container if it doesn't exist yet
         if not self.container and self.context:
             self._create_container()
-
-        if self.container and self.context:
-            app = self.context.app
-            toolbar = getattr(app.main_window, "_plugin_toolbar", None)
-
-            if mode == "cue_maker":
-                # Remove from toolbar (will be shown in drawer instead)
-                if toolbar and self.container.parent() == toolbar:
-                    self.container.setParent(None)
-            else:
-                # Add back to toolbar if not already there
-                if toolbar and self.container.parent() != toolbar:
-                    toolbar.addWidget(self.container)
-                self.container.setVisible(True)
 
         # Re-apply current filter
         self._on_filter_changed()
         logging.debug("[Genre Filter] Activated for %s mode", mode)
 
     def deactivate(self, mode: str) -> None:
-        """Deactivate plugin when switching away from jukebox mode.
+        """Deactivate plugin when switching away.
 
-        Hides the filter buttons and clears the filter (shows all tracks).
+        Clears the filter (shows all tracks).
 
         Args:
             mode: Mode name being switched away from
         """
-        if self.container:
-            self.container.setVisible(False)
         # Clear filter so all tracks are visible
         if self.proxy:
             self.proxy.set_filter(set(), set())

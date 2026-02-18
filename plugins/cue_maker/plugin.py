@@ -160,7 +160,23 @@ class CueMakerPlugin:
         right_container = QWidget()
         right_layout = QVBoxLayout()
         right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.addWidget(app.search_bar)
+
+        # Search bar with genre filter buttons
+        search_container = QWidget()
+        search_layout = QVBoxLayout(search_container)
+        search_layout.setContentsMargins(0, 0, 0, 0)
+        search_layout.setSpacing(4)
+        search_layout.addWidget(app.search_bar)
+
+        # Add genre filter buttons below search bar
+        genre_filter_plugin = app.plugin_manager.plugins.get("genre_filter")
+        if genre_filter_plugin and hasattr(genre_filter_plugin, "_make_button_container"):
+            self._drawer_genre_buttons = genre_filter_plugin._make_button_container(
+                genre_filter_plugin._on_filter_changed
+            )
+            search_layout.addWidget(self._drawer_genre_buttons, stretch=0)
+
+        right_layout.addWidget(search_container, stretch=0)
         right_layout.addWidget(app.track_list, stretch=1)
         right_container.setLayout(right_layout)
         h_splitter.addWidget(right_container)
@@ -175,16 +191,6 @@ class CueMakerPlugin:
         dc_layout.addWidget(h_splitter, stretch=1)
 
         dc_layout.addWidget(app.controls, stretch=0)
-
-        # Add genre filter buttons to drawer (from genre_filter plugin)
-        genre_filter_plugin = app.plugin_manager.plugins.get("genre_filter")
-        if genre_filter_plugin and hasattr(genre_filter_plugin, "_make_button_container"):
-            # Create a second set of genre buttons for the drawer
-            # (toolbar buttons are hidden in genre_filter.activate() for cue_maker mode)
-            self._drawer_genre_buttons = genre_filter_plugin._make_button_container(
-                genre_filter_plugin._on_filter_changed
-            )
-            dc_layout.addWidget(self._drawer_genre_buttons, stretch=0)
 
         # Re-add waveform visualizer widget (from waveform_visualizer plugin)
         # It was detached to avoid destruction when we replaced the central widget

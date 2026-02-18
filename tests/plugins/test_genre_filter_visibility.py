@@ -3,11 +3,15 @@ from unittest.mock import Mock
 
 from PySide6.QtWidgets import QHBoxLayout, QMainWindow, QToolBar, QWidget
 
-from plugins.genre_filter import GenreFilterPlugin
+from plugins.genre_filter import GenreFilterPlugin, GenreFilterProxyModel
 
 
-def test_genre_buttons_hidden_in_cue_maker_mode(qapp) -> None:  # type: ignore
-    """Test that genre filter toolbar buttons are hidden in cue_maker mode."""
+def test_genre_buttons_remain_in_toolbar_all_modes(qapp) -> None:  # type: ignore
+    """Test that genre filter toolbar buttons remain in toolbar across all modes.
+
+    In the new architecture, toolbar buttons stay in the toolbar always.
+    Separate drawer buttons are created for cue_maker mode.
+    """
     # Setup genre_filter plugin
     genre_plugin = GenreFilterPlugin()
     mock_context = Mock()
@@ -44,59 +48,45 @@ def test_genre_buttons_hidden_in_cue_maker_mode(qapp) -> None:  # type: ignore
     toolbar.addWidget(genre_plugin.container)
     main_window.show()
 
-    # Now the container should be visible (it has a visible parent)
+    # Container should be visible (it has a visible parent)
     assert genre_plugin.container.isVisible(), "Container should be visible when added to toolbar"
 
     # Activate in jukebox mode
     genre_plugin.activate("jukebox")
     assert genre_plugin.container.isVisible(), "Should be visible in jukebox mode"
-    assert genre_plugin.container.parent() == toolbar, "Should be in toolbar in jukebox mode"
+    assert genre_plugin.container.parent() == toolbar, "Should remain in toolbar in jukebox mode"
 
-    # Activate in cue_maker mode - THIS IS THE KEY TEST
+    # Activate in cue_maker mode
     genre_plugin.activate("cue_maker")
-    print(f"After activate('cue_maker'): container.parent() = {genre_plugin.container.parent()}")
-    print(f"After activate('cue_maker'): container.isVisible() = {genre_plugin.container.isVisible()}")
+    # Buttons should still be in toolbar (not removed)
     assert (
-        genre_plugin.container.parent() is None
-    ), "Should be REMOVED from toolbar in cue_maker mode"
+        genre_plugin.container.parent() == toolbar
+    ), "Toolbar buttons should remain in toolbar in cue_maker mode"
+    assert genre_plugin.container.isVisible(), "Toolbar buttons should remain visible"
 
     # Switch back to jukebox
     genre_plugin.activate("jukebox")
     assert (
         genre_plugin.container.parent() == toolbar
-    ), "Should be back in toolbar in jukebox mode"
+    ), "Should still be in toolbar in jukebox mode"
     assert (
         genre_plugin.container.isVisible()
-    ), "Should be visible again in jukebox mode"
+    ), "Should still be visible in jukebox mode"
 
 
-def test_genre_buttons_hidden_in_curating_mode(qapp) -> None:  # type: ignore
-    """Test that genre filter buttons are hidden in curating mode."""
+def test_genre_buttons_clear_filter_on_deactivate(qapp) -> None:  # type: ignore
+    """Test that genre filter is cleared when deactivating the plugin."""
     genre_plugin = GenreFilterPlugin()
-    mock_context = Mock()
-    mock_config = Mock()
+    genre_plugin.proxy = GenreFilterProxyModel()
 
-    class CodeConfig:
-        def __init__(self, code: str, name: str):
-            self.code = code
-            self.name = name
+    # Set up some filter state
+    genre_plugin.proxy.set_filter({"H", "D"}, {"W"})
+    assert genre_plugin.proxy._on_genres == {"H", "D"}
+    assert genre_plugin.proxy._off_genres == {"W"}
 
-    mock_config.genre_editor.codes = [CodeConfig("H", "House")]
-    mock_context.config = mock_config
-    genre_plugin.context = mock_context
-
-    genre_plugin._create_container()
-
-    # Add to visible parent
-    toolbar = QWidget()
-    toolbar_layout = QHBoxLayout(toolbar)
-    toolbar_layout.addWidget(genre_plugin.container)
-    toolbar.show()
-
-    # Activate in jukebox mode
-    genre_plugin.activate("jukebox")
-    assert genre_plugin.container.isVisible()
-
-    # Deactivate (curating mode is not in modes list, so deactivate is called)
+    # Deactivate should clear the filter
     genre_plugin.deactivate("jukebox")
-    assert not genre_plugin.container.isVisible()
+
+    # Filter should be cleared
+    assert genre_plugin.proxy._on_genres == set()
+    assert genre_plugin.proxy._off_genres == set()

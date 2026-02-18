@@ -366,27 +366,32 @@ class TestGenreFilterPlugin:
 
         mock_proxy.invalidateFilter.assert_called_once()
 
-    def test_activate_shows_container(self, qapp) -> None:  # type: ignore
-        """Test activate() shows container."""
+    def test_activate_re_applies_filter(self, qapp) -> None:  # type: ignore
+        """Test activate() re-applies the filter."""
         plugin = GenreFilterPlugin()
-        plugin.container = Mock()
         plugin.proxy = GenreFilterProxyModel()
-        plugin.buttons = [GenreFilterButton("H", "House")]
+        mock_context = Mock()
+        plugin.context = mock_context
+
+        btn = GenreFilterButton("H", "House")
+        btn.state = GenreFilterState.ON
+        plugin.buttons = [btn]
+        plugin.container = Mock()  # Set container so _create_container isn't called
 
         plugin.activate("jukebox")
 
-        plugin.container.setVisible.assert_called_once_with(True)
+        # Verify filter was re-applied via event emission
+        mock_context.emit.assert_called()
 
-    def test_deactivate_hides_container_and_clears_filter(self, qapp) -> None:  # type: ignore
-        """Test deactivate() hides container and clears filter."""
+    def test_deactivate_clears_filter(self, qapp) -> None:  # type: ignore
+        """Test deactivate() clears the filter."""
         plugin = GenreFilterPlugin()
-        plugin.container = Mock()
         plugin.proxy = GenreFilterProxyModel()
         plugin.proxy.set_filter({"H"}, {"W"})
 
         plugin.deactivate("curating")
 
-        plugin.container.setVisible.assert_called_once_with(False)
+        # Filter should be cleared
         assert plugin.proxy._on_genres == set()
         assert plugin.proxy._off_genres == set()
 
