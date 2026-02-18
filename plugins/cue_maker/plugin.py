@@ -48,6 +48,7 @@ class CueMakerPlugin:
         self._nav_dock: Any | None = None
         self._saved_bottom_widgets: list[QWidget] = []
         self._drawer: BottomDrawer | None = None
+        self._drawer_genre_buttons: QWidget | None = None
 
     def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin with application context.
@@ -175,6 +176,15 @@ class CueMakerPlugin:
 
         dc_layout.addWidget(app.controls, stretch=0)
 
+        # Add genre filter buttons to drawer (from genre_filter plugin)
+        genre_filter_plugin = app.plugin_manager.plugins.get("genre_filter")
+        if genre_filter_plugin and hasattr(genre_filter_plugin, "_make_button_container"):
+            # Create a second set of genre buttons for the drawer
+            self._drawer_genre_buttons = genre_filter_plugin._make_button_container(
+                genre_filter_plugin._on_filter_changed
+            )
+            dc_layout.addWidget(self._drawer_genre_buttons, stretch=0)
+
         # Re-add waveform visualizer widget (from waveform_visualizer plugin)
         # It was detached to avoid destruction when we replaced the central widget
         waveform_plugin = app.plugin_manager.plugins.get("waveform_visualizer")
@@ -233,6 +243,11 @@ class CueMakerPlugin:
             w.setParent(None)
         if self.main_widget:
             self.main_widget.setParent(None)
+
+        # Remove drawer genre buttons
+        if self._drawer_genre_buttons:
+            self._drawer_genre_buttons.setParent(None)
+            self._drawer_genre_buttons = None
 
         # Remove waveform widget from drawer (was added in activate)
         waveform_plugin = app.plugin_manager.plugins.get("waveform_visualizer")

@@ -252,7 +252,7 @@ class GenreFilterPlugin:
     name = "genre_filter"
     version = "1.0.0"
     description = "Filter tracks by genre with toggle buttons"
-    modes = ["jukebox"]
+    modes = ["jukebox", "cue_maker"]
 
     def __init__(self) -> None:
         """Initialize plugin state (all None/empty until register_ui)."""
@@ -285,6 +285,27 @@ class GenreFilterPlugin:
         if not self.context:
             return
 
+        # Create the container widget with buttons
+        self._create_container()
+
+        # Add container to toolbar
+        ui_builder.add_toolbar_widget(self.container)
+
+        # Create proxy model and install it on the track list
+        self.proxy = GenreFilterProxyModel()
+        self._track_list = ui_builder.main_window.track_list
+        self._track_list.set_proxy_model(self.proxy)
+
+        logging.info("[Genre Filter] Registered %d filter buttons", len(self.buttons))
+
+    def _create_container(self) -> None:
+        """Create the filter buttons container widget for the toolbar.
+
+        Creates one button per genre code (from config), sorted alphabetically.
+        """
+        if not self.context or self.container:
+            return
+
         config = self.context.config
         codes = config.genre_editor.codes
 
@@ -304,14 +325,77 @@ class GenreFilterPlugin:
             self.buttons.append(btn)
             layout.addWidget(btn)
 
-        ui_builder.add_toolbar_widget(self.container)
+    def _make_button_container(self, on_filter_changed_callback: Any) -> QWidget:
+        """Create a button container widget that can be reused.
 
-        # Create proxy model and install it on the track list
-        self.proxy = GenreFilterProxyModel()
-        self._track_list = ui_builder.main_window.track_list
-        self._track_list.set_proxy_model(self.proxy)
+        This method creates a container with genre filter buttons that are
+        connected to the provided callback. It can be used to create buttons
+        for the toolbar or for other layouts (e.g., drawer).
 
-        logging.info("[Genre Filter] Registered %d filter buttons", len(self.buttons))
+        Args:
+            on_filter_changed_callback: Callback to connect to button clicks
+
+        Returns:
+            QWidget container with genre filter buttons
+        """
+        if not self.context:
+            return QWidget()
+
+        config = self.context.config
+        codes = config.genre_editor.codes
+
+        # Sort codes alphabetically by code letter
+        sorted_codes = sorted(codes, key=lambda c: c.code)
+
+        # Create container widget
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+
+        # Create one button per genre code
+        for code_config in sorted_codes:
+            btn = GenreFilterButton(code_config.code, code_config.name)
+            btn.clicked.connect(on_filter_changed_callback)
+            layout.addWidget(btn)
+
+        return container
+
+    def _make_button_container(self, on_filter_changed_callback: Any) -> QWidget:
+        """Create a button container widget that can be reused.
+
+        This method creates a container with genre filter buttons that are
+        connected to the provided callback. It can be used to create buttons
+        for the toolbar or for other layouts (e.g., drawer).
+
+        Args:
+            on_filter_changed_callback: Callback to connect to button clicks
+
+        Returns:
+            QWidget container with genre filter buttons
+        """
+        if not self.context:
+            return QWidget()
+
+        config = self.context.config
+        codes = config.genre_editor.codes
+
+        # Sort codes alphabetically by code letter
+        sorted_codes = sorted(codes, key=lambda c: c.code)
+
+        # Create container widget
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+
+        # Create one button per genre code
+        for code_config in sorted_codes:
+            btn = GenreFilterButton(code_config.code, code_config.name)
+            btn.clicked.connect(on_filter_changed_callback)
+            layout.addWidget(btn)
+
+        return container
 
     def _on_filter_changed(self) -> None:
         """Collect button states and update the proxy filter.
@@ -349,13 +433,19 @@ class GenreFilterPlugin:
             self.proxy.invalidateFilter()
 
     def activate(self, mode: str) -> None:
-        """Activate plugin when switching to jukebox mode.
+        """Activate plugin when switching to jukebox or cue_maker mode.
 
         Shows the filter buttons and re-applies the current filter state.
+        Creates the container if it doesn't exist yet (first activation in cue_maker).
 
         Args:
-            mode: Mode name (always "jukebox" for this plugin)
+            mode: Mode name ("jukebox" or "cue_maker")
         """
+        # Create container if it doesn't exist yet
+        # (register_ui might not have been called for cue_maker mode initially)
+        if not self.container and self.context:
+            self._create_container()
+
         if self.container:
             self.container.setVisible(True)
         # Re-apply current filter
