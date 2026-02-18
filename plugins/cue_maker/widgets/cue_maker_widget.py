@@ -419,7 +419,7 @@ class CueMakerWidget(QWidget):
 
     def _create_mix_controls(self) -> QWidget:
         """Create the top bar with mix file controls."""
-        group = QGroupBox("Mix")
+        group = QGroupBox()
         h = QHBoxLayout()
         h.setContentsMargins(4, 4, 4, 4)
 
