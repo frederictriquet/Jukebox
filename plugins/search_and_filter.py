@@ -285,22 +285,35 @@ class SearchAndFilterPlugin:
         if self.toolbar_container:
             should_show_toolbar_buttons = mode != "cue_maker"
             self.toolbar_container.setVisible(should_show_toolbar_buttons)
+            logging.warning(
+                "[Search & Filter] Mode=%s, toolbar_container.setVisible(%s)",
+                mode,
+                should_show_toolbar_buttons,
+            )
 
         # Re-apply current filter
         self._on_filter_changed()
-        logging.debug("[Search & Filter] Activated for %s mode", mode)
+        logging.info("[Search & Filter] Activated for %s mode", mode)
 
     def deactivate(self, mode: str) -> None:
         """Deactivate plugin."""
-        # Hide toolbar buttons when deactivating
+        # Show/hide toolbar buttons based on mode being left
+        # If leaving cue_maker, show buttons (we're going to jukebox/curating)
+        # If leaving jukebox/curating, hide buttons (we're going to cue_maker)
         if self.toolbar_container:
-            self.toolbar_container.setVisible(False)
+            should_show_toolbar_buttons = mode == "cue_maker"
+            self.toolbar_container.setVisible(should_show_toolbar_buttons)
+            logging.warning(
+                "[Search & Filter] Deactivate mode=%s, toolbar_container.setVisible(%s)",
+                mode,
+                should_show_toolbar_buttons,
+            )
 
         # Clear filter so all tracks are visible
         if self.proxy:
             self.proxy.set_genre_filter(set(), set())
             self.proxy.set_search_text("")
-        logging.debug("[Search & Filter] Deactivated for %s mode", mode)
+        logging.info("[Search & Filter] Deactivated for %s mode", mode)
 
     def shutdown(self) -> None:
         """Cleanup resources."""
