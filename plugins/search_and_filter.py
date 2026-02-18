@@ -286,11 +286,17 @@ class SearchAndFilterPlugin:
             if mode == "cue_maker":
                 # Hide the container when entering cue_maker mode
                 self.toolbar_container.setVisible(False)
-                logging.info("[Search & Filter] Hidden toolbar buttons for %s mode", mode)
+                print(f"\n*** SEARCH_AND_FILTER: HIDING TOOLBAR BUTTONS (mode={mode}) ***\n")
+                logging.error(
+                    "[Search & Filter] *** HIDING toolbar buttons for %s mode (visible=False) ***", mode
+                )
             else:
                 # Show the container for other modes (jukebox, curating)
                 self.toolbar_container.setVisible(True)
-                logging.info("[Search & Filter] Shown toolbar buttons for %s mode", mode)
+                print(f"\n*** SEARCH_AND_FILTER: SHOWING TOOLBAR BUTTONS (mode={mode}) ***\n")
+                logging.error(
+                    "[Search & Filter] *** SHOWING toolbar buttons for %s mode (visible=True) ***", mode
+                )
 
         # Re-apply current filter
         self._on_filter_changed()
