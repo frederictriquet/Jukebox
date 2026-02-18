@@ -281,15 +281,16 @@ class SearchAndFilterPlugin:
             self._create_toolbar_buttons()
 
         # Show/hide toolbar buttons based on mode
-        # In cue_maker mode, buttons are shown in drawer instead
+        # In cue_maker mode, buttons are shown in drawer instead (not toolbar)
         if self.toolbar_container:
-            should_show_toolbar_buttons = mode != "cue_maker"
-            self.toolbar_container.setVisible(should_show_toolbar_buttons)
-            logging.warning(
-                "[Search & Filter] Mode=%s, toolbar_container.setVisible(%s)",
-                mode,
-                should_show_toolbar_buttons,
-            )
+            if mode == "cue_maker":
+                # Hide the container when entering cue_maker mode
+                self.toolbar_container.setVisible(False)
+                logging.info("[Search & Filter] Hidden toolbar buttons for %s mode", mode)
+            else:
+                # Show the container for other modes (jukebox, curating)
+                self.toolbar_container.setVisible(True)
+                logging.info("[Search & Filter] Shown toolbar buttons for %s mode", mode)
 
         # Re-apply current filter
         self._on_filter_changed()
