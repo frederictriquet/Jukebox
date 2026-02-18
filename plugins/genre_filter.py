@@ -395,6 +395,9 @@ class GenreFilterPlugin:
             btn.clicked.connect(on_filter_changed_callback)
             layout.addWidget(btn)
 
+        # Add stretch to keep buttons left-aligned in wider layouts
+        layout.addStretch()
+
         return container
 
     def _on_filter_changed(self) -> None:
