@@ -207,9 +207,7 @@ class SearchAndFilterPlugin:
             area.setFixedHeight(30)  # Show area now that it has content
             logging.info("[Search & Filter] Added genre buttons to genre_buttons_area")
 
-        logging.info(
-            "[Search & Filter] Registered with %d genre buttons", len(self.genre_buttons)
-        )
+        logging.info("[Search & Filter] Registered with %d genre buttons", len(self.genre_buttons))
 
     def get_drawer_genre_buttons_container(self) -> QWidget:
         """Get a SEPARATE container with genre buttons for drawer.
