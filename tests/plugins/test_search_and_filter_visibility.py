@@ -58,11 +58,11 @@ def test_genre_buttons_remain_in_toolbar_all_modes(qapp) -> None:  # type: ignor
 
     # Activate in cue_maker mode
     search_filter_plugin.activate("cue_maker")
-    # Buttons should still be in toolbar (not removed)
+    # Buttons are hidden in cue_maker mode (shown in drawer instead)
     assert (
         search_filter_plugin.toolbar_container.parent() == toolbar
-    ), "Toolbar buttons should remain in toolbar in cue_maker mode"
-    assert search_filter_plugin.toolbar_container.isVisible(), "Toolbar buttons should remain visible"
+    ), "Toolbar buttons container should remain in toolbar"
+    assert not search_filter_plugin.toolbar_container.isVisible(), "Toolbar buttons should be hidden in cue_maker mode"
 
     # Switch back to jukebox
     search_filter_plugin.activate("jukebox")
@@ -71,7 +71,7 @@ def test_genre_buttons_remain_in_toolbar_all_modes(qapp) -> None:  # type: ignor
     ), "Should still be in toolbar in jukebox mode"
     assert (
         search_filter_plugin.toolbar_container.isVisible()
-    ), "Should still be visible in jukebox mode"
+    ), "Should be visible again in jukebox mode"
 
 
 def test_genre_buttons_clear_filter_on_deactivate(qapp) -> None:  # type: ignore

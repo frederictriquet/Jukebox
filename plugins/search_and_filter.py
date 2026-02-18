@@ -280,12 +280,22 @@ class SearchAndFilterPlugin:
         if not self.toolbar_container and self.context:
             self._create_toolbar_buttons()
 
+        # Show/hide toolbar buttons based on mode
+        # In cue_maker mode, buttons are shown in drawer instead
+        if self.toolbar_container:
+            should_show_toolbar_buttons = mode != "cue_maker"
+            self.toolbar_container.setVisible(should_show_toolbar_buttons)
+
         # Re-apply current filter
         self._on_filter_changed()
         logging.debug("[Search & Filter] Activated for %s mode", mode)
 
     def deactivate(self, mode: str) -> None:
         """Deactivate plugin."""
+        # Hide toolbar buttons when deactivating
+        if self.toolbar_container:
+            self.toolbar_container.setVisible(False)
+
         # Clear filter so all tracks are visible
         if self.proxy:
             self.proxy.set_genre_filter(set(), set())
