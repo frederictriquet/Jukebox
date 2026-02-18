@@ -147,11 +147,14 @@ class ModeSwitcherPlugin:
             main_window.track_list.set_mode(mode.value)
 
             # Reload tracks for new mode (apply search if active)
-            search_query = main_window.search_bar.text().strip()
-            if search_query:
-                main_window._perform_search(search_query)
-            else:
-                main_window._load_tracks_from_db()
+            # In cue_maker mode, keep the existing library tracks as-is
+            # (search is handled by the proxy model, not database FTS5)
+            if mode != AppMode.CUE_MAKER:
+                search_query = main_window.search_bar.text().strip()
+                if search_query:
+                    main_window._perform_search(search_query)
+                else:
+                    main_window._load_tracks_from_db()
 
             logging.info(f"Switched to {mode.value} mode")
 

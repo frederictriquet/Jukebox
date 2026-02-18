@@ -1,66 +1,35 @@
-"""Real integration test: Genre buttons visibility in true widget hierarchy.
+"""Integration test: Genre buttons in real widget hierarchy.
 
-This test uses the REAL search_and_filter plugin with a REAL toolbar,
-and verifies that genre buttons are ACTUALLY hidden (not just setVisible=False).
-
-It recursively searches the entire widget tree to prove buttons don't exist
-in the toolbar when in cue_maker mode.
+Tests that:
+1. Genre buttons are inside toolbar_container (not in a QToolBar)
+2. toolbar_container has "Genres" label + buttons on same horizontal line
+3. Drawer buttons are separate independent instances
 """
 
 from unittest.mock import Mock
 
-from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QToolBar
+from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
 
 from plugins.search_and_filter import SearchAndFilterPlugin
 
 
 def find_all_genre_buttons(widget: QWidget, path: str = "root") -> list[tuple[QWidget, str]]:
-    """Recursively find ALL genre buttons in widget tree with their paths.
-
-    Returns list of (button_widget, path) tuples so we can see where buttons are.
-    """
-    from PySide6.QtWidgets import QPushButton
-
+    """Recursively find ALL genre buttons in widget tree with their paths."""
     buttons = []
-
-    # Check if this widget is a genre button
     if isinstance(widget, QPushButton):
         text = widget.text()
         if len(text) == 1 and text.isalpha() and text.isupper():
             buttons.append((widget, f"{path}/{text}"))
-
-    # Recurse into children
     for i, child in enumerate(widget.children()):
         if isinstance(child, QWidget):
             child_path = f"{path}/{child.__class__.__name__}[{i}]"
             buttons.extend(find_all_genre_buttons(child, child_path))
-
     return buttons
 
 
-def test_genre_buttons_not_in_toolbar_during_cue_maker(qapp) -> None:  # type: ignore
-    """REAL TEST: Genre buttons must NOT exist in toolbar during cue_maker mode.
-
-    This test:
-    1. Creates REAL toolbar with buttons added by register_ui()
-    2. Switches to cue_maker mode
-    3. Searches ENTIRE widget tree for genre buttons
-    4. FAILS if ANY buttons found in toolbar
-    """
-    # Create main window with REAL toolbar
-    main_window = QMainWindow()
-    plugin_toolbar = QToolBar("Plugins")
-    main_window.addToolBar(plugin_toolbar)
-
-    central = QWidget()
-    central_layout = QVBoxLayout(central)
-    main_window.setCentralWidget(central)
-
-    # CRITICAL: Show window so widgets become truly visible
-    main_window.show()
-
-    # Initialize search_and_filter plugin
-    search_filter_plugin = SearchAndFilterPlugin()
+def _make_plugin_with_codes(codes: list[tuple[str, str]]) -> SearchAndFilterPlugin:
+    """Create a SearchAndFilterPlugin with mock context and given genre codes."""
+    plugin = SearchAndFilterPlugin()
 
     class CodeConfig:
         def __init__(self, code: str, name: str):
@@ -69,129 +38,90 @@ def test_genre_buttons_not_in_toolbar_during_cue_maker(qapp) -> None:  # type: i
 
     mock_context = Mock()
     mock_config = Mock()
-    mock_config.genre_editor.codes = [
-        CodeConfig("H", "House"),
-        CodeConfig("D", "Deep"),
-        CodeConfig("T", "Trance"),
-        CodeConfig("W", "Weed"),
-    ]
+    mock_config.genre_editor.codes = [CodeConfig(c, n) for c, n in codes]
     mock_context.config = mock_config
-    mock_app = Mock()
-    mock_app.main_window = main_window
-    mock_context.app = mock_app
+    plugin.context = mock_context
+    return plugin
 
-    search_filter_plugin.context = mock_context
 
-    # Simulate register_ui - this adds buttons to real toolbar
-    search_filter_plugin._create_toolbar_buttons()
-    plugin_toolbar.addWidget(search_filter_plugin.toolbar_container)
+def test_toolbar_container_layout(qapp) -> None:  # type: ignore
+    """Test that toolbar_container has 'Genres' label and buttons on same line."""
+    plugin = _make_plugin_with_codes([
+        ("H", "House"), ("D", "Deep"), ("T", "Trance"), ("W", "Weed"),
+    ])
+    plugin._create_toolbar_buttons()
 
-    # Store toolbar reference (normally done in register_ui)
-    search_filter_plugin._toolbar = plugin_toolbar
+    container = plugin.toolbar_container
+    assert container is not None
 
-    # --- TEST 1: Verify buttons ARE in toolbar in jukebox mode ---
-    print("\n=== JUKEBOX MODE ===")
-    search_filter_plugin.activate("jukebox")
+    # Find genre buttons
+    buttons = find_all_genre_buttons(container)
+    assert len(buttons) == 4, f"Expected 4 buttons, found {len(buttons)}"
 
-    # Search entire window for genre buttons
-    all_buttons = find_all_genre_buttons(main_window)
-    print(f"Buttons found in window: {len(all_buttons)}")
-    for btn, path in all_buttons:
-        print(f"  - {path}: visible={btn.isVisible()}")
+    # Find "Genres" label
+    labels = container.findChildren(QLabel)
+    genre_labels = [lb for lb in labels if lb.text() == "Genres"]
+    assert len(genre_labels) == 1, "Should have one 'Genres' label"
 
-    # Verify we have 4 buttons and they're in toolbar
-    assert len(all_buttons) == 4, f"Expected 4 genre buttons in jukebox, found {len(all_buttons)}"
+    # Container should use QHBoxLayout (same line)
+    from PySide6.QtWidgets import QHBoxLayout
 
-    toolbar_buttons = [btn for btn, path in all_buttons if "QToolBar" in path]
-    print(f"Buttons in toolbar: {len(toolbar_buttons)}")
-    assert len(toolbar_buttons) >= 4, f"Expected buttons in toolbar, but found {len(toolbar_buttons)} toolbar buttons"
+    assert isinstance(container.layout(), QHBoxLayout), "Should use horizontal layout"
 
-    assert search_filter_plugin.toolbar_container.isVisible(), "Container should be visible in jukebox"
-    print("✅ JUKEBOX MODE: Buttons correctly visible in toolbar")
 
-    # --- TEST 2: Verify buttons are REMOVED from toolbar in cue_maker mode ---
-    print("\n=== CUE_MAKER MODE ===")
-    search_filter_plugin.activate("cue_maker")
+def test_toolbar_container_in_genre_buttons_area(qapp) -> None:  # type: ignore
+    """Test that register_ui places toolbar_container into genre_buttons_area."""
+    plugin = _make_plugin_with_codes([("H", "House"), ("D", "Deep")])
 
-    # Search entire window for genre buttons - should find NONE VISIBLE in toolbar
-    all_buttons_after = find_all_genre_buttons(main_window)
-    print(f"Total buttons found in window: {len(all_buttons_after)}")
-    for btn, path in all_buttons_after:
-        visible_status = btn.isVisible()
-        print(f"  - {path}: visible={visible_status}")
+    # Simulate what main_window provides
+    main_window = Mock()
+    main_window.search_bar = Mock()
+    main_window.search_bar.search_triggered = Mock()
+    main_window.search_bar.search_triggered.connect = Mock()
 
-    # Check toolbar specifically - should have NO VISIBLE buttons
-    toolbar_buttons_after = [
-        (btn, path) for btn, path in all_buttons_after
-        if "QToolBar" in path and btn.isVisible()
-    ]
-    print(f"VISIBLE buttons in toolbar: {len(toolbar_buttons_after)}")
+    area = QWidget()
+    area.setFixedHeight(0)  # Initially hidden like in _init_ui()
+    main_window.genre_buttons_area = area
 
-    # KEY ASSERTION: No VISIBLE buttons should be in toolbar
-    assert (
-        len(toolbar_buttons_after) == 0
-    ), f"❌ FAIL: Found {len(toolbar_buttons_after)} VISIBLE genre buttons in toolbar!\n" + "\n".join(
-        f"    - {path}" for _, path in toolbar_buttons_after
-    )
+    track_list = Mock()
+    main_window.track_list = track_list
 
-    assert (
-        not search_filter_plugin.toolbar_container.isVisible()
-    ), "❌ Container should be hidden in cue_maker"
+    ui_builder = Mock()
+    ui_builder.main_window = main_window
 
-    print("✅ CUE_MAKER MODE: No VISIBLE buttons in toolbar (correctly hidden)")
+    plugin.context = Mock()
+    plugin.context.config = Mock()
 
-    # --- TEST 3: Verify buttons REAPPEAR in toolbar when back in jukebox ---
-    print("\n=== BACK TO JUKEBOX MODE ===")
-    search_filter_plugin.activate("jukebox")
+    class CodeConfig:
+        def __init__(self, code: str, name: str):
+            self.code = code
+            self.name = name
 
-    all_buttons_final = find_all_genre_buttons(main_window)
-    toolbar_buttons_final = [btn for btn, path in all_buttons_final if "QToolBar" in path]
-    print(f"Buttons in toolbar: {len(toolbar_buttons_final)}")
+    plugin.context.config.genre_editor.codes = [CodeConfig("H", "House"), CodeConfig("D", "Deep")]
 
-    assert len(toolbar_buttons_final) >= 4, f"Expected buttons back in toolbar, found {len(toolbar_buttons_final)}"
-    assert search_filter_plugin.toolbar_container.isVisible(), "Container should be visible again in jukebox"
-    print("✅ JUKEBOX MODE (RETURN): Buttons correctly visible again in toolbar")
+    plugin.register_ui(ui_builder)
 
-    print("\n" + "="*60)
-    print("✅✅✅ ALL TESTS PASSED - Buttons correctly hidden/shown ✅✅✅")
-    print("="*60)
+    # genre_buttons_area should now have content and height > 0
+    assert area.maximumHeight() > 0, "genre_buttons_area should be visible after register_ui"
+    buttons = find_all_genre_buttons(area)
+    assert len(buttons) == 2, f"Expected 2 buttons in area, found {len(buttons)}"
 
 
 def test_drawer_buttons_exist_independently(qapp) -> None:  # type: ignore
     """Verify drawer buttons are separate instances and work independently."""
-    search_filter_plugin = SearchAndFilterPlugin()
+    plugin = _make_plugin_with_codes([("H", "House"), ("D", "Deep")])
+    plugin._create_toolbar_buttons()
 
-    class CodeConfig:
-        def __init__(self, code: str, name: str):
-            self.code = code
-            self.name = name
+    drawer_container = plugin.get_drawer_genre_buttons_container()
+    assert drawer_container is not plugin.toolbar_container
 
-    mock_context = Mock()
-    mock_config = Mock()
-    mock_config.genre_editor.codes = [
-        CodeConfig("H", "House"),
-        CodeConfig("D", "Deep"),
-    ]
-    mock_context.config = mock_config
+    toolbar_btns = find_all_genre_buttons(plugin.toolbar_container)
+    drawer_btns = find_all_genre_buttons(drawer_container)
 
-    search_filter_plugin.context = mock_context
+    assert len(toolbar_btns) == 2
+    assert len(drawer_btns) == 2
 
-    # Create toolbar buttons
-    search_filter_plugin._create_toolbar_buttons()
-    toolbar_buttons = search_filter_plugin.toolbar_container
-
-    # Create drawer buttons - should be DIFFERENT instance
-    drawer_buttons = search_filter_plugin.get_button_container()
-
-    assert (
-        toolbar_buttons is not drawer_buttons
-    ), "Toolbar and drawer buttons should be different instances"
-
-    # Verify both have buttons
-    toolbar_button_count = find_all_genre_buttons(toolbar_buttons)
-    drawer_button_count = find_all_genre_buttons(drawer_buttons)
-
-    assert len(toolbar_button_count) == 2, f"Expected 2 buttons in toolbar, found {len(toolbar_button_count)}"
-    assert len(drawer_button_count) == 2, f"Expected 2 buttons in drawer, found {len(drawer_button_count)}"
-
-    print("✅ Drawer buttons are independent instances with correct counts")
+    # Different widget instances
+    toolbar_widgets = {b[0] for b in toolbar_btns}
+    drawer_widgets = {b[0] for b in drawer_btns}
+    assert toolbar_widgets.isdisjoint(drawer_widgets), "Should be separate instances"

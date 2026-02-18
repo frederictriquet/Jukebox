@@ -48,7 +48,8 @@ class CueMakerPlugin:
         self._nav_dock: Any | None = None
         self._saved_bottom_widgets: list[QWidget] = []
         self._drawer: BottomDrawer | None = None
-        self._drawer_genre_buttons: QWidget | None = None
+        self._active = False
+        self._main_layout_buttons_hidden = False
 
     def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin with application context.
@@ -122,6 +123,9 @@ class CueMakerPlugin:
         # destroys it. Other plugins' bottom widgets (waveform, genre_suggester)
         # would be destroyed otherwise since they're children of the old central.
         known_widgets = {app.search_bar, app.track_list, app.controls, self.main_widget}
+        # Include genre_buttons_area so it's detached but not saved as bottom widget
+        if hasattr(app, "genre_buttons_area") and app.genre_buttons_area:
+            known_widgets.add(app.genre_buttons_area)
         self._saved_bottom_widgets = []
         if self._original_central is not None:
             original_layout = self._original_central.layout()
@@ -161,18 +165,39 @@ class CueMakerPlugin:
         right_layout = QVBoxLayout()
         right_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Search bar with genre filter buttons
+        # Search bar with genre filter buttons below it
         search_container = QWidget()
         search_layout = QVBoxLayout(search_container)
         search_layout.setContentsMargins(0, 0, 0, 0)
         search_layout.setSpacing(4)
         search_layout.addWidget(app.search_bar)
 
-        # Add genre filter buttons below search bar
+        # Hide main layout genre buttons and create separate ones for drawer
         search_filter_plugin = app.plugin_manager.plugins.get("search_and_filter")
-        if search_filter_plugin and hasattr(search_filter_plugin, "get_button_container"):
-            self._drawer_genre_buttons = search_filter_plugin.get_button_container()
-            search_layout.addWidget(self._drawer_genre_buttons, stretch=0)
+        if search_filter_plugin and hasattr(search_filter_plugin, "toolbar_container"):
+            # Hide genre buttons from main layout
+            search_filter_plugin.toolbar_container.setVisible(False)
+            self._main_layout_buttons_hidden = True
+
+            # Get a fresh container for the drawer (new instance, not moving the old one)
+            if hasattr(search_filter_plugin, "get_drawer_genre_buttons_container"):
+                drawer_genres = search_filter_plugin.get_drawer_genre_buttons_container()
+            else:
+                # Fallback: create a simple container
+                from PySide6.QtWidgets import QHBoxLayout, QLabel
+                drawer_genres = QWidget()
+                layout = QHBoxLayout(drawer_genres)
+                layout.setContentsMargins(0, 0, 0, 0)
+                layout.setSpacing(6)
+                label = QLabel("Genres")
+                label.setStyleSheet("font-weight: bold; font-size: 12px; color: #aaa;")
+                layout.addWidget(label)
+                layout.addStretch()
+
+            search_layout.addWidget(drawer_genres, stretch=0)
+            logger.debug("[Cue Maker] Added genre buttons to drawer (hidden from main layout)")
+        else:
+            logger.warning("[Cue Maker] Could not find search_and_filter plugin")
 
         right_layout.addWidget(search_container, stretch=0)
         right_layout.addWidget(app.track_list, stretch=1)
@@ -249,10 +274,13 @@ class CueMakerPlugin:
         if self.main_widget:
             self.main_widget.setParent(None)
 
-        # Remove drawer genre buttons
-        if self._drawer_genre_buttons:
-            self._drawer_genre_buttons.setParent(None)
-            self._drawer_genre_buttons = None
+        # Show genre buttons in main layout again
+        if self._main_layout_buttons_hidden:
+            search_filter_plugin = app.plugin_manager.plugins.get("search_and_filter")
+            if search_filter_plugin and hasattr(search_filter_plugin, "toolbar_container"):
+                search_filter_plugin.toolbar_container.setVisible(True)
+                logger.debug("[Cue Maker] Showed genre buttons in main layout")
+            self._main_layout_buttons_hidden = False
 
         # Remove waveform widget from drawer (was added in activate)
         waveform_plugin = app.plugin_manager.plugins.get("waveform_visualizer")
@@ -278,6 +306,12 @@ class CueMakerPlugin:
         central = QWidget()
         layout = QVBoxLayout()
         layout.addWidget(app.search_bar)
+
+        # Add genre buttons area below searchbar
+        if hasattr(app, "genre_buttons_area") and app.genre_buttons_area:
+            app.genre_buttons_area.setVisible(True)
+            layout.addWidget(app.genre_buttons_area, stretch=0)
+
         layout.addWidget(app.track_list, stretch=1)
         layout.addWidget(app.controls, stretch=0)
         if self.main_widget:

@@ -20,8 +20,8 @@ import logging
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QSortFilterProxyModel, Qt
-from PySide6.QtWidgets import QHBoxLayout, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QSortFilterProxyModel
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from jukebox.core.event_bus import Events
 
@@ -78,7 +78,12 @@ class GenreFilterProxyModel(QSortFilterProxyModel):
         if self._search_text:
             artist = (track.get("artist") or "").lower()
             title = (track.get("title") or "").lower()
-            if self._search_text not in artist and self._search_text not in title:
+            filename = (track.get("filename") or "").lower()
+            if (
+                self._search_text not in artist
+                and self._search_text not in title
+                and self._search_text not in filename
+            ):
                 return False
 
         # Genre filter
@@ -160,9 +165,11 @@ class SearchAndFilterPlugin:
         self.context: PluginContextProtocol | None = None
         self.proxy: GenreFilterProxyModel | None = None
         self.genre_buttons: list[GenreFilterButton] = []
+        self._drawer_buttons: list[GenreFilterButton] = []
+        self._genre_states: dict[str, GenreFilterState] = {}
         self.toolbar_container: QWidget | None = None
         self._track_list: Any = None
-        self._toolbar: Any = None  # Reference to the toolbar for removal/re-addition
+        self._toolbar_main_layout: Any = None  # Reference to main layout for moving buttons
 
     def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin with application context."""
@@ -171,35 +178,86 @@ class SearchAndFilterPlugin:
         logging.info("[Search & Filter] Plugin initialized")
 
     def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
-        """Register UI elements (genre buttons in toolbar)."""
+        """Register UI elements (proxy model, search connection, genre buttons below searchbar).
+
+        Genre buttons with "Genres" label are created and added below the searchbar.
+        """
         if not self.context:
             return
 
-        # Create genre buttons in toolbar
-        self._create_toolbar_buttons()
-        ui_builder.add_toolbar_widget(self.toolbar_container)
-
-        # Store reference to toolbar for later manipulation (hiding/removing)
-        main_window = ui_builder.main_window
-        if hasattr(main_window, "_plugin_toolbar"):
-            self._toolbar = main_window._plugin_toolbar
-            logging.debug("[Search & Filter] Stored toolbar reference")
-
         # Create proxy model and install on track list
         self.proxy = GenreFilterProxyModel()
-        self._track_list = ui_builder.main_window.track_list
+        main_window = ui_builder.main_window
+        self._track_list = main_window.track_list
         self._track_list.set_proxy_model(self.proxy)
 
-        # Connect search bar to proxy (search bar exists in main_window)
+        # Connect search bar to proxy
         if hasattr(main_window, "search_bar"):
             main_window.search_bar.search_triggered.connect(self._on_search)
+
+        # Create buttons container
+        self._create_toolbar_buttons()
+
+        # Add genre buttons to the genre_buttons_area placeholder in main_window
+        if hasattr(main_window, "genre_buttons_area") and self.toolbar_container:
+            area = main_window.genre_buttons_area
+            area_layout = QVBoxLayout(area)
+            area_layout.setContentsMargins(0, 0, 0, 0)
+            area_layout.setSpacing(0)
+            area_layout.addWidget(self.toolbar_container)
+            area.setFixedHeight(30)  # Show area now that it has content
+            logging.info("[Search & Filter] Added genre buttons to genre_buttons_area")
 
         logging.info(
             "[Search & Filter] Registered with %d genre buttons", len(self.genre_buttons)
         )
 
+    def get_drawer_genre_buttons_container(self) -> QWidget:
+        """Get a SEPARATE container with genre buttons for drawer.
+
+        Creates a NEW set of buttons tracked in _drawer_buttons.
+        Restores saved state from _genre_states for persistence across mode switches.
+        When the container is destroyed, _drawer_buttons is auto-cleared.
+        """
+        if not self.context:
+            return QWidget()
+
+        config = self.context.config
+        codes = config.genre_editor.codes
+        sorted_codes = sorted(codes, key=lambda c: c.code)
+
+        # Container with horizontal layout (label + NEW buttons on same line)
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        # Add "Genres" label
+        label = QLabel("Genres")
+        label.setStyleSheet("font-weight: bold; font-size: 12px; color: #aaa;")
+        layout.addWidget(label)
+
+        # Create NEW buttons tracked in _drawer_buttons
+        self._drawer_buttons = []
+        for code_config in sorted_codes:
+            btn = GenreFilterButton(code_config.code, code_config.name)
+            # Restore saved state
+            if code_config.code in self._genre_states:
+                btn.state = self._genre_states[code_config.code]
+                btn._apply_style()
+            btn.clicked.connect(self._on_filter_changed)
+            self._drawer_buttons.append(btn)
+            layout.addWidget(btn)
+
+        layout.addStretch()
+
+        # Auto-clear drawer buttons when container is destroyed
+        container.destroyed.connect(self._clear_drawer_buttons)
+
+        return container
+
     def _create_toolbar_buttons(self) -> None:
-        """Create genre filter buttons for toolbar."""
+        """Create genre filter buttons container (displayed below searchbar, not in toolbar)."""
         if not self.context or self.toolbar_container:
             return
 
@@ -207,11 +265,16 @@ class SearchAndFilterPlugin:
         codes = config.genre_editor.codes
         sorted_codes = sorted(codes, key=lambda c: c.code)
 
-        # Container
+        # Container with horizontal layout (label + buttons on same line)
         self.toolbar_container = QWidget()
         layout = QHBoxLayout(self.toolbar_container)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
+        layout.setSpacing(6)
+
+        # Add "Genres" label
+        label = QLabel("Genres")
+        label.setStyleSheet("font-weight: bold; font-size: 12px; color: #aaa;")
+        layout.addWidget(label)
 
         # Genre buttons
         for code_config in sorted_codes:
@@ -258,12 +321,17 @@ class SearchAndFilterPlugin:
         on_genres: set[str] = set()
         off_genres: set[str] = set()
 
-        # Collect state from ALL buttons (both toolbar and any other instances)
-        for btn in self.genre_buttons:
+        # Use drawer buttons when they exist (cue_maker mode), otherwise toolbar buttons
+        active_buttons = self._drawer_buttons if self._drawer_buttons else self.genre_buttons
+
+        for btn in active_buttons:
             if btn.state == GenreFilterState.ON:
                 on_genres.add(btn.code)
             elif btn.state == GenreFilterState.OFF:
                 off_genres.add(btn.code)
+
+        # Save state for persistence across mode switches
+        self._genre_states = {btn.code: btn.state for btn in active_buttons}
 
         if self.proxy:
             self.proxy.set_genre_filter(on_genres, off_genres)
@@ -274,6 +342,10 @@ class SearchAndFilterPlugin:
                 on_genres=on_genres,
                 off_genres=off_genres,
             )
+
+    def _clear_drawer_buttons(self) -> None:
+        """Clear drawer buttons reference (called when drawer container is destroyed)."""
+        self._drawer_buttons = []
 
     def _on_tracks_added(self) -> None:
         """Re-invalidate filter when tracks change."""
@@ -286,32 +358,11 @@ class SearchAndFilterPlugin:
         if not self.toolbar_container and self.context:
             self._create_toolbar_buttons()
 
-        # Show/hide toolbar buttons based on mode
-        # In cue_maker mode, buttons are shown in drawer instead (not toolbar)
-        if self.toolbar_container:
-            if mode == "cue_maker":
-                # REMOVE the container from toolbar
-                if self.toolbar_container.parent():
-                    self.toolbar_container.hide()
-                    self.toolbar_container.setParent(None)
-                    logging.info(
-                        "[Search & Filter] Hidden and removed toolbar buttons from toolbar for %s mode", mode
-                    )
-            else:
-                # Re-add the container to toolbar for other modes (jukebox, curating)
-                # If it was removed, re-add it to the toolbar
-                if self._toolbar and self.toolbar_container.parent() is None:
-                    self._toolbar.addWidget(self.toolbar_container)
-                    self.toolbar_container.show()
-                    logging.info(
-                        "[Search & Filter] Re-added and shown toolbar buttons to toolbar for %s mode", mode
-                    )
-                else:
-                    # Already in toolbar, just ensure it's visible
-                    self.toolbar_container.setVisible(True)
-                    logging.info(
-                        "[Search & Filter] Ensured toolbar buttons are visible for %s mode", mode
-                    )
+        # Restore saved genre button states on toolbar buttons
+        for btn in self.genre_buttons:
+            if btn.code in self._genre_states:
+                btn.state = self._genre_states[btn.code]
+                btn._apply_style()
 
         # Re-apply current filter
         self._on_filter_changed()
@@ -319,10 +370,6 @@ class SearchAndFilterPlugin:
 
     def deactivate(self, mode: str) -> None:
         """Deactivate plugin."""
-        # Note: deactivate() is called when LEAVING a mode
-        # If leaving cue_maker → we're going to jukebox/curating, so buttons should be shown
-        # This is handled by activate() of the new mode, not here
-
         # Clear filter so all tracks are visible
         if self.proxy:
             self.proxy.set_genre_filter(set(), set())

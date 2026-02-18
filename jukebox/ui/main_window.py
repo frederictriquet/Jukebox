@@ -95,6 +95,11 @@ class MainWindow(QMainWindow):
         self.search_bar.search_triggered.connect(self._perform_search)
         layout.addWidget(self.search_bar)
 
+        # Placeholder for genre filter buttons (populated by search_and_filter plugin)
+        self.genre_buttons_area = QWidget()
+        self.genre_buttons_area.setFixedHeight(0)  # hidden until plugin populates it
+        layout.addWidget(self.genre_buttons_area, stretch=0)
+
         # Configure waveform cache size from config
         WaveformStyler.configure(self.config.ui.waveform_cache_size)
 
@@ -181,11 +186,17 @@ class MainWindow(QMainWindow):
 
     def _perform_search(self, query: str) -> None:
         """Perform FTS5 search within current mode."""
+        mode = self._get_current_mode()
+
+        # In cue_maker mode, search is handled by the proxy model (search_and_filter plugin)
+        # Don't clear/reload tracks from database as there are no "cue_maker" mode tracks
+        if mode == "cue_maker":
+            return
+
         # Save current playing track
         current_track = self.player.current_file if self.player.current_file else None
 
         self.track_list.clear_tracks()
-        mode = self._get_current_mode()
         if not query:
             tracks = self.database.get_all_tracks(mode=mode)
         else:

@@ -311,6 +311,13 @@ class TestSearchAndFilterPlugin:
         mock_track_list = Mock()
         mock_ui_builder.main_window.track_list = mock_track_list
 
+        # Provide a real QWidget for genre_buttons_area (QVBoxLayout needs real widget)
+        from PySide6.QtWidgets import QWidget
+
+        genre_area = QWidget()
+        genre_area.setFixedHeight(0)
+        mock_ui_builder.main_window.genre_buttons_area = genre_area
+
         plugin.register_ui(mock_ui_builder)
 
         # Verify buttons created and sorted
@@ -319,9 +326,9 @@ class TestSearchAndFilterPlugin:
         assert plugin.genre_buttons[1].code == "H"
         assert plugin.genre_buttons[2].code == "T"
 
-        # Verify container added
-        mock_ui_builder.add_toolbar_widget.assert_called_once()
+        # Verify container placed in genre_buttons_area
         assert plugin.toolbar_container is not None
+        assert genre_area.maximumHeight() > 0, "genre_buttons_area should be visible"
 
         # Verify proxy created
         assert plugin.proxy is not None
