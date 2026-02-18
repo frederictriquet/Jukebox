@@ -294,18 +294,16 @@ class SearchAndFilterPlugin:
                 # This removes it from the widget hierarchy, making it invisible
                 if self.toolbar_container.parent():
                     self.toolbar_container.setParent(None)
-                    print(f"\n*** SEARCH_AND_FILTER: REMOVED TOOLBAR BUTTONS (mode={mode}) ***\n")
-                    logging.error(
-                        "[Search & Filter] *** REMOVED toolbar buttons from toolbar for %s mode ***", mode
+                    logging.info(
+                        "[Search & Filter] Removed toolbar buttons from toolbar for %s mode", mode
                     )
             else:
                 # Re-add the container to toolbar for other modes (jukebox, curating)
                 # If it was removed, re-add it to the toolbar
                 if self._toolbar and not self.toolbar_container.parent():
                     self._toolbar.addWidget(self.toolbar_container)
-                    print(f"\n*** SEARCH_AND_FILTER: RE-ADDED TOOLBAR BUTTONS (mode={mode}) ***\n")
-                    logging.error(
-                        "[Search & Filter] *** RE-ADDED toolbar buttons to toolbar for %s mode ***", mode
+                    logging.info(
+                        "[Search & Filter] Re-added toolbar buttons to toolbar for %s mode", mode
                     )
                 # Ensure visibility
                 self.toolbar_container.setVisible(True)
