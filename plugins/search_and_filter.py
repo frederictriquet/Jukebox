@@ -162,6 +162,7 @@ class SearchAndFilterPlugin:
         self.genre_buttons: list[GenreFilterButton] = []
         self.toolbar_container: QWidget | None = None
         self._track_list: Any = None
+        self._toolbar: Any = None  # Reference to the toolbar for removal/re-addition
 
     def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin with application context."""
@@ -178,13 +179,18 @@ class SearchAndFilterPlugin:
         self._create_toolbar_buttons()
         ui_builder.add_toolbar_widget(self.toolbar_container)
 
+        # Store reference to toolbar for later manipulation (hiding/removing)
+        main_window = ui_builder.main_window
+        if hasattr(main_window, "_plugin_toolbar"):
+            self._toolbar = main_window._plugin_toolbar
+            logging.debug("[Search & Filter] Stored toolbar reference")
+
         # Create proxy model and install on track list
         self.proxy = GenreFilterProxyModel()
         self._track_list = ui_builder.main_window.track_list
         self._track_list.set_proxy_model(self.proxy)
 
         # Connect search bar to proxy (search bar exists in main_window)
-        main_window = ui_builder.main_window
         if hasattr(main_window, "search_bar"):
             main_window.search_bar.search_triggered.connect(self._on_search)
 
@@ -284,19 +290,25 @@ class SearchAndFilterPlugin:
         # In cue_maker mode, buttons are shown in drawer instead (not toolbar)
         if self.toolbar_container:
             if mode == "cue_maker":
-                # Hide the container when entering cue_maker mode
-                self.toolbar_container.setVisible(False)
-                print(f"\n*** SEARCH_AND_FILTER: HIDING TOOLBAR BUTTONS (mode={mode}) ***\n")
-                logging.error(
-                    "[Search & Filter] *** HIDING toolbar buttons for %s mode (visible=False) ***", mode
-                )
+                # REMOVE the container from toolbar completely
+                # This removes it from the widget hierarchy, making it invisible
+                if self.toolbar_container.parent():
+                    self.toolbar_container.setParent(None)
+                    print(f"\n*** SEARCH_AND_FILTER: REMOVED TOOLBAR BUTTONS (mode={mode}) ***\n")
+                    logging.error(
+                        "[Search & Filter] *** REMOVED toolbar buttons from toolbar for %s mode ***", mode
+                    )
             else:
-                # Show the container for other modes (jukebox, curating)
+                # Re-add the container to toolbar for other modes (jukebox, curating)
+                # If it was removed, re-add it to the toolbar
+                if self._toolbar and not self.toolbar_container.parent():
+                    self._toolbar.addWidget(self.toolbar_container)
+                    print(f"\n*** SEARCH_AND_FILTER: RE-ADDED TOOLBAR BUTTONS (mode={mode}) ***\n")
+                    logging.error(
+                        "[Search & Filter] *** RE-ADDED toolbar buttons to toolbar for %s mode ***", mode
+                    )
+                # Ensure visibility
                 self.toolbar_container.setVisible(True)
-                print(f"\n*** SEARCH_AND_FILTER: SHOWING TOOLBAR BUTTONS (mode={mode}) ***\n")
-                logging.error(
-                    "[Search & Filter] *** SHOWING toolbar buttons for %s mode (visible=True) ***", mode
-                )
 
         # Re-apply current filter
         self._on_filter_changed()
@@ -304,23 +316,15 @@ class SearchAndFilterPlugin:
 
     def deactivate(self, mode: str) -> None:
         """Deactivate plugin."""
-        # Show/hide toolbar buttons based on mode being left
-        # If leaving cue_maker, show buttons (we're going to jukebox/curating)
-        # If leaving jukebox/curating, hide buttons (we're going to cue_maker)
-        if self.toolbar_container:
-            should_show_toolbar_buttons = mode == "cue_maker"
-            self.toolbar_container.setVisible(should_show_toolbar_buttons)
-            logging.warning(
-                "[Search & Filter] Deactivate mode=%s, toolbar_container.setVisible(%s)",
-                mode,
-                should_show_toolbar_buttons,
-            )
+        # Note: deactivate() is called when LEAVING a mode
+        # If leaving cue_maker → we're going to jukebox/curating, so buttons should be shown
+        # This is handled by activate() of the new mode, not here
 
         # Clear filter so all tracks are visible
         if self.proxy:
             self.proxy.set_genre_filter(set(), set())
             self.proxy.set_search_text("")
-        logging.info("[Search & Filter] Deactivated for %s mode", mode)
+        logging.info("[Search & Filter] Deactivated from %s mode", mode)
 
     def shutdown(self) -> None:
         """Cleanup resources."""

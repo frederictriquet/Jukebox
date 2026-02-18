@@ -86,6 +86,9 @@ def test_genre_buttons_not_in_toolbar_during_cue_maker(qapp) -> None:  # type: i
     search_filter_plugin._create_toolbar_buttons()
     plugin_toolbar.addWidget(search_filter_plugin.toolbar_container)
 
+    # Store toolbar reference (normally done in register_ui)
+    search_filter_plugin._toolbar = plugin_toolbar
+
     # --- TEST 1: Verify buttons ARE in toolbar in jukebox mode ---
     print("\n=== JUKEBOX MODE ===")
     search_filter_plugin.activate("jukebox")
