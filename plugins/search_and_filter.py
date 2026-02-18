@@ -1,13 +1,20 @@
 """Search and filter plugin - unified management of search bar and genre filters.
 
-This plugin manages genre filter buttons in a centralized way. The buttons can be
-placed either in the toolbar (jukebox mode) or in the drawer with the search bar
-(cue_maker mode), through a unified API.
+This plugin manages genre filter buttons in a centralized way and installs a
+proxy model on the track list for real-time filtering. It operates in two modes:
 
-The search bar is provided by MainWindow. This plugin:
-- Manages genre filter buttons
-- Provides filter proxy model for searching + genre filtering
-- Offers get_container() method for flexible placement
+- **jukebox/curating modes**: genre buttons live in `genre_buttons_area` (below
+  the search bar in the main layout), managed as `genre_buttons`.
+- **cue_maker mode**: genre buttons live in the BottomDrawer, created on demand
+  via `get_drawer_genre_buttons_container()` and tracked as `_drawer_buttons`.
+
+In cue_maker mode, search and genre filtering are handled entirely by the
+GenreFilterProxyModel — the database FTS5 is bypassed. This avoids the DB
+returning 0 tracks when queried with mode="cue_maker".
+
+Button state (ON/OFF/INDIFFERENT) is persisted across mode switches via the
+`_genre_states` dict, which is updated by `_on_filter_changed()` and restored
+when a new button set is created (toolbar or drawer).
 
 Events:
 - Subscribes to: TRACKS_ADDED
@@ -145,12 +152,23 @@ class GenreFilterButton(QPushButton):
 class SearchAndFilterPlugin:
     """Centralized search and genre filter plugin.
 
-    Manages genre filter buttons with unified control. Provides both:
-    - Buttons for toolbar (jukebox/curating modes)
-    - Buttons for drawer (cue_maker mode)
+    Maintains two independent sets of genre filter buttons:
 
-    The search bar is managed by MainWindow. This plugin syncs the search
-    text with genre filtering in the proxy model.
+    - ``genre_buttons`` / ``toolbar_container``: created once in ``register_ui``
+      and placed in ``main_window.genre_buttons_area``. Used in jukebox and
+      curating modes.
+    - ``_drawer_buttons``: created on each call to
+      ``get_drawer_genre_buttons_container()``, placed inside the cue_maker
+      BottomDrawer. Automatically cleared when the drawer container is destroyed.
+
+    Both sets share ``_genre_states`` (dict[code → GenreFilterState]) to persist
+    button ON/OFF state across mode switches. ``_on_filter_changed()`` always reads
+    from the *active* set (drawer when present, toolbar otherwise) and saves the
+    resulting state back to ``_genre_states``.
+
+    The ``GenreFilterProxyModel`` is installed once in ``register_ui`` and remains
+    active for the lifetime of the plugin. In cue_maker mode it is the sole
+    filtering mechanism (DB FTS5 is not used).
 
     Active in: jukebox, cue_maker modes
     """
@@ -164,10 +182,13 @@ class SearchAndFilterPlugin:
         """Initialize plugin state."""
         self.context: PluginContextProtocol | None = None
         self.proxy: GenreFilterProxyModel | None = None
+        # Toolbar button set — lives in genre_buttons_area (jukebox/curating modes)
         self.genre_buttons: list[GenreFilterButton] = []
-        self._drawer_buttons: list[GenreFilterButton] = []
-        self._genre_states: dict[str, GenreFilterState] = {}
         self.toolbar_container: QWidget | None = None
+        # Drawer button set — created on demand for cue_maker BottomDrawer
+        self._drawer_buttons: list[GenreFilterButton] = []
+        # Persisted state across mode switches: {genre_code: GenreFilterState}
+        self._genre_states: dict[str, GenreFilterState] = {}
         self._track_list: Any = None
 
     def initialize(self, context: PluginContextProtocol) -> None:
@@ -324,7 +345,14 @@ class SearchAndFilterPlugin:
             self.proxy.invalidateFilter()
 
     def activate(self, mode: str) -> None:
-        """Activate plugin for the given mode."""
+        """Activate plugin for the given mode.
+
+        Restores genre button states from ``_genre_states`` (for toolbar buttons)
+        and re-applies the current filter to the proxy model. In cue_maker mode,
+        drawer buttons are created by the cue_maker plugin calling
+        ``get_drawer_genre_buttons_container()`` — this method only handles the
+        toolbar button set.
+        """
         # Create buttons if needed
         if not self.toolbar_container and self.context:
             self._create_toolbar_buttons()
@@ -340,8 +368,13 @@ class SearchAndFilterPlugin:
         logging.info("[Search & Filter] Activated for %s mode", mode)
 
     def deactivate(self, mode: str) -> None:
-        """Deactivate plugin."""
-        # Clear filter so all tracks are visible
+        """Deactivate plugin for the given mode.
+
+        Resets the proxy filter so all tracks remain visible during the mode
+        transition. Genre button states are preserved in ``_genre_states`` and
+        will be restored when the plugin is re-activated.
+        """
+        # Clear filter so all tracks are visible during transition
         if self.proxy:
             self.proxy.set_genre_filter(set(), set())
             self.proxy.set_search_text("")

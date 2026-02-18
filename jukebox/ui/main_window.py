@@ -185,7 +185,12 @@ class MainWindow(QMainWindow):
         self.player.set_volume(max(0, current - 10))
 
     def _perform_search(self, query: str) -> None:
-        """Perform FTS5 search within current mode."""
+        """Perform FTS5 search within current mode.
+
+        No-op in cue_maker mode: search is handled entirely by GenreFilterProxyModel
+        (search_and_filter plugin). Reloading from the database in cue_maker mode
+        would return 0 tracks because no tracks have mode='cue_maker' in the DB.
+        """
         mode = self._get_current_mode()
 
         # In cue_maker mode, search is handled by the proxy model (search_and_filter plugin)
