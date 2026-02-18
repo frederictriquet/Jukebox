@@ -169,7 +169,6 @@ class SearchAndFilterPlugin:
         self._genre_states: dict[str, GenreFilterState] = {}
         self.toolbar_container: QWidget | None = None
         self._track_list: Any = None
-        self._toolbar_main_layout: Any = None  # Reference to main layout for moving buttons
 
     def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin with application context."""
@@ -284,32 +283,6 @@ class SearchAndFilterPlugin:
             layout.addWidget(btn)
 
         layout.addStretch()
-
-    def get_button_container(self) -> QWidget:
-        """Get a container with genre filter buttons (for drawer or other layouts).
-
-        Returns a NEW container with copies of the button logic, not the toolbar buttons.
-        """
-        if not self.context:
-            return QWidget()
-
-        config = self.context.config
-        codes = config.genre_editor.codes
-        sorted_codes = sorted(codes, key=lambda c: c.code)
-
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
-
-        # Create buttons
-        for code_config in sorted_codes:
-            btn = GenreFilterButton(code_config.code, code_config.name)
-            btn.clicked.connect(self._on_filter_changed)
-            layout.addWidget(btn)
-
-        layout.addStretch()
-        return container
 
     def _on_search(self, text: str) -> None:
         """Handle search text change from main search bar."""
