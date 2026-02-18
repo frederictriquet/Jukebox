@@ -135,12 +135,6 @@ class CueMakerPlugin:
                             w.setVisible(False)
                         w.setParent(None)
 
-        # Hide genre filter toolbar buttons (will show drawer buttons instead)
-        genre_filter_plugin = app.plugin_manager.plugins.get("genre_filter")
-        if genre_filter_plugin and hasattr(genre_filter_plugin, "container"):
-            if genre_filter_plugin.container:
-                genre_filter_plugin.container.setVisible(False)
-
         # Build new layout:
         # Central widget with vertical layout
         central = QWidget()
@@ -183,8 +177,10 @@ class CueMakerPlugin:
         dc_layout.addWidget(app.controls, stretch=0)
 
         # Add genre filter buttons to drawer (from genre_filter plugin)
+        genre_filter_plugin = app.plugin_manager.plugins.get("genre_filter")
         if genre_filter_plugin and hasattr(genre_filter_plugin, "_make_button_container"):
             # Create a second set of genre buttons for the drawer
+            # (toolbar buttons are hidden in genre_filter.activate() for cue_maker mode)
             self._drawer_genre_buttons = genre_filter_plugin._make_button_container(
                 genre_filter_plugin._on_filter_changed
             )
@@ -253,12 +249,6 @@ class CueMakerPlugin:
         if self._drawer_genre_buttons:
             self._drawer_genre_buttons.setParent(None)
             self._drawer_genre_buttons = None
-
-        # Restore genre filter toolbar buttons
-        genre_filter_plugin = app.plugin_manager.plugins.get("genre_filter")
-        if genre_filter_plugin and hasattr(genre_filter_plugin, "container"):
-            if genre_filter_plugin.container:
-                genre_filter_plugin.container.setVisible(True)
 
         # Remove waveform widget from drawer (was added in activate)
         waveform_plugin = app.plugin_manager.plugins.get("waveform_visualizer")

@@ -438,19 +438,23 @@ class GenreFilterPlugin:
     def activate(self, mode: str) -> None:
         """Activate plugin when switching to jukebox or cue_maker mode.
 
-        Shows the filter buttons and re-applies the current filter state.
-        Creates the container if it doesn't exist yet (first activation in cue_maker).
+        Shows the filter buttons (except in cue_maker mode where they appear
+        in the drawer instead) and re-applies the current filter state.
+        Creates the container if it doesn't exist yet (first activation).
 
         Args:
             mode: Mode name ("jukebox" or "cue_maker")
         """
         # Create container if it doesn't exist yet
-        # (register_ui might not have been called for cue_maker mode initially)
         if not self.container and self.context:
             self._create_container()
 
         if self.container:
-            self.container.setVisible(True)
+            # Hide buttons in cue_maker mode (shown in drawer instead)
+            if mode == "cue_maker":
+                self.container.setVisible(False)
+            else:
+                self.container.setVisible(True)
         # Re-apply current filter
         self._on_filter_changed()
         logging.debug("[Genre Filter] Activated for %s mode", mode)
