@@ -39,8 +39,8 @@ class TestGenreFilterButton:
         """Test button has fixed size."""
         button = GenreFilterButton("D", "Deep")
 
-        assert button.width() == 28
-        assert button.height() == 22
+        assert button.width() == 32
+        assert button.height() == 26
 
     def test_cycle_states(self, qapp) -> None:  # type: ignore
         """Test button cycles through states: indifferent → on → off → indifferent."""
@@ -264,7 +264,7 @@ class TestGenreFilterPlugin:
         assert plugin.name == "genre_filter"
         assert plugin.version == "1.0.0"
         assert plugin.description == "Filter tracks by genre with toggle buttons"
-        assert plugin.modes == ["jukebox"]
+        assert plugin.modes == ["jukebox", "cue_maker"]
 
     def test_initialization(self) -> None:
         """Test plugin initializes correctly."""

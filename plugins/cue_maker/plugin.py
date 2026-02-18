@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QSplitter, QVBoxLayout, QWidget
 
+from plugins.cue_maker.widgets.bottom_drawer import BottomDrawer
+
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
     from plugins.cue_maker.analyzer import AnalyzeWorker
@@ -45,6 +47,7 @@ class CueMakerPlugin:
         self._splitter: QSplitter | None = None
         self._nav_dock: Any | None = None
         self._saved_bottom_widgets: list[QWidget] = []
+        self._drawer: BottomDrawer | None = None
 
     def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin with application context.
@@ -88,9 +91,9 @@ class CueMakerPlugin:
     def activate(self, mode: str) -> None:
         """Activate plugin when entering cue_maker mode.
 
-        Rebuilds the central widget with a vertical splitter:
-        - Top: directory navigator + tracklist side by side
-        - Bottom: cue maker widget + player controls
+        Rebuilds the central widget with:
+        - Top: cue maker widget (takes all available space)
+        - Bottom: drawer with directory navigator, search bar, track list, controls
 
         Args:
             mode: Mode being activated (should be "cue_maker")
@@ -119,23 +122,38 @@ class CueMakerPlugin:
         # would be destroyed otherwise since they're children of the old central.
         known_widgets = {app.search_bar, app.track_list, app.controls, self.main_widget}
         self._saved_bottom_widgets = []
-        if self._original_central and self._original_central.layout():
+        if self._original_central is not None:
             original_layout = self._original_central.layout()
-            while original_layout.count():
-                item = original_layout.takeAt(0)
-                w = item.widget() if item else None
-                if w:
-                    if w not in known_widgets:
-                        self._saved_bottom_widgets.append(w)
-                        w.setVisible(False)
-                    w.setParent(None)
+            if original_layout is not None:
+                while original_layout.count():
+                    item = original_layout.takeAt(0)
+                    w = item.widget() if item else None
+                    if w:
+                        if w not in known_widgets:
+                            self._saved_bottom_widgets.append(w)
+                            w.setVisible(False)
+                        w.setParent(None)
 
-        # Build new layout with splitters
-        # Top: horizontal splitter (navigator | search + tracklist)
-        top_splitter = QSplitter(Qt.Orientation.Horizontal)
+        # Build new layout:
+        # Central widget with vertical layout
+        central = QWidget()
+        v_layout = QVBoxLayout(central)
+        v_layout.setContentsMargins(0, 0, 0, 0)
+        v_layout.setSpacing(0)
 
+        # Top: CueMakerWidget (stretch=1, takes all available space)
+        if self.main_widget:
+            v_layout.addWidget(self.main_widget, stretch=1)
+            self.main_widget.setVisible(True)
+
+        # Bottom: BottomDrawer with library content
+        self._drawer = BottomDrawer()
+
+        # Create content for drawer:
+        # - Horizontal splitter: DirNav | (SearchBar + TrackList)
+        h_splitter = QSplitter(Qt.Orientation.Horizontal)
         if nav_widget:
-            top_splitter.addWidget(nav_widget)
+            h_splitter.addWidget(nav_widget)
             nav_widget.setVisible(True)
 
         right_container = QWidget()
@@ -144,35 +162,41 @@ class CueMakerPlugin:
         right_layout.addWidget(app.search_bar)
         right_layout.addWidget(app.track_list, stretch=1)
         right_container.setLayout(right_layout)
-        top_splitter.addWidget(right_container)
+        h_splitter.addWidget(right_container)
 
         # Set horizontal proportions (25% navigator, 75% tracklist)
-        top_splitter.setSizes([250, 750])
+        h_splitter.setSizes([250, 750])
 
-        # Bottom: cue maker widget + player controls
-        bottom_container = QWidget()
-        bottom_layout = QVBoxLayout()
-        bottom_layout.setContentsMargins(0, 0, 0, 0)
-        if self.main_widget:
-            bottom_layout.addWidget(self.main_widget, stretch=1)
-            self.main_widget.setVisible(True)
-        bottom_layout.addWidget(app.controls, stretch=0)
-        bottom_container.setLayout(bottom_layout)
+        # Create drawer content with splitter + controls + waveform
+        drawer_content = QWidget()
+        dc_layout = QVBoxLayout(drawer_content)
+        dc_layout.setContentsMargins(0, 0, 0, 0)
+        dc_layout.addWidget(h_splitter, stretch=1)
 
-        # Main vertical splitter
-        self._splitter = QSplitter(Qt.Orientation.Vertical)
-        self._splitter.addWidget(top_splitter)
-        self._splitter.addWidget(bottom_container)
-        # Set vertical proportions (40% top, 60% bottom)
-        self._splitter.setSizes([400, 600])
+        dc_layout.addWidget(app.controls, stretch=0)
+
+        # Re-add waveform visualizer widget (from waveform_visualizer plugin)
+        # It was detached to avoid destruction when we replaced the central widget
+        waveform_plugin = app.plugin_manager.plugins.get("waveform_visualizer")
+        if (
+            waveform_plugin
+            and hasattr(waveform_plugin, "waveform_widget")
+            and waveform_plugin.waveform_widget
+        ):
+            waveform_widget = waveform_plugin.waveform_widget
+            waveform_widget.setVisible(True)
+            dc_layout.addWidget(waveform_widget, stretch=0)
+            # Remove from saved widgets to avoid adding it twice in deactivate()
+            try:
+                self._saved_bottom_widgets.remove(waveform_widget)
+            except ValueError:
+                pass
+
+        self._drawer.set_content(drawer_content)
+        v_layout.addWidget(self._drawer)
 
         # Replace central widget
-        new_central = QWidget()
-        new_layout = QVBoxLayout()
-        new_layout.setContentsMargins(0, 0, 0, 0)
-        new_layout.addWidget(self._splitter)
-        new_central.setLayout(new_layout)
-        app.setCentralWidget(new_central)
+        app.setCentralWidget(central)
 
         # Add "Add to Cue Sheet" in track context menu
         if self._ui_builder and self._cue_context_action is None:
@@ -203,7 +227,7 @@ class CueMakerPlugin:
             self.main_widget.cleanup_workers()
             self.main_widget.setVisible(False)
 
-        # Remove widgets from splitter layout before restoring
+        # Remove widgets from drawer layout before restoring
         for w in [app.search_bar, app.track_list, app.controls]:
             w.setParent(None)
         if self.main_widget:
@@ -235,14 +259,17 @@ class CueMakerPlugin:
         central.setLayout(layout)
         app.setCentralWidget(central)
 
-        # Clean up splitter reference
+        # Clean up references
         self._splitter = None
+        self._drawer = None
         self._original_central = None
 
         # Remove context menu action
         if self._ui_builder and self._cue_context_action is not None:
             try:
-                self._ui_builder.track_context_actions.remove(self._cue_context_action)
+                self._ui_builder.track_context_actions.remove(  # type: ignore[attr-defined]
+                    self._cue_context_action
+                )
             except ValueError:
                 pass
             self._cue_context_action = None
@@ -319,6 +346,12 @@ class CueMakerPlugin:
         """Handle analysis completion and update UI."""
         if self.main_widget:
             self.main_widget.on_analysis_complete(entries)
+            # Cache entries for instant reload on next load
+            mix_path = self.main_widget.model.sheet.mix_filepath
+            if mix_path:
+                from plugins.cue_maker.cache import save_entries_cache
+
+                save_entries_cache(mix_path, entries)
         if self.context:
             from jukebox.core.event_bus import Events
 
@@ -334,7 +367,7 @@ class CueMakerPlugin:
         Args:
             track: Track dictionary with artist, title, filepath, id keys.
         """
-        if not self.main_widget:
+        if not self.main_widget or not self.context:
             return
 
         artist = track.get("artist", "") or ""
@@ -342,17 +375,29 @@ class CueMakerPlugin:
         filepath = track.get("filepath", "") or ""
         track_id = track.get("id", 0)
 
+        # Get duration from database
+        duration_ms = 0
+        if track_id:
+            db = self.context.database
+            if db and hasattr(db, "tracks"):
+                track_info = db.tracks.get_by_id(track_id)
+                if track_info:
+                    duration_s = track_info["duration_seconds"] or 0
+                    duration_ms = int(duration_s * 1000)
+
         self.main_widget.model.add_manual_entry(
             start_time_ms=0,
             artist=artist,
             title=title,
         )
 
-        # Update filepath on the newly added entry
+        # Update filepath and duration on the newly added entry
         for entry in self.main_widget.model.sheet.entries:
             if entry.filepath == "" and entry.artist == artist and entry.title == title:
                 entry.filepath = str(filepath)
                 entry.track_id = track_id
+                if duration_ms > 0:
+                    entry.duration_ms = duration_ms
                 break
 
         logger.info("[Cue Maker] Added track to cue: %s - %s", artist, title)
