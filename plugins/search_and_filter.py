@@ -290,23 +290,28 @@ class SearchAndFilterPlugin:
         # In cue_maker mode, buttons are shown in drawer instead (not toolbar)
         if self.toolbar_container:
             if mode == "cue_maker":
-                # REMOVE the container from toolbar completely
-                # This removes it from the widget hierarchy, making it invisible
+                # REMOVE the container from toolbar
                 if self.toolbar_container.parent():
+                    self.toolbar_container.hide()
                     self.toolbar_container.setParent(None)
                     logging.info(
-                        "[Search & Filter] Removed toolbar buttons from toolbar for %s mode", mode
+                        "[Search & Filter] Hidden and removed toolbar buttons from toolbar for %s mode", mode
                     )
             else:
                 # Re-add the container to toolbar for other modes (jukebox, curating)
                 # If it was removed, re-add it to the toolbar
-                if self._toolbar and not self.toolbar_container.parent():
+                if self._toolbar and self.toolbar_container.parent() is None:
                     self._toolbar.addWidget(self.toolbar_container)
+                    self.toolbar_container.show()
                     logging.info(
-                        "[Search & Filter] Re-added toolbar buttons to toolbar for %s mode", mode
+                        "[Search & Filter] Re-added and shown toolbar buttons to toolbar for %s mode", mode
                     )
-                # Ensure visibility
-                self.toolbar_container.setVisible(True)
+                else:
+                    # Already in toolbar, just ensure it's visible
+                    self.toolbar_container.setVisible(True)
+                    logging.info(
+                        "[Search & Filter] Ensured toolbar buttons are visible for %s mode", mode
+                    )
 
         # Re-apply current filter
         self._on_filter_changed()
