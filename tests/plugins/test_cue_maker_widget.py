@@ -17,7 +17,17 @@ def mock_context():  # type: ignore
     context = Mock()
     context.config = Mock()
     context.config.shazamix_db_path = "/fake/db.db"
+    context.get_current_track_duration.return_value = 0.0
     return context
+
+
+@pytest.fixture(autouse=True)
+def _no_waveform_worker(monkeypatch):  # type: ignore
+    """Prevent waveform worker from starting in tests."""
+    monkeypatch.setattr(
+        "plugins.cue_maker.widgets.cue_maker_widget.CueMakerWidget._start_waveform_generation",
+        lambda self, filepath: None,
+    )
 
 
 class TestCueMakerWidget:
@@ -48,8 +58,6 @@ class TestCueMakerWidget:
         assert widget.time_input is not None
         assert widget.artist_input is not None
         assert widget.title_input is not None
-        assert widget.confirm_btn is not None
-        assert widget.reject_btn is not None
         assert widget.delete_btn is not None
 
     def test_initial_state(self, qapp, mock_context) -> None:  # type: ignore
@@ -220,16 +228,6 @@ class TestCueMakerWidget:
 
         assert widget.model.sheet.entries[0].title == "New Title"
 
-    def test_set_status_confirmed(self, qapp, mock_context) -> None:  # type: ignore
-        """Test _set_status updates entry status."""
-        widget = CueMakerWidget(mock_context)
-        widget.model.load_entries([CueEntry(60000, "A", "T", 0.9, 180000)])
-
-        widget._selected_row = 0
-        widget._set_status(EntryStatus.CONFIRMED)
-
-        assert widget.model.sheet.entries[0].status == EntryStatus.CONFIRMED
-
     def test_delete_entry(self, qapp, mock_context) -> None:  # type: ignore
         """Test _on_delete_entry removes entry."""
         widget = CueMakerWidget(mock_context)
@@ -246,19 +244,16 @@ class TestCueMakerWidget:
         assert widget.model.rowCount() == 1
         assert widget.model.sheet.entries[0].artist == "A2"
 
-    def test_export_with_no_confirmed_entries(self, qapp, mock_context) -> None:  # type: ignore
-        """Test _on_export warns when no confirmed entries."""
+    def test_export_with_no_entries(self, qapp, mock_context) -> None:  # type: ignore
+        """Test _on_export warns when no entries exist."""
         widget = CueMakerWidget(mock_context)
-        entry = CueEntry(60000, "A", "T", 0.9, 180000)
-        entry.status = EntryStatus.PENDING
-        widget.model.load_entries([entry])
 
         with patch.object(QMessageBox, "warning") as mock_msgbox:
             widget._on_export()
 
             mock_msgbox.assert_called_once()
             args = mock_msgbox.call_args[0]
-            assert "No confirmed entries" in args[2]
+            assert "No entries" in args[2]
 
     def test_export_with_confirmed_entries(self, qapp, mock_context) -> None:  # type: ignore
         """Test _on_export creates CUE file."""
@@ -266,7 +261,6 @@ class TestCueMakerWidget:
         widget.model.set_metadata("/path/to/mix.mp3", "Mix", "DJ")
 
         entry = CueEntry(0, "Artist", "Title", 1.0, 180000)
-        entry.status = EntryStatus.CONFIRMED
         widget.model.load_entries([entry])
 
         with TemporaryDirectory() as tmpdir:
@@ -287,21 +281,15 @@ class TestCueMakerWidget:
             assert Path(output_path).exists()
 
     def test_export_button_enabled_state(self, qapp, mock_context) -> None:  # type: ignore
-        """Test export button enables when confirmed entries exist."""
+        """Test export button enables when entries exist."""
         widget = CueMakerWidget(mock_context)
 
-        # Initially disabled
+        # Initially disabled (no entries)
         assert widget.export_btn.isEnabled() is False
 
-        # Load unconfirmed entry
+        # Load entry
         entry = CueEntry(60000, "A", "T", 0.9, 180000)
-        entry.status = EntryStatus.PENDING
         widget.model.load_entries([entry])
-        widget._update_export_button()
-        assert widget.export_btn.isEnabled() is False
-
-        # Confirm entry
-        widget.model.set_entry_status(0, EntryStatus.CONFIRMED)
         widget._update_export_button()
         assert widget.export_btn.isEnabled() is True
 
@@ -310,5 +298,5 @@ class TestCueMakerWidget:
         widget = CueMakerWidget(mock_context)
 
         assert widget.table_view.model() == widget.model
-        assert widget.table_view.alternatingRowColors() is True
+        assert widget.table_view.alternatingRowColors() is False
         assert widget.table_view.showGrid() is False

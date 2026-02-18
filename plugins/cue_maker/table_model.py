@@ -79,6 +79,8 @@ class CueTableModel(QAbstractTableModel):
 
     def _display_data(self, entry: CueEntry, col: int) -> str:
         """Return formatted display string for a cell."""
+        if col == TableColumn.OVERLAP:
+            return "⚠️" if self._has_overlap(entry) else ""
         if col == TableColumn.TIME:
             return entry.to_display_time()
         if col == TableColumn.ARTIST:
@@ -89,11 +91,20 @@ class CueTableModel(QAbstractTableModel):
             return f"{entry.confidence:.0%}"
         if col == TableColumn.DURATION:
             return entry.duration_to_display()
-        if col == TableColumn.STATUS:
-            return entry.status.value.capitalize()
-        if col == TableColumn.ACTIONS:
-            return ""
         return ""
+
+    def _has_overlap(self, entry: CueEntry) -> bool:
+        """Check if entry's interval overlaps with any other entry."""
+        start = entry.start_time_ms
+        end = start + entry.duration_ms
+        for other in self._sheet.entries:
+            if other is entry:
+                continue
+            other_start = other.start_time_ms
+            other_end = other_start + other.duration_ms
+            if start < other_end and end > other_start:
+                return True
+        return False
 
     def _raw_data(self, entry: CueEntry, col: int) -> int | float | str | None:
         """Return raw data for programmatic access."""
@@ -103,8 +114,6 @@ class CueTableModel(QAbstractTableModel):
             return entry.confidence
         if col == TableColumn.DURATION:
             return entry.duration_ms
-        if col == TableColumn.STATUS:
-            return entry.status.value
         return None
 
     def flags(self, index: _INDEX_TYPE) -> Qt.ItemFlag:
@@ -194,14 +203,6 @@ class CueTableModel(QAbstractTableModel):
             self._sheet.remove_entry(row)
             self.endRemoveRows()
 
-    def set_entry_status(self, row: int, status: EntryStatus) -> None:
-        """Update status of entry at row."""
-        if 0 <= row < len(self._sheet.entries):
-            self._sheet.set_status(row, status)
-            left = self.index(row, TableColumn.STATUS)
-            right = self.index(row, TableColumn.STATUS)
-            self.dataChanged.emit(left, right, [])
-
     def get_entry(self, row: int) -> CueEntry | None:
         """Get entry at row, or None if invalid."""
         if 0 <= row < len(self._sheet.entries):
@@ -216,4 +217,4 @@ class CueTableModel(QAbstractTableModel):
 
     def has_confirmed_entries(self) -> bool:
         """Check if there are entries ready for export."""
-        return len(self._sheet.get_confirmed_entries()) > 0
+        return len(self._sheet.entries) > 0

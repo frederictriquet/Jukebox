@@ -14,7 +14,7 @@ class TestCueTableModel:
         """Test model initializes with empty sheet."""
         model = CueTableModel()
         assert model.rowCount() == 0
-        assert model.columnCount() == 7
+        assert model.columnCount() == 6
         assert model.sheet is not None
         assert len(model.sheet.entries) == 0
 
@@ -33,19 +33,18 @@ class TestCueTableModel:
     def test_column_count(self, qapp) -> None:  # type: ignore
         """Test columnCount returns 7 columns."""
         model = CueTableModel()
-        assert model.columnCount() == 7
+        assert model.columnCount() == 6
 
     def test_header_data_horizontal(self, qapp) -> None:  # type: ignore
         """Test horizontal headers."""
         model = CueTableModel()
         headers = [
+            "",
             "Time",
             "Artist",
             "Title",
             "Confidence",
             "Duration",
-            "Status",
-            "Actions",
         ]
         for col, expected in enumerate(headers):
             result = model.headerData(col, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
@@ -66,7 +65,6 @@ class TestCueTableModel:
             title="Test Title",
             confidence=0.95,
             duration_ms=240000,  # 4:00
-            status=EntryStatus.CONFIRMED,
         )
         model.load_entries([entry])
 
@@ -75,14 +73,12 @@ class TestCueTableModel:
         idx_title = model.index(0, TableColumn.TITLE)
         idx_confidence = model.index(0, TableColumn.CONFIDENCE)
         idx_duration = model.index(0, TableColumn.DURATION)
-        idx_status = model.index(0, TableColumn.STATUS)
 
         assert model.data(idx_time, Qt.ItemDataRole.DisplayRole) == "03:05"
         assert model.data(idx_artist, Qt.ItemDataRole.DisplayRole) == "Test Artist"
         assert model.data(idx_title, Qt.ItemDataRole.DisplayRole) == "Test Title"
         assert model.data(idx_confidence, Qt.ItemDataRole.DisplayRole) == "95%"
         assert model.data(idx_duration, Qt.ItemDataRole.DisplayRole) == "04:00"
-        assert model.data(idx_status, Qt.ItemDataRole.DisplayRole) == "Confirmed"
 
     def test_data_user_role(self, qapp) -> None:  # type: ignore
         """Test data returns raw values for UserRole."""
@@ -93,7 +89,6 @@ class TestCueTableModel:
             title="Title",
             confidence=0.75,
             duration_ms=240000,
-            status=EntryStatus.PENDING,
         )
         model.load_entries([entry])
 
@@ -125,17 +120,15 @@ class TestCueTableModel:
         assert Qt.ItemFlag.ItemIsEditable in model.flags(idx_title)
 
     def test_flags_non_editable_columns(self, qapp) -> None:  # type: ignore
-        """Test confidence, duration, status, actions are not editable."""
+        """Test confidence, duration, actions are not editable."""
         model = CueTableModel()
         model.load_entries([CueEntry(0, "A", "T", 1.0, 0)])
 
         idx_confidence = model.index(0, TableColumn.CONFIDENCE)
         idx_duration = model.index(0, TableColumn.DURATION)
-        idx_status = model.index(0, TableColumn.STATUS)
 
         assert Qt.ItemFlag.ItemIsEditable not in model.flags(idx_confidence)
         assert Qt.ItemFlag.ItemIsEditable not in model.flags(idx_duration)
-        assert Qt.ItemFlag.ItemIsEditable not in model.flags(idx_status)
 
     def test_set_data_time_valid(self, qapp) -> None:  # type: ignore
         """Test setData updates time with valid MM:SS format."""
@@ -264,15 +257,6 @@ class TestCueTableModel:
 
         assert model.rowCount() == 1  # Unchanged
 
-    def test_set_entry_status(self, qapp) -> None:  # type: ignore
-        """Test set_entry_status updates status."""
-        model = CueTableModel()
-        model.load_entries([CueEntry(60000, "A", "T", 0.9, 180000)])
-
-        model.set_entry_status(0, EntryStatus.CONFIRMED)
-
-        assert model.sheet.entries[0].status == EntryStatus.CONFIRMED
-
     def test_get_entry_valid(self, qapp) -> None:  # type: ignore
         """Test get_entry returns entry at row."""
         model = CueTableModel()
@@ -312,22 +296,9 @@ class TestCueTableModel:
     def test_has_confirmed_entries_true(self, qapp) -> None:  # type: ignore
         """Test has_confirmed_entries returns True when entries exist."""
         model = CueTableModel()
-        entry1 = CueEntry(30000, "A1", "T1", 0.9, 180000)
-        entry1.status = EntryStatus.CONFIRMED
-        entry2 = CueEntry(60000, "A2", "T2", 0.9, 180000)
-        entry2.status = EntryStatus.PENDING
-        model.load_entries([entry1, entry2])
+        model.load_entries([CueEntry(30000, "A1", "T1", 0.9, 180000)])
 
         assert model.has_confirmed_entries() is True
-
-    def test_has_confirmed_entries_false(self, qapp) -> None:  # type: ignore
-        """Test has_confirmed_entries returns False when none confirmed."""
-        model = CueTableModel()
-        entry = CueEntry(30000, "A1", "T1", 0.9, 180000)
-        entry.status = EntryStatus.PENDING
-        model.load_entries([entry])
-
-        assert model.has_confirmed_entries() is False
 
     def test_has_confirmed_entries_empty(self, qapp) -> None:  # type: ignore
         """Test has_confirmed_entries returns False when empty."""

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QSplitter, QVBoxLayout, QWidget
 
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
@@ -34,8 +37,14 @@ class CueMakerPlugin:
     def __init__(self) -> None:
         """Initialize plugin state."""
         self.context: PluginContextProtocol | None = None
+        self._ui_builder: UIBuilderProtocol | None = None
         self.main_widget: CueMakerWidget | None = None
         self._analyzer: AnalyzeWorker | None = None
+        self._cue_context_action: Any | None = None
+        self._original_central: QWidget | None = None
+        self._splitter: QSplitter | None = None
+        self._nav_dock: Any | None = None
+        self._saved_bottom_widgets: list[QWidget] = []
 
     def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin with application context.
@@ -44,6 +53,12 @@ class CueMakerPlugin:
             context: Application context providing access to services
         """
         self.context = context
+        self._active = False
+
+        # Listen for explicit "add track to cue" requests (e.g. from directory navigator)
+        from jukebox.core.event_bus import Events
+
+        context.subscribe(Events.CUE_ADD_TRACK, self._on_cue_add_track)
         logger.info("[Cue Maker] Plugin initialized")
 
     def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
@@ -58,6 +73,7 @@ class CueMakerPlugin:
         from plugins.cue_maker.widgets.cue_maker_widget import CueMakerWidget
 
         assert self.context is not None
+        self._ui_builder = ui_builder
         self.main_widget = CueMakerWidget(self.context)
         ui_builder.add_bottom_widget(self.main_widget)
 
@@ -72,29 +88,177 @@ class CueMakerPlugin:
     def activate(self, mode: str) -> None:
         """Activate plugin when entering cue_maker mode.
 
+        Rebuilds the central widget with a vertical splitter:
+        - Top: directory navigator + tracklist side by side
+        - Bottom: cue maker widget + player controls
+
         Args:
             mode: Mode being activated (should be "cue_maker")
         """
+        self._active = True
+        assert self.context is not None
+
+        app = self.context.app
+        nav_plugin = app.plugin_manager.plugins.get("directory_navigator")
+
+        # Save original central widget
+        self._original_central = app.centralWidget()
+
+        # Hide the directory navigator dock and reparent its widget
+        nav_widget = None
+        if nav_plugin and hasattr(nav_plugin, "widget") and nav_plugin.widget:
+            nav_widget = nav_plugin.widget
+            self._nav_dock = nav_widget.parent()
+            if self._nav_dock and hasattr(self._nav_dock, "setVisible"):
+                self._nav_dock.setVisible(False)
+            # Reparent: extract from dock
+            nav_widget.setParent(None)
+
+        # Detach ALL widgets from original layout before setCentralWidget
+        # destroys it. Other plugins' bottom widgets (waveform, genre_suggester)
+        # would be destroyed otherwise since they're children of the old central.
+        known_widgets = {app.search_bar, app.track_list, app.controls, self.main_widget}
+        self._saved_bottom_widgets = []
+        if self._original_central and self._original_central.layout():
+            original_layout = self._original_central.layout()
+            while original_layout.count():
+                item = original_layout.takeAt(0)
+                w = item.widget() if item else None
+                if w:
+                    if w not in known_widgets:
+                        self._saved_bottom_widgets.append(w)
+                        w.setVisible(False)
+                    w.setParent(None)
+
+        # Build new layout with splitters
+        # Top: horizontal splitter (navigator | search + tracklist)
+        top_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        if nav_widget:
+            top_splitter.addWidget(nav_widget)
+            nav_widget.setVisible(True)
+
+        right_container = QWidget()
+        right_layout = QVBoxLayout()
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.addWidget(app.search_bar)
+        right_layout.addWidget(app.track_list, stretch=1)
+        right_container.setLayout(right_layout)
+        top_splitter.addWidget(right_container)
+
+        # Set horizontal proportions (25% navigator, 75% tracklist)
+        top_splitter.setSizes([250, 750])
+
+        # Bottom: cue maker widget + player controls
+        bottom_container = QWidget()
+        bottom_layout = QVBoxLayout()
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
         if self.main_widget:
+            bottom_layout.addWidget(self.main_widget, stretch=1)
             self.main_widget.setVisible(True)
+        bottom_layout.addWidget(app.controls, stretch=0)
+        bottom_container.setLayout(bottom_layout)
+
+        # Main vertical splitter
+        self._splitter = QSplitter(Qt.Orientation.Vertical)
+        self._splitter.addWidget(top_splitter)
+        self._splitter.addWidget(bottom_container)
+        # Set vertical proportions (40% top, 60% bottom)
+        self._splitter.setSizes([400, 600])
+
+        # Replace central widget
+        new_central = QWidget()
+        new_layout = QVBoxLayout()
+        new_layout.setContentsMargins(0, 0, 0, 0)
+        new_layout.addWidget(self._splitter)
+        new_central.setLayout(new_layout)
+        app.setCentralWidget(new_central)
+
+        # Add "Add to Cue Sheet" in track context menu
+        if self._ui_builder and self._cue_context_action is None:
+            self._cue_context_action = self._ui_builder.add_track_context_action(
+                "Add to Cue Sheet",
+                self._add_track_to_cue,
+                separator_before=True,
+            )
+
         logger.debug("[Cue Maker] Activated for %s mode", mode)
 
     def deactivate(self, mode: str) -> None:
         """Deactivate plugin when leaving cue_maker mode.
 
+        Restores the original central widget layout with search bar, tracklist,
+        and player controls. Puts the navigator widget back into its dock.
+
         Args:
             mode: Mode being deactivated
         """
+        self._active = False
+        assert self.context is not None
+
+        app = self.context.app
+
         if self.main_widget:
+            self.main_widget.stop_mix_playback()
+            self.main_widget.cleanup_workers()
             self.main_widget.setVisible(False)
+
+        # Remove widgets from splitter layout before restoring
+        for w in [app.search_bar, app.track_list, app.controls]:
+            w.setParent(None)
+        if self.main_widget:
+            self.main_widget.setParent(None)
+
+        # Restore navigator widget to its dock
+        nav_plugin = app.plugin_manager.plugins.get("directory_navigator")
+        if nav_plugin and hasattr(nav_plugin, "widget") and nav_plugin.widget:
+            nav_widget = nav_plugin.widget
+            nav_widget.setParent(None)
+            if self._nav_dock and hasattr(self._nav_dock, "setWidget"):
+                self._nav_dock.setWidget(nav_widget)
+                # Don't show dock here - directory_navigator.activate() handles it
+        self._nav_dock = None
+
+        # Rebuild original central widget
+        central = QWidget()
+        layout = QVBoxLayout()
+        layout.addWidget(app.search_bar)
+        layout.addWidget(app.track_list, stretch=1)
+        layout.addWidget(app.controls, stretch=0)
+        if self.main_widget:
+            layout.addWidget(self.main_widget)
+        # Restore other plugins' bottom widgets (waveform, genre_suggester, etc.)
+        for w in self._saved_bottom_widgets:
+            w.setVisible(True)
+            layout.addWidget(w)
+        self._saved_bottom_widgets = []
+        central.setLayout(layout)
+        app.setCentralWidget(central)
+
+        # Clean up splitter reference
+        self._splitter = None
+        self._original_central = None
+
+        # Remove context menu action
+        if self._ui_builder and self._cue_context_action is not None:
+            try:
+                self._ui_builder.track_context_actions.remove(self._cue_context_action)
+            except ValueError:
+                pass
+            self._cue_context_action = None
+
         logger.debug("[Cue Maker] Deactivated for %s mode", mode)
 
     def shutdown(self) -> None:
         """Cleanup resources when plugin is unloaded."""
-        if self._analyzer and self._analyzer.isRunning():
-            self._analyzer.quit()
-            self._analyzer.wait(3000)
-        self._analyzer = None
+        if self._analyzer is not None:
+            if self._analyzer.isRunning():
+                self._analyzer.requestInterruption()
+                self._analyzer.quit()
+                self._analyzer.wait(5000)
+            self._analyzer = None
+        if self.main_widget:
+            self.main_widget.cleanup_workers()
         self.main_widget = None
         self.context = None
         logger.info("[Cue Maker] Plugin shut down")
@@ -102,7 +266,12 @@ class CueMakerPlugin:
     # --- Analysis ---
 
     def _on_analyze(self) -> None:
-        """Start shazamix analysis of the loaded mix."""
+        """Start shazamix analysis of the loaded mix.
+
+        Checks the persistent cache first. If cached results exist for the same
+        file (same path, size, mtime), they are loaded instantly. Otherwise a
+        background AnalyzeWorker is started and results are cached on completion.
+        """
         if not self.main_widget or not self.context:
             return
 
@@ -110,8 +279,9 @@ class CueMakerPlugin:
         if not mix_path:
             return
 
-        # Get database path from config
-        db_path = getattr(self.context.config, "shazamix_db_path", "")
+        # Get config
+        cue_config = getattr(self.context.config, "cue_maker", None)
+        db_path = str(cue_config.shazamix_db_path.expanduser()) if cue_config else ""
         if not db_path:
             logger.warning("[Cue Maker] No shazamix database path configured")
             from PySide6.QtWidgets import QMessageBox
@@ -125,11 +295,82 @@ class CueMakerPlugin:
 
         from plugins.cue_maker.analyzer import AnalyzeWorker
 
-        self._analyzer = AnalyzeWorker(mix_path, db_path)
+        self._analyzer = AnalyzeWorker(
+            mix_path,
+            db_path,
+            segment_duration=cue_config.segment_duration if cue_config else 30.0,
+            overlap=cue_config.overlap if cue_config else 15.0,
+            max_workers=cue_config.max_workers if cue_config else 4,
+        )
+        self._analyzer.setObjectName("CueMaker-AnalyzeWorker")
         self._analyzer.progress.connect(self.main_widget.set_analysis_progress)
-        self._analyzer.finished.connect(self.main_widget.on_analysis_complete)
+        self._analyzer.finished.connect(self._on_analysis_done)
         self._analyzer.error.connect(self.main_widget.on_analysis_error)
 
         self.main_widget.analyze_btn.setEnabled(False)
         self._analyzer.start()
         logger.info("[Cue Maker] Analysis started for %s", mix_path)
+
+        from jukebox.core.event_bus import Events
+
+        self.context.emit(Events.STATUS_MESSAGE, message="Cue Maker: Analyzing mix...")
+
+    def _on_analysis_done(self, entries: list) -> None:
+        """Handle analysis completion and update UI."""
+        if self.main_widget:
+            self.main_widget.on_analysis_complete(entries)
+        if self.context:
+            from jukebox.core.event_bus import Events
+
+            n = len(entries)
+            msg = f"Cue Maker: Found {n} track{'s' if n != 1 else ''} in mix"
+            self.context.emit(Events.STATUS_MESSAGE, message=msg)
+
+    # --- Track addition to cue sheet ---
+
+    def _add_track_to_cue(self, track: dict[str, Any]) -> None:
+        """Add a track to the cue sheet from the context menu.
+
+        Args:
+            track: Track dictionary with artist, title, filepath, id keys.
+        """
+        if not self.main_widget:
+            return
+
+        artist = track.get("artist", "") or ""
+        title = track.get("title", "") or ""
+        filepath = track.get("filepath", "") or ""
+        track_id = track.get("id", 0)
+
+        self.main_widget.model.add_manual_entry(
+            start_time_ms=0,
+            artist=artist,
+            title=title,
+        )
+
+        # Update filepath on the newly added entry
+        for entry in self.main_widget.model.sheet.entries:
+            if entry.filepath == "" and entry.artist == artist and entry.title == title:
+                entry.filepath = str(filepath)
+                entry.track_id = track_id
+                break
+
+        logger.info("[Cue Maker] Added track to cue: %s - %s", artist, title)
+
+    def _on_cue_add_track(self, track_id: int) -> None:
+        """Handle CUE_ADD_TRACK event."""
+        if not self._active or not self.main_widget or not self.context:
+            return
+
+        db = self.context.database
+        if not db.conn:  # type: ignore[attr-defined]
+            return
+
+        row = db.conn.execute(  # type: ignore[attr-defined]
+            "SELECT id, artist, title, filepath FROM tracks WHERE id = ?",
+            (track_id,),
+        ).fetchone()
+        if not row:
+            return
+
+        self._add_track_to_cue(dict(row))

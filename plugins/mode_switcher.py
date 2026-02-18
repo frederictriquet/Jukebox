@@ -131,7 +131,7 @@ class ModeSwitcherPlugin:
         try:
             # Stop current playback and unload track
             main_window.player.unload()
-            main_window.position_timer.stop()
+            main_window.playback.stop()
 
             # Reset window title
             main_window.setWindowTitle(main_window.config.ui.window_title)

@@ -272,32 +272,17 @@ class TestCueSheet:
 
         assert confirmed == []
 
-    def test_get_confirmed_entries_filters_correctly(self) -> None:
-        """Test getting only confirmed and manual entries."""
+    def test_get_confirmed_entries_returns_all(self) -> None:
+        """Test getting all entries for export."""
         sheet = CueSheet()
 
-        entry1 = CueEntry(30000, "Artist 1", "Title 1", 0.9, 180000)
-        entry1.status = EntryStatus.PENDING
-
-        entry2 = CueEntry(60000, "Artist 2", "Title 2", 0.85, 120000)
-        entry2.status = EntryStatus.CONFIRMED
-
-        entry3 = CueEntry(90000, "Artist 3", "Title 3", 0.95, 150000)
-        entry3.status = EntryStatus.REJECTED
-
-        entry4 = CueEntry(120000, "Artist 4", "Title 4", 1.0, 200000)
-        entry4.status = EntryStatus.MANUAL
-
-        sheet.add_entry(entry1)
-        sheet.add_entry(entry2)
-        sheet.add_entry(entry3)
-        sheet.add_entry(entry4)
+        sheet.add_entry(CueEntry(30000, "Artist 1", "Title 1", 0.9, 180000))
+        sheet.add_entry(CueEntry(60000, "Artist 2", "Title 2", 0.85, 120000))
+        sheet.add_entry(CueEntry(90000, "Artist 3", "Title 3", 0.95, 150000))
 
         confirmed = sheet.get_confirmed_entries()
 
-        assert len(confirmed) == 2
-        assert confirmed[0].artist == "Artist 2"  # CONFIRMED
-        assert confirmed[1].artist == "Artist 4"  # MANUAL
+        assert len(confirmed) == 3
 
     def test_sort_by_time(self) -> None:
         """Test explicit sort by time."""

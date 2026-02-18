@@ -32,9 +32,8 @@ class WaveformVisualizerPlugin:
         self.context: PluginContextProtocol | None = None
         self.waveform_widget: WaveformWidget | None = None
         self.current_track_id: int | None = None  # Currently displayed track
-        self._single_worker: QThread | None = (
-            None  # For single waveform regeneration  # Currently displayed track
-        )
+        self._current_track_filepath: str | None = None  # Filepath of displayed track
+        self._single_worker: QThread | None = None  # For single waveform regeneration
 
     def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
@@ -66,6 +65,7 @@ class WaveformVisualizerPlugin:
         if self.waveform_widget:
             self.waveform_widget.clear_waveform()
         self.current_track_id = None
+        self._current_track_filepath = None
 
     def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Add waveform widget."""
@@ -98,29 +98,41 @@ class WaveformVisualizerPlugin:
         )
 
     def _update_cursor(self, position: float) -> None:
-        """Update cursor position."""
-        if self.waveform_widget:
+        """Update cursor position only when the displayed track is playing."""
+        if not self.waveform_widget or self._current_track_filepath is None:
+            return
+        current_file = self.context.player.current_file
+        if current_file is not None and str(current_file) == self._current_track_filepath:
             self.waveform_widget.set_position(position)
 
     def _on_seek_requested(self, position: float) -> None:
         """Handle seek request from waveform click.
 
-        If the player is stopped, start playback first then seek.
+        Loads the displayed track via PlaybackController if needed (which stops
+        any other playback, e.g. a mix), then seeks to the clicked position.
         """
-        player = self.context.player
-        if not player.current_file:
+        if self._current_track_filepath is None:
             return
 
-        was_playing = player.is_playing()
+        from pathlib import Path
 
-        if not was_playing:
-            # Must start playback first, then seek (VLC ignores seek when stopped)
-            player.play()
+        from PySide6.QtCore import QTimer
+
+        player = self.context.player
+        playback = self.context.app.playback
+        filepath = Path(self._current_track_filepath)
+
+        # If a different file is playing (e.g. the mix), load this track first
+        if player.current_file is None or str(player.current_file) != self._current_track_filepath:
+            playback.load_and_play(filepath)
             # Small delay to let VLC start, then seek
-            from PySide6.QtCore import QTimer
-
+            QTimer.singleShot(50, lambda: player.set_position(position))
+        elif not player.is_playing():
+            # Same file but stopped — resume and seek
+            playback.play()
             QTimer.singleShot(50, lambda: player.set_position(position))
         else:
+            # Already playing this track — just seek
             player.set_position(position)
 
     def _on_track_loaded(self, track_id: int) -> None:
@@ -128,8 +140,10 @@ class WaveformVisualizerPlugin:
         if not self.waveform_widget:
             return
 
-        # Store current track ID
+        # Store current track ID and filepath
         self.current_track_id = track_id
+        track = self.context.database.tracks.get_by_id(track_id)
+        self._current_track_filepath = str(track["filepath"]) if track else None
 
         # Check cache
         cached_data = self.context.database.waveforms.get(track_id)
@@ -152,9 +166,6 @@ class WaveformVisualizerPlugin:
                 WaveformVisualizerPlugin._batch_processor
                 and WaveformVisualizerPlugin._batch_processor.is_running
             ):
-                # Get filepath
-                track = self.context.database.tracks.get_by_id(track_id)
-
                 if track:
                     item = (track_id, track["filepath"])
                     added = WaveformVisualizerPlugin._batch_processor.add_priority_item(item)
@@ -312,6 +323,13 @@ class WaveformVisualizerPlugin:
 
     def shutdown(self) -> None:
         """Cleanup on application exit."""
+        # Stop single worker if running
+        if self._single_worker is not None and self._single_worker.isRunning():
+            self._single_worker.requestInterruption()
+            self._single_worker.quit()
+            self._single_worker.wait(5000)
+            self._single_worker = None
+
         # Stop batch processor if running (but keep it alive in class variable)
         if WaveformVisualizerPlugin._batch_processor:
             logging.debug("[Waveform] Stopping batch processor during shutdown")
@@ -580,7 +598,7 @@ class CompleteWaveformWorker(QThread):
             offset = 0.0
 
             # Process all chunks
-            while offset < duration:
+            while offset < duration and not self.isInterruptionRequested():
                 actual_chunk_duration = min(self.chunk_duration, duration - offset)
 
                 # Load chunk
@@ -688,6 +706,7 @@ class CompleteWaveformWorker(QThread):
                     "mid": mid_wave,
                     "treble": treble_wave,
                 },
+                "duration": duration,
                 "energy": energy,
                 "bass_energy": bass_energy,
                 "mid_energy": mid_energy,

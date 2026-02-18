@@ -101,7 +101,9 @@ class Events:
             kwargs: None
         WAVEFORM_WIDGET_READY: Waveform widget is initialized and available
             kwargs: widget (Any) - The waveform widget instance
-        POSITION_UPDATE: Playback position changed
+        POSITION_UPDATE: Track playback position changed
+            kwargs: position (float) - Position as ratio 0.0-1.0
+        MIX_POSITION_UPDATE: Mix playback position changed (cue_maker mode)
             kwargs: position (float) - Position as ratio 0.0-1.0
         STATUS_MESSAGE: Display status message in status bar
             kwargs: message (str) - Message text
@@ -150,6 +152,7 @@ class Events:
     WAVEFORM_CLEAR = "waveform_clear"  # kwargs: None
     WAVEFORM_WIDGET_READY = "waveform_widget_ready"  # kwargs: widget (Any)
     POSITION_UPDATE = "position_update"  # kwargs: position (float)
+    MIX_POSITION_UPDATE = "mix_position_update"  # kwargs: position (float)
     STATUS_MESSAGE = "status_message"  # kwargs: message (str), color (str, optional)
 
     # Loop events
@@ -177,4 +180,5 @@ class Events:
     )
     CUE_ANALYSIS_COMPLETE = "cue_analysis_complete"  # kwargs: entries (list)
     CUE_ENTRY_UPDATED = "cue_entry_updated"  # kwargs: index (int)
+    CUE_ADD_TRACK = "cue_add_track"  # kwargs: track_id (int)
     CUE_EXPORTED = "cue_exported"  # kwargs: output_path (str)

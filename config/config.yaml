@@ -237,6 +237,13 @@ video_exporter:
       description: "Digital glitch aesthetics"
   vjing_default_preset: ""  # Empty = use genre mappings
 
+cue_maker:
+  shazamix_db_path: ~/.jukebox/jukebox.db
+  mix_directory: "/Users/fred/Music/000 My mixes"
+  segment_duration: 30.0  # Duration of analysis segments in seconds
+  overlap: 15.0  # Overlap between segments in seconds
+  max_workers: 4  # Parallel workers for analysis
+
 plugins:
   enabled:
     - mode_switcher

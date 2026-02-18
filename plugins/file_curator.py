@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -10,6 +11,8 @@ from PySide6.QtWidgets import QDialog, QLabel, QPushButton, QVBoxLayout
 
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
+
+logger = logging.getLogger(__name__)
 
 
 class FileCuratorPlugin:
@@ -57,7 +60,6 @@ class FileCuratorPlugin:
         if not track:
             return None
 
-        # Format new path
         try:
             new_path = dest_root / pattern.format(
                 artist=track["artist"] or "Unknown",
@@ -69,21 +71,14 @@ class FileCuratorPlugin:
             orig_path = Path(track["filepath"])
             new_path = new_path.with_suffix(orig_path.suffix)
 
-            # Create directories
             new_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Move file
             shutil.move(str(orig_path), str(new_path))
-
-            # Update database
             self.context.database.tracks.update_filepath(track_id, new_path)
 
             return new_path
 
         except Exception as e:
-            import logging
-
-            logging.error(f"Failed to organize file: {e}")
+            logger.error("Failed to organize file: %s", e)
             return None
 
     def shutdown(self) -> None:

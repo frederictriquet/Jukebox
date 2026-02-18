@@ -117,17 +117,13 @@ class TestCueExporter:
         result = CueExporter._escape_quotes('"Start" and "End"')
         assert result == '\\"Start\\" and \\"End\\"'
 
-    def test_export_raises_on_no_confirmed_entries(self) -> None:
-        """Test export raises ValueError when no confirmed entries."""
+    def test_export_raises_on_no_entries(self) -> None:
+        """Test export raises ValueError when no entries."""
         sheet = CueSheet(
             mix_filepath="/path/to/mix.mp3",
             mix_title="Test Mix",
             mix_artist="DJ Test",
         )
-
-        entry = CueEntry(60000, "Artist", "Title", 0.9, 180000)
-        entry.status = EntryStatus.PENDING
-        sheet.add_entry(entry)
 
         with TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "test.cue"
@@ -176,8 +172,8 @@ class TestCueExporter:
             assert '    TITLE "Title 2"' in content
             assert "    INDEX 01 03:05:00" in content
 
-    def test_export_skips_rejected_entries(self) -> None:
-        """Test export only includes confirmed and manual entries."""
+    def test_export_includes_all_entries(self) -> None:
+        """Test export includes all entries regardless of status."""
         sheet = CueSheet(
             mix_filepath="/path/to/mix.mp3",
             mix_title="Mix",
@@ -185,13 +181,8 @@ class TestCueExporter:
         )
 
         entry1 = CueEntry(0, "Artist 1", "Title 1", 0.95, 180000)
-        entry1.status = EntryStatus.CONFIRMED
-
         entry2 = CueEntry(60000, "Artist 2", "Title 2", 0.80, 150000)
-        entry2.status = EntryStatus.REJECTED
-
         entry3 = CueEntry(120000, "Artist 3", "Title 3", 1.0, 200000)
-        entry3.status = EntryStatus.MANUAL
 
         sheet.add_entry(entry1)
         sheet.add_entry(entry2)
@@ -203,14 +194,13 @@ class TestCueExporter:
 
             content = output_path.read_text(encoding="utf-8")
 
-            # Should have 2 tracks (not 3)
+            # Should have all 3 tracks
             assert "  TRACK 01 AUDIO" in content
             assert "  TRACK 02 AUDIO" in content
-            assert "  TRACK 03 AUDIO" not in content
+            assert "  TRACK 03 AUDIO" in content
 
-            # Should include Artist 1 and 3, not 2
             assert "Artist 1" in content
-            assert "Artist 2" not in content
+            assert "Artist 2" in content
             assert "Artist 3" in content
 
     def test_export_handles_different_audio_formats(self) -> None:

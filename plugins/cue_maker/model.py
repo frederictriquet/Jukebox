@@ -128,16 +128,12 @@ class CueSheet:
             self.entries[index].status = status
 
     def get_confirmed_entries(self) -> list[CueEntry]:
-        """Get only confirmed and manual entries for export.
+        """Get all entries for export, sorted by time.
 
         Returns:
-            List of confirmed/manual entries sorted by time
+            List of all entries sorted by time
         """
-        return [
-            entry
-            for entry in self.entries
-            if entry.status in (EntryStatus.CONFIRMED, EntryStatus.MANUAL)
-        ]
+        return list(self.entries)
 
     def sort_by_time(self) -> None:
         """Sort entries by start_time_ms."""

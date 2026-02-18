@@ -2,13 +2,36 @@
 
 from __future__ import annotations
 
+import atexit
 import logging
+import os
 
 from PySide6.QtCore import QThread, Signal
 
 from plugins.cue_maker.model import CueEntry, EntryStatus
 
 logger = logging.getLogger(__name__)
+
+# Track all live AnalyzeWorker instances.  The atexit handler uses this list
+# to force-exit the process when a worker is stuck in non-interruptible C code
+# (e.g. librosa.load).  Without this, Python's interpreter finalisation
+# destroys the QThread C++ object while the OS thread is still alive, which
+# triggers "QThread: Destroyed while thread is still running" and SIGABRT.
+_live_workers: list = []
+
+
+@atexit.register
+def _force_exit_if_threads_alive() -> None:
+    """Last-resort cleanup: force-exit if any AnalyzeWorker is still running."""
+    for worker in _live_workers:
+        if worker.isRunning():
+            worker.requestInterruption()
+            worker.quit()
+            if not worker.wait(2000):
+                logger.warning(
+                    "[Analyzer] Worker still alive at exit, forcing os._exit(0)"
+                )
+                os._exit(0)
 
 
 class AnalyzeWorker(QThread):
@@ -46,19 +69,27 @@ class AnalyzeWorker(QThread):
         self.segment_duration = segment_duration
         self.overlap = overlap
         self.max_workers = max_workers
+        _live_workers.append(self)
 
     def run(self) -> None:
         """Run analysis in background thread.
+
+        Checks the fingerprints cache first. On hit, skips audio loading and
+        extraction (the expensive part) and only runs matching. On miss, runs
+        the full pipeline and saves the extracted fingerprints for next time.
 
         Emits progress signals during analysis and finished signal with results.
         Emits error signal if analysis fails.
         """
         try:
-            from shazamix.fingerprint import (  # type: ignore[attr-defined]
-                FingerprintDB,
-                Fingerprinter,
-            )
+            from shazamix.database import FingerprintDB
+            from shazamix.fingerprint import Fingerprinter
             from shazamix.matcher import Matcher
+
+            from plugins.cue_maker.cache import (
+                load_cached_fingerprints,
+                save_fingerprints_cache,
+            )
 
             logger.info("[Analyzer] Starting analysis of %s", self.mix_path)
 
@@ -67,23 +98,32 @@ class AnalyzeWorker(QThread):
             fingerprinter = Fingerprinter()
             matcher = Matcher(db, fingerprinter)
 
-            # Progress callback
+            # Progress callback — always emit the signal so the UI stays informed
             def progress_callback(current: int, total: int, message: str) -> None:
-                if current < 0:
-                    # Log message
-                    logger.debug("[Analyzer] %s", message)
-                else:
-                    # Progress update
-                    self.progress.emit(current, total, message)
+                logger.info("[Analyzer] %s", message)
+                self.progress.emit(current, total, message)
 
-            # Run analysis
-            matches = matcher.analyze_mix(
+            # Try loading cached fingerprints
+            cached_fps = load_cached_fingerprints(self.mix_path)
+
+            # Run analysis (with or without precomputed fingerprints)
+            matches, fingerprints = matcher.analyze_mix(
                 self.mix_path,
                 segment_duration_sec=self.segment_duration,
                 overlap_sec=self.overlap,
                 progress_callback=progress_callback,
                 max_workers=self.max_workers,
+                cancelled=self.isInterruptionRequested,
+                precomputed_fingerprints=cached_fps,
             )
+
+            if self.isInterruptionRequested():
+                logger.info("[Analyzer] Analysis cancelled")
+                return
+
+            # Save fingerprints to cache if they were freshly extracted
+            if cached_fps is None and fingerprints:
+                save_fingerprints_cache(self.mix_path, fingerprints)
 
             # Convert matches to CueEntry objects
             entries = self._convert_matches(matches)

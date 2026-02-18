@@ -205,6 +205,16 @@ class VideoExporterConfig(BaseModel):
     vjing_simultaneous_effects: int = Field(ge=1, le=10, default=1)
 
 
+class CueMakerConfig(BaseModel):
+    """Cue Maker plugin configuration."""
+
+    shazamix_db_path: Path = Field(default_factory=lambda: Path.home() / ".jukebox" / "jukebox.db")
+    mix_directory: Path = Field(default_factory=lambda: Path.home() / "Music")
+    segment_duration: float = Field(gt=0, default=60.0)
+    overlap: float = Field(ge=0, default=15.0)
+    max_workers: int = Field(ge=1, default=4)
+
+
 class PluginsConfig(BaseModel):
     """Plugins configuration."""
 
@@ -234,6 +244,7 @@ class JukeboxConfig(BaseModel):
     genre_editor: GenreEditorConfig = Field(default_factory=GenreEditorConfig)
     file_manager: FileManagerConfig = Field(default_factory=FileManagerConfig)
     video_exporter: VideoExporterConfig = Field(default_factory=VideoExporterConfig)
+    cue_maker: CueMakerConfig = Field(default_factory=CueMakerConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     logging: LoggingConfig
 

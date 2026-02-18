@@ -195,7 +195,7 @@ class DirectoryNavigatorPlugin:
     name = "directory_navigator"
     version = "1.0.0"
     description = "Directory tree navigation for track browsing"
-    modes = ["jukebox"]
+    modes = ["jukebox", "cue_maker"]
 
     def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin and subscribe to events."""

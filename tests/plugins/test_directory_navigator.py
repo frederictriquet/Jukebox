@@ -252,7 +252,7 @@ def test_plugin_metadata(plugin) -> None:  # type: ignore
     assert plugin.name == "directory_navigator"
     assert plugin.version == "1.0.0"
     assert "directory" in plugin.description.lower()
-    assert plugin.modes == ["jukebox"]
+    assert plugin.modes == ["jukebox", "cue_maker"]
 
 
 def test_initialize_subscribes_to_events(plugin, mock_context) -> None:  # type: ignore
