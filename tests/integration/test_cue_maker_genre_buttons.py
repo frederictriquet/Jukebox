@@ -8,7 +8,7 @@ This test verifies that:
 
 from unittest.mock import Mock
 
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QPushButton, QWidget
 
 from plugins.search_and_filter import SearchAndFilterPlugin
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSortFilterProxyModel, Qt
 from PySide6.QtWidgets import QSplitter, QVBoxLayout, QWidget
 
 from plugins.cue_maker.widgets.bottom_drawer import BottomDrawer
@@ -44,7 +44,6 @@ class CueMakerPlugin:
         self._analyzer: AnalyzeWorker | None = None
         self._cue_context_action: Any | None = None
         self._original_central: QWidget | None = None
-        self._splitter: QSplitter | None = None
         self._nav_dock: Any | None = None
         self._saved_bottom_widgets: list[QWidget] = []
         self._drawer: BottomDrawer | None = None
@@ -185,6 +184,7 @@ class CueMakerPlugin:
             else:
                 # Fallback: create a simple container
                 from PySide6.QtWidgets import QHBoxLayout, QLabel
+
                 drawer_genres = QWidget()
                 layout = QHBoxLayout(drawer_genres)
                 layout.setContentsMargins(0, 0, 0, 0)
@@ -246,6 +246,12 @@ class CueMakerPlugin:
                 separator_before=True,
             )
 
+        # Connect action signals
+        if self.main_widget:
+            self.main_widget.import_requested.connect(self._on_import_from_library)
+            self.main_widget.search_requested.connect(self._on_search_in_library)
+            self.main_widget.connect_player_events()
+
         logger.debug("[Cue Maker] Activated for %s mode", mode)
 
     def deactivate(self, mode: str) -> None:
@@ -264,8 +270,14 @@ class CueMakerPlugin:
 
         if self.main_widget:
             self.main_widget.stop_mix_playback()
+            self.main_widget.disconnect_player_events()
             self.main_widget.cleanup_workers()
             self.main_widget.setVisible(False)
+            try:
+                self.main_widget.import_requested.disconnect(self._on_import_from_library)
+                self.main_widget.search_requested.disconnect(self._on_search_in_library)
+            except RuntimeError:
+                pass
 
         # Remove widgets from drawer layout before restoring
         # This includes search_bar, track_list, controls, and waveform_widget
@@ -325,7 +337,6 @@ class CueMakerPlugin:
         app.setCentralWidget(central)
 
         # Clean up references
-        self._splitter = None
         self._drawer = None
         self._original_central = None
 
@@ -352,6 +363,11 @@ class CueMakerPlugin:
         if self.main_widget:
             self.main_widget.cleanup_workers()
         self.main_widget = None
+        # Unsubscribe from event bus
+        if self.context and self.context.event_bus:
+            from jukebox.core.event_bus import Events
+
+            self.context.event_bus.unsubscribe(Events.CUE_ADD_TRACK, self._on_cue_add_track)
         self.context = None
         logger.info("[Cue Maker] Plugin shut down")
 
@@ -381,7 +397,7 @@ class CueMakerPlugin:
             QMessageBox.warning(
                 self.main_widget,
                 "Configuration",
-                "No shazamix database path configured.\n" "Set shazamix_db_path in config.yaml.",
+                "No shazamix database path configured.\nSet shazamix_db_path in config.yaml.",
             )
             return
 
@@ -450,20 +466,17 @@ class CueMakerPlugin:
                     duration_s = track_info["duration_seconds"] or 0
                     duration_ms = int(duration_s * 1000)
 
-        self.main_widget.model.add_manual_entry(
+        entry = self.main_widget.model.add_manual_entry(
             start_time_ms=0,
             artist=artist,
             title=title,
         )
 
-        # Update filepath and duration on the newly added entry
-        for entry in self.main_widget.model.sheet.entries:
-            if entry.filepath == "" and entry.artist == artist and entry.title == title:
-                entry.filepath = str(filepath)
-                entry.track_id = track_id
-                if duration_ms > 0:
-                    entry.duration_ms = duration_ms
-                break
+        # Update filepath and duration on the returned entry
+        entry.filepath = str(filepath)
+        entry.track_id = track_id
+        if duration_ms > 0:
+            entry.duration_ms = duration_ms
 
         logger.info("[Cue Maker] Added track to cue: %s - %s", artist, title)
 
@@ -484,3 +497,79 @@ class CueMakerPlugin:
             return
 
         self._add_track_to_cue(dict(row))
+
+    def _on_import_from_library(self, row: int) -> None:
+        """Import artist/title/duration from the selected library track into a cue entry."""
+        if not self.main_widget or not self.context:
+            return
+
+        entry = self.main_widget.model.get_entry(row)
+        if entry is None:
+            return
+
+        # Only allow import on manual entries
+        from plugins.cue_maker.model import EntryStatus
+
+        if entry.status != EntryStatus.MANUAL:
+            return
+
+        app = self.context.app
+        track_list = app.track_list
+
+        # Get selected track from the library (TrackList uses proxy, map to source)
+        index = track_list.selectionModel().currentIndex()
+        if not index.isValid():
+            return
+
+        # Get source row (through proxy if present)
+        model = track_list.model()
+        source_row = index.row()
+        if isinstance(model, QSortFilterProxyModel):
+            source_index = model.mapToSource(index)
+            source_row = source_index.row()
+
+        tracks = track_list.track_model.tracks
+        if source_row >= len(tracks):
+            return
+
+        track = tracks[source_row]
+
+        # Update entry fields
+        entry.artist = track.get("artist", "") or ""
+        entry.title = track.get("title", "") or ""
+        entry.filepath = track.get("filepath", "") or ""
+        entry.track_id = track.get("id")
+
+        # Get duration from track data
+        duration_s = track.get("duration_seconds", 0) or 0
+        if duration_s:
+            entry.duration_ms = int(duration_s * 1000)
+
+        # Notify table model of changes
+        self.main_widget.model.dataChanged.emit(
+            self.main_widget.model.index(row, 0),
+            self.main_widget.model.index(row, self.main_widget.model.columnCount() - 1),
+            [],
+        )
+
+        # Refresh timing bar if this row is currently selected
+        if self.main_widget._selected_row == row:
+            self.main_widget._refresh_editor_fields()
+
+    def _on_search_in_library(self, row: int) -> None:
+        """Send entry's artist and title to the search bar, opening the drawer if needed."""
+        if not self.main_widget or not self.context:
+            return
+
+        entry = self.main_widget.model.get_entry(row)
+        if entry is None:
+            return
+
+        # Open drawer if closed
+        if self._drawer and not self._drawer.is_open:
+            self._drawer.toggle()
+
+        parts = [p for p in (entry.artist, entry.title) if p]
+        query = " ".join(parts)
+        if query:
+            self.context.app.search_bar.setText(query)

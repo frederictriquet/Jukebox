@@ -28,9 +28,7 @@ def _force_exit_if_threads_alive() -> None:
             worker.requestInterruption()
             worker.quit()
             if not worker.wait(2000):
-                logger.warning(
-                    "[Analyzer] Worker still alive at exit, forcing os._exit(0)"
-                )
+                logger.warning("[Analyzer] Worker still alive at exit, forcing os._exit(0)")
                 os._exit(0)
 
 
@@ -82,14 +80,13 @@ class AnalyzeWorker(QThread):
         Emits error signal if analysis fails.
         """
         try:
-            from shazamix.database import FingerprintDB
-            from shazamix.fingerprint import Fingerprinter
-            from shazamix.matcher import Matcher
-
             from plugins.cue_maker.cache import (
                 load_cached_fingerprints,
                 save_fingerprints_cache,
             )
+            from shazamix.database import FingerprintDB
+            from shazamix.fingerprint import Fingerprinter
+            from shazamix.matcher import Matcher
 
             logger.info("[Analyzer] Starting analysis of %s", self.mix_path)
 
@@ -134,6 +131,11 @@ class AnalyzeWorker(QThread):
         except Exception as e:
             logger.error("[Analyzer] Analysis failed: %s", e, exc_info=True)
             self.error.emit(str(e))
+        finally:
+            try:
+                _live_workers.remove(self)
+            except ValueError:
+                pass
 
     def _convert_matches(self, matches: list) -> list[CueEntry]:
         """Convert shazamix Match objects to CueEntry objects.

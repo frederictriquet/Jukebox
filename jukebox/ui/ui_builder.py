@@ -128,6 +128,7 @@ class UIBuilder:
 
         dock = QDockWidget(title, self.main_window)
         dock.setWidget(widget)
+        dock.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
         self.main_window.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)
         self.plugin_widgets.append(dock)
 

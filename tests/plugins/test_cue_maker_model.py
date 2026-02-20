@@ -266,14 +266,14 @@ class TestCueSheet:
 
         assert sheet.entries[0].status == EntryStatus.PENDING
 
-    def test_get_confirmed_entries_empty(self) -> None:
-        """Test getting confirmed entries from empty sheet."""
+    def test_get_entries_for_export_empty(self) -> None:
+        """Test getting entries for export from empty sheet."""
         sheet = CueSheet()
-        confirmed = sheet.get_confirmed_entries()
+        entries = sheet.get_entries_for_export()
 
-        assert confirmed == []
+        assert entries == []
 
-    def test_get_confirmed_entries_returns_all(self) -> None:
+    def test_get_entries_for_export_returns_all(self) -> None:
         """Test getting all entries for export."""
         sheet = CueSheet()
 
@@ -281,9 +281,9 @@ class TestCueSheet:
         sheet.add_entry(CueEntry(60000, "Artist 2", "Title 2", 0.85, 120000))
         sheet.add_entry(CueEntry(90000, "Artist 3", "Title 3", 0.95, 150000))
 
-        confirmed = sheet.get_confirmed_entries()
+        entries = sheet.get_entries_for_export()
 
-        assert len(confirmed) == 3
+        assert len(entries) == 3
 
     def test_sort_by_time(self) -> None:
         """Test explicit sort by time."""

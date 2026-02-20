@@ -127,6 +127,23 @@ class TestCueMakerWidget:
             args = mock_msgbox.call_args[0]
             assert "Test error message" in args[2]
 
+    def test_on_waveform_error(self, qapp, mock_context) -> None:  # type: ignore
+        """Test _on_waveform_error shows warning dialog and emits status message."""
+        widget = CueMakerWidget(mock_context)
+
+        with patch.object(QMessageBox, "warning") as mock_msgbox:
+            widget._on_waveform_error("Waveform generation failed: Out of memory")
+
+            # Should show QMessageBox.warning
+            mock_msgbox.assert_called_once()
+            args = mock_msgbox.call_args[0]
+            assert "Waveform generation failed: Out of memory" in args[2]
+
+        # Should also emit status message
+        mock_context.emit.assert_called_with(
+            "status_message", message="Waveform error: Waveform generation failed: Out of memory"
+        )
+
     def test_set_analysis_progress(self, qapp, mock_context) -> None:  # type: ignore
         """Test set_analysis_progress updates progress bar."""
         widget = CueMakerWidget(mock_context)
@@ -375,3 +392,24 @@ class TestCueMakerWidget:
         """Test cursor inside region tracking is initialized to None."""
         widget = CueMakerWidget(mock_context)
         assert widget._cursor_inside_region is None
+
+    def test_create_waveform_logs_debug_on_config_fallback(
+        self, qapp, caplog
+    ) -> None:  # type: ignore
+        """Test _create_waveform logs debug when waveform config is unavailable."""
+        # Create context without waveform config (AttributeError will be raised)
+        context = Mock()
+        context.config = Mock()
+        context.config.shazamix_db_path = "/fake/db.db"
+        context.get_current_track_duration.return_value = 0.0
+        # Delete waveform attribute to trigger AttributeError
+        del context.config.waveform
+
+        with caplog.at_level("DEBUG"):
+            widget = CueMakerWidget(context)
+
+        # Should log debug message about using defaults
+        assert any(
+            "Waveform config not available, using defaults" in record.message
+            for record in caplog.records
+        )

@@ -294,17 +294,17 @@ class TestCueTableModel:
         assert model.rowCount() == 0
         assert len(model.sheet.entries) == 0
 
-    def test_has_confirmed_entries_true(self, qapp) -> None:  # type: ignore
-        """Test has_confirmed_entries returns True when entries exist."""
+    def test_has_entries_true(self, qapp) -> None:  # type: ignore
+        """Test has_entries returns True when entries exist."""
         model = CueTableModel()
         model.load_entries([CueEntry(30000, "A1", "T1", 0.9, 180000)])
 
-        assert model.has_confirmed_entries() is True
+        assert model.has_entries() is True
 
-    def test_has_confirmed_entries_empty(self, qapp) -> None:  # type: ignore
-        """Test has_confirmed_entries returns False when empty."""
+    def test_has_entries_empty(self, qapp) -> None:  # type: ignore
+        """Test has_entries returns False when empty."""
         model = CueTableModel()
-        assert model.has_confirmed_entries() is False
+        assert model.has_entries() is False
 
     def test_entry_status_indicator_overlap(self, qapp) -> None:  # type: ignore
         """Test _entry_status_indicator returns overlap indicator for overlapping entries."""

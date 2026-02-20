@@ -73,9 +73,7 @@ def load_cached_fingerprints(mix_path: str) -> list[list] | None:
         )
         return segments
     except Exception:
-        logger.warning(
-            "[Cache] Failed to read fingerprints cache for %s", mix_path, exc_info=True
-        )
+        logger.warning("[Cache] Failed to read fingerprints cache for %s", mix_path, exc_info=True)
         return None
 
 
@@ -116,9 +114,7 @@ def save_fingerprints_cache(mix_path: str, segment_fps_list: list[list]) -> None
             mix_path,
         )
     except Exception:
-        logger.warning(
-            "[Cache] Failed to save fingerprints cache for %s", mix_path, exc_info=True
-        )
+        logger.warning("[Cache] Failed to save fingerprints cache for %s", mix_path, exc_info=True)
 
 
 def load_cached_waveform(mix_path: str) -> dict[str, np.ndarray] | None:
@@ -193,6 +189,7 @@ def load_cached_entries(mix_path: str) -> list | None:
     try:
         path = _entries_cache_file(mix_path)
     except OSError:
+        logger.debug("[Cache] Cannot stat mix file for cache key: %s", mix_path)
         return None
     if not path.exists():
         return None

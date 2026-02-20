@@ -34,15 +34,11 @@ def test_build_tree_empty_filepaths(qapp) -> None:  # type: ignore
     widget = DirectoryTreeWidget()
     widget.build_tree([], [])
 
-    # Should have "All Tracks" and "Directories" root nodes
+    # Should have "Directories" root node only
     root = widget.model.invisibleRootItem()
-    assert root.rowCount() == 2
+    assert root.rowCount() == 1
 
-    all_tracks_item = root.child(0)
-    assert "All Tracks (0)" in all_tracks_item.text()
-    assert all_tracks_item.data(ROLE_NODE_TYPE) == "all_tracks"
-
-    dir_item = root.child(1)
+    dir_item = root.child(0)
     assert "Directories" in dir_item.text()
     assert dir_item.data(ROLE_NODE_TYPE) == "root"
 
@@ -59,12 +55,8 @@ def test_build_tree_single_level(qapp) -> None:  # type: ignore
 
     root = widget.model.invisibleRootItem()
 
-    # Check "All Tracks" node
-    all_tracks_item = root.child(0)
-    assert "All Tracks (3)" in all_tracks_item.text()
-
     # Check "Directories" node has one child
-    dir_node = root.child(1)
+    dir_node = root.child(0)
     assert dir_node.rowCount() == 1
 
     # Check the /music directory
@@ -87,14 +79,10 @@ def test_build_tree_multi_level(qapp) -> None:  # type: ignore
     widget.build_tree(filepaths, [])
 
     root = widget.model.invisibleRootItem()
-    dir_node = root.child(1)
+    dir_node = root.child(0)
 
     # Should have "rock" and "jazz" under first level
     assert dir_node.rowCount() > 0
-
-    # Verify counts are accumulated (rock=2, jazz=2 including nested)
-    all_tracks_item = root.child(0)
-    assert "All Tracks (4)" in all_tracks_item.text()
 
 
 def test_build_tree_with_playlists(qapp) -> None:  # type: ignore
@@ -109,10 +97,10 @@ def test_build_tree_with_playlists(qapp) -> None:  # type: ignore
 
     root = widget.model.invisibleRootItem()
 
-    # Should have "All Tracks", "Directories", and "Playlists" nodes
-    assert root.rowCount() == 3
+    # Should have "Directories" and "Playlists" nodes
+    assert root.rowCount() == 2
 
-    playlists_node = root.child(2)
+    playlists_node = root.child(1)
     assert "Playlists (2)" in playlists_node.text()
     assert playlists_node.data(ROLE_NODE_TYPE) == "root"
 
@@ -139,7 +127,7 @@ def test_build_tree_common_prefix(qapp) -> None:  # type: ignore
     widget.build_tree(filepaths, [])
 
     root = widget.model.invisibleRootItem()
-    dir_node = root.child(1)
+    dir_node = root.child(0)
 
     # Should strip common prefix and show relative paths
     # The exact structure depends on _build_directory_nodes implementation
@@ -207,7 +195,7 @@ def test_tree_view_expand_directories_by_default(qapp) -> None:  # type: ignore
 
     # Verify the "Directories" node is expanded (tested via index)
     root = widget.model.invisibleRootItem()
-    dir_node = root.child(1)
+    dir_node = root.child(0)
     dir_index = widget.model.indexFromItem(dir_node)
 
     # This should be expanded after build_tree
@@ -230,6 +218,7 @@ def mock_context() -> Mock:
     context.event_bus = Mock()
     context.emit = Mock()
     context.subscribe = Mock()
+    context.config.directory_navigator.default_directory = ""
     return context
 
 
@@ -418,38 +407,6 @@ def test_rebuild_tree_with_playlists(qapp, plugin, mock_context, mock_ui_builder
         assert len(call_args[1]) == 1  # playlists
 
 
-def test_on_item_clicked_all_tracks(qapp, plugin, mock_context, mock_ui_builder) -> None:  # type: ignore
-    """Test clicking 'All Tracks' node emits LOAD_TRACK_LIST with all tracks."""
-    plugin.initialize(mock_context)
-    plugin.register_ui(mock_ui_builder)
-
-    # Setup mock database
-    mock_conn = Mock()
-    mock_context.database.conn = mock_conn
-    track_rows = [
-        {"filepath": "/music/song1.mp3"},
-        {"filepath": "/music/song2.mp3"},
-    ]
-    mock_conn.execute.return_value.fetchall.return_value = track_rows
-
-    # Create mock index for "all_tracks" node
-    mock_item = Mock()
-    mock_item.data.side_effect = lambda role: "all_tracks" if role == ROLE_NODE_TYPE else ""
-
-    with patch.object(plugin.widget.model, "itemFromIndex", return_value=mock_item):
-        mock_index = Mock(spec=QModelIndex)
-        plugin._on_item_clicked(mock_index)
-
-    # Verify LOAD_TRACK_LIST was emitted with all filepaths
-    from jukebox.core.event_bus import Events
-
-    mock_context.emit.assert_called_once()
-    call_args = mock_context.emit.call_args
-    assert call_args[0][0] == Events.LOAD_TRACK_LIST
-    assert "filepaths" in call_args[1]
-    assert len(call_args[1]["filepaths"]) == 2
-
-
 def test_on_item_clicked_directory(qapp, plugin, mock_context, mock_ui_builder) -> None:  # type: ignore
     """Test clicking directory node filters tracks recursively."""
     plugin.initialize(mock_context)
@@ -577,7 +534,7 @@ def test_rebuild_tree_handles_empty_database(qapp, plugin, mock_context, mock_ui
     plugin._rebuild_tree()
 
     # Widget should have empty tree
-    assert plugin.widget.model.invisibleRootItem().rowCount() >= 2  # At least root nodes
+    assert plugin.widget.model.invisibleRootItem().rowCount() >= 1  # At least root nodes
 
 
 def test_filepaths_converted_to_path_objects(qapp, plugin, mock_context, mock_ui_builder) -> None:  # type: ignore
@@ -590,9 +547,9 @@ def test_filepaths_converted_to_path_objects(qapp, plugin, mock_context, mock_ui
     track_rows = [{"filepath": "/music/song1.mp3"}]
     mock_conn.execute.return_value.fetchall.return_value = track_rows
 
-    # Click "all_tracks" node
+    # Click a "directory" node
     mock_item = Mock()
-    mock_item.data.side_effect = lambda role: "all_tracks" if role == ROLE_NODE_TYPE else ""
+    mock_item.data.side_effect = lambda role: "directory" if role == ROLE_NODE_TYPE else "/music"
 
     with patch.object(plugin.widget.model, "itemFromIndex", return_value=mock_item):
         mock_index = Mock(spec=QModelIndex)

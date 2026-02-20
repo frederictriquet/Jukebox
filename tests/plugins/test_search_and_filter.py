@@ -6,9 +6,9 @@ from PySide6.QtCore import QModelIndex
 
 from plugins.search_and_filter import (
     GenreFilterButton,
-    SearchAndFilterPlugin,
     GenreFilterProxyModel,
     GenreFilterState,
+    SearchAndFilterPlugin,
 )
 
 

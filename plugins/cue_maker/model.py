@@ -6,6 +6,25 @@ from dataclasses import dataclass
 from enum import Enum
 
 
+def ms_to_display_time(ms: int) -> str:
+    """Convert milliseconds to MM:SS format for display.
+
+    Args:
+        ms: Time in milliseconds
+
+    Returns:
+        Time string in MM:SS format
+
+    Example:
+        >>> ms_to_display_time(185000)
+        '03:05'
+    """
+    total_seconds = ms // 1000
+    minutes = total_seconds // 60
+    seconds = total_seconds % 60
+    return f"{minutes:02d}:{seconds:02d}"
+
+
 class EntryStatus(Enum):
     """Status of a cue entry."""
 
@@ -40,26 +59,12 @@ class CueEntry:
         self.duration_ms = round(self.duration_ms / 1000) * 1000
 
     def to_display_time(self) -> str:
-        """Convert start_time_ms to MM:SS format for display.
-
-        Returns:
-            Time string in MM:SS format
-        """
-        total_seconds = self.start_time_ms // 1000
-        minutes = total_seconds // 60
-        seconds = total_seconds % 60
-        return f"{minutes:02d}:{seconds:02d}"
+        """Convert start_time_ms to MM:SS format for display."""
+        return ms_to_display_time(self.start_time_ms)
 
     def duration_to_display(self) -> str:
-        """Convert duration_ms to MM:SS format for display.
-
-        Returns:
-            Duration string in MM:SS format
-        """
-        total_seconds = self.duration_ms // 1000
-        minutes = total_seconds // 60
-        seconds = total_seconds % 60
-        return f"{minutes:02d}:{seconds:02d}"
+        """Convert duration_ms to MM:SS format for display."""
+        return ms_to_display_time(self.duration_ms)
 
 
 class CueSheet:
@@ -144,7 +149,7 @@ class CueSheet:
         if 0 <= index < len(self.entries):
             self.entries[index].status = status
 
-    def get_confirmed_entries(self) -> list[CueEntry]:
+    def get_entries_for_export(self) -> list[CueEntry]:
         """Get all entries for export, sorted by time.
 
         Returns:

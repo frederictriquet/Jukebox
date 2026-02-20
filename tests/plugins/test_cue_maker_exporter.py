@@ -328,3 +328,168 @@ class TestCueExporter:
             assert "  TRACK 03 AUDIO" in content
             assert "  TRACK 04 AUDIO" in content
             assert "  TRACK 05 AUDIO" in content
+
+    def test_cue_time_to_ms_zero(self) -> None:
+        """Test CUE time conversion for zero."""
+        result = CueExporter.cue_time_to_ms("00:00:00")
+        assert result == 0
+
+    def test_cue_time_to_ms_seconds_only(self) -> None:
+        """Test CUE time conversion for seconds."""
+        result = CueExporter.cue_time_to_ms("00:45:00")
+        assert result == 45000
+
+    def test_cue_time_to_ms_minutes_and_seconds(self) -> None:
+        """Test CUE time conversion for minutes and seconds."""
+        result = CueExporter.cue_time_to_ms("03:05:00")
+        assert result == 185000
+
+    def test_cue_time_to_ms_with_frames(self) -> None:
+        """Test CUE time conversion with frames (1 frame = 1/75 second)."""
+        result = CueExporter.cue_time_to_ms("03:05:37")
+        # 3*60 + 5 + 37/75 = 185.493... seconds = 185493ms
+        assert result == 185493
+
+    def test_cue_time_to_ms_with_full_frames(self) -> None:
+        """Test CUE time conversion with 74 frames (almost 1 second)."""
+        result = CueExporter.cue_time_to_ms("00:00:74")
+        # 74/75 = 0.986... seconds = 986ms
+        assert result == 986
+
+    def test_cue_time_to_ms_invalid_format(self) -> None:
+        """Test CUE time conversion handles invalid format."""
+        result = CueExporter.cue_time_to_ms("invalid")
+        assert result == 0
+
+    def test_cue_time_to_ms_too_few_parts(self) -> None:
+        """Test CUE time conversion with too few parts."""
+        result = CueExporter.cue_time_to_ms("03:05")
+        assert result == 0
+
+    def test_parse_valid_cue_file(self) -> None:
+        """Test parsing a valid CUE file."""
+        cue_content = """PERFORMER "DJ Test"
+TITLE "Test Mix"
+FILE "mix.mp3" MP3
+  TRACK 01 AUDIO
+    PERFORMER "Artist 1"
+    TITLE "Title 1"
+    INDEX 01 00:00:00
+  TRACK 02 AUDIO
+    PERFORMER "Artist 2"
+    TITLE "Title 2"
+    INDEX 01 03:05:00
+  TRACK 03 AUDIO
+    PERFORMER "Artist 3"
+    TITLE "Title 3"
+    INDEX 01 06:10:37
+"""
+        with TemporaryDirectory() as tmpdir:
+            cue_path = Path(tmpdir) / "test.cue"
+            cue_path.write_text(cue_content, encoding="utf-8")
+
+            entries = CueExporter.parse(cue_path)
+
+            assert len(entries) == 3
+
+            # First entry
+            assert entries[0].artist == "Artist 1"
+            assert entries[0].title == "Title 1"
+            assert entries[0].start_time_ms == 0
+            assert entries[0].confidence == 1.0
+            assert entries[0].status == EntryStatus.CONFIRMED
+            assert entries[0].duration_ms == 185000  # Gap to next entry
+
+            # Second entry
+            assert entries[1].artist == "Artist 2"
+            assert entries[1].title == "Title 2"
+            assert entries[1].start_time_ms == 185000
+            assert entries[1].duration_ms == 185000  # Gap rounded to second
+
+            # Third entry (no duration computed, last track)
+            assert entries[2].artist == "Artist 3"
+            assert entries[2].title == "Title 3"
+            assert entries[2].start_time_ms == 370000  # Rounded to second
+            assert entries[2].duration_ms == 0
+
+    def test_parse_cue_file_with_escaped_quotes(self) -> None:
+        """Test parsing CUE file with escaped quotes in metadata."""
+        cue_content = """PERFORMER "DJ \\"The Pro\\""
+TITLE "Mix \\"Special\\""
+FILE "mix.mp3" MP3
+  TRACK 01 AUDIO
+    PERFORMER "Artist \\"Quoted\\""
+    TITLE "Title \\"Special\\""
+    INDEX 01 00:00:00
+"""
+        with TemporaryDirectory() as tmpdir:
+            cue_path = Path(tmpdir) / "test.cue"
+            cue_path.write_text(cue_content, encoding="utf-8")
+
+            entries = CueExporter.parse(cue_path)
+
+            assert len(entries) == 1
+            assert entries[0].artist == 'Artist "Quoted"'
+            assert entries[0].title == 'Title "Special"'
+
+    def test_parse_cue_file_missing_metadata(self) -> None:
+        """Test parsing CUE file with missing artist/title."""
+        cue_content = """FILE "mix.mp3" MP3
+  TRACK 01 AUDIO
+    INDEX 01 00:00:00
+  TRACK 02 AUDIO
+    PERFORMER "Artist 2"
+    INDEX 01 01:00:00
+  TRACK 03 AUDIO
+    TITLE "Title 3"
+    INDEX 01 02:00:00
+"""
+        with TemporaryDirectory() as tmpdir:
+            cue_path = Path(tmpdir) / "test.cue"
+            cue_path.write_text(cue_content, encoding="utf-8")
+
+            entries = CueExporter.parse(cue_path)
+
+            assert len(entries) == 3
+            assert entries[0].artist == ""
+            assert entries[0].title == ""
+            assert entries[1].artist == "Artist 2"
+            assert entries[1].title == ""
+            assert entries[2].artist == ""
+            assert entries[2].title == "Title 3"
+
+    def test_parse_empty_cue_file_raises_error(self) -> None:
+        """Test parsing empty CUE file raises ValueError."""
+        cue_content = """PERFORMER "DJ Test"
+FILE "mix.mp3" MP3
+"""
+        with TemporaryDirectory() as tmpdir:
+            cue_path = Path(tmpdir) / "test.cue"
+            cue_path.write_text(cue_content, encoding="utf-8")
+
+            with pytest.raises(ValueError, match="No valid tracks found"):
+                CueExporter.parse(cue_path)
+
+    def test_parse_cue_file_with_only_index_00(self) -> None:
+        """Test parsing CUE file with INDEX 00 (pre-gap) ignores it."""
+        cue_content = """FILE "mix.mp3" MP3
+  TRACK 01 AUDIO
+    PERFORMER "Artist 1"
+    TITLE "Title 1"
+    INDEX 00 00:00:00
+    INDEX 01 00:02:00
+"""
+        with TemporaryDirectory() as tmpdir:
+            cue_path = Path(tmpdir) / "test.cue"
+            cue_path.write_text(cue_content, encoding="utf-8")
+
+            entries = CueExporter.parse(cue_path)
+
+            # Should only parse INDEX 01, not INDEX 00
+            assert len(entries) == 1
+            assert entries[0].start_time_ms == 2000  # 00:02:00
+
+    def test_parse_nonexistent_file_raises_error(self) -> None:
+        """Test parsing nonexistent file raises OSError."""
+        with pytest.raises(OSError):
+            CueExporter.parse("/nonexistent/path/file.cue")

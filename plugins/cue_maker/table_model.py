@@ -211,8 +211,8 @@ class CueTableModel(QAbstractTableModel):
         self._sheet.mix_title = title
         self._sheet.mix_artist = artist
 
-    def add_manual_entry(self, start_time_ms: int, artist: str, title: str) -> None:
-        """Add a manually created entry."""
+    def add_manual_entry(self, start_time_ms: int, artist: str, title: str) -> CueEntry:
+        """Add a manually created entry and return it."""
         entry = CueEntry(
             start_time_ms=start_time_ms,
             artist=artist,
@@ -228,6 +228,7 @@ class CueTableModel(QAbstractTableModel):
         self.endInsertRows()
         # Sort may reorder, refresh
         self.layoutChanged.emit()
+        return entry
 
     def remove_entry(self, row: int) -> None:
         """Remove entry at row index."""
@@ -274,6 +275,6 @@ class CueTableModel(QAbstractTableModel):
         self._sheet.clear()
         self.endResetModel()
 
-    def has_confirmed_entries(self) -> bool:
-        """Check if there are entries ready for export."""
+    def has_entries(self) -> bool:
+        """Check if there are any entries."""
         return len(self._sheet.entries) > 0

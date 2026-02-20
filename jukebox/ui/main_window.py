@@ -25,6 +25,8 @@ from jukebox.ui.components.track_cell_renderer import WaveformStyler
 from jukebox.ui.components.track_list import TrackList
 from jukebox.ui.ui_builder import UIBuilder
 
+logger = logging.getLogger(__name__)
+
 
 class MainWindow(QMainWindow):
     """Main application window."""
@@ -145,6 +147,9 @@ class MainWindow(QMainWindow):
 
         # Playback controller → UI
         self.playback.track_started.connect(self._on_track_started)
+
+        # Playlist management
+        self.track_list.add_to_playlist_requested.connect(self._on_add_to_playlist)
 
     def _register_shortcuts(self) -> None:
         """Register default keyboard shortcuts."""
@@ -383,6 +388,33 @@ class MainWindow(QMainWindow):
     def _on_track_started(self, filepath: str) -> None:
         """Update window title when a library track starts playing."""
         self.setWindowTitle(f"{self.config.ui.window_title} - {Path(filepath).name}")
+
+    def _on_add_to_playlist(self, filepath: Path, playlist_id: int) -> None:
+        """Add a track to a playlist in the database."""
+        if not self.database.conn:
+            return
+        # Find track ID from filepath
+        row = self.database.conn.execute(
+            "SELECT id FROM tracks WHERE filepath = ?", (str(filepath),)
+        ).fetchone()
+        if not row:
+            return
+        track_id = row["id"]
+        # Get next position
+        pos_row = self.database.conn.execute(
+            "SELECT COALESCE(MAX(position), 0) + 1 AS next_pos FROM playlist_tracks WHERE playlist_id = ?",
+            (playlist_id,),
+        ).fetchone()
+        next_pos = pos_row["next_pos"] if pos_row else 1
+        try:
+            self.database.conn.execute(
+                "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)",
+                (playlist_id, track_id, next_pos),
+            )
+            self.database.conn.commit()
+            logger.info("Added track %s to playlist %d", filepath.name, playlist_id)
+        except Exception:
+            logger.exception("Failed to add track to playlist")
 
     def _load_plugins(self) -> None:
         """Load all plugins."""

@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 
 # Data roles for tree items
 ROLE_PATH = Qt.ItemDataRole.UserRole  # Full path string or "playlist:{id}"
-ROLE_NODE_TYPE = Qt.ItemDataRole.UserRole + 1  # "all_tracks", "directory", "playlist"
+ROLE_NODE_TYPE = Qt.ItemDataRole.UserRole + 1  # "root", "directory", "playlist"
 
 
 class DirectoryTreeWidget(QWidget):
@@ -74,21 +74,21 @@ class DirectoryTreeWidget(QWidget):
         layout.addWidget(self.tree_view)
         self.setLayout(layout)
 
-    def build_tree(self, filepaths: list[str], playlists: list[dict[str, Any]]) -> None:
+    def build_tree(
+        self,
+        filepaths: list[str],
+        playlists: list[dict[str, Any]],
+        default_directory: str = "",
+    ) -> None:
         """Build the directory tree from database filepaths and playlists.
 
         Args:
             filepaths: List of all track filepaths from database
             playlists: List of playlist dicts with 'id', 'name', 'track_count'
+            default_directory: Directory name to select by default
         """
         self.model.clear()
         root = self.model.invisibleRootItem()
-
-        # "All Tracks" node
-        all_item = QStandardItem(f"All Tracks ({len(filepaths)})")
-        all_item.setData("all_tracks", ROLE_NODE_TYPE)
-        all_item.setData("", ROLE_PATH)
-        root.appendRow(all_item)
 
         # Build directory tree
         dir_node = QStandardItem("Directories")
@@ -118,9 +118,35 @@ class DirectoryTreeWidget(QWidget):
                 pl_item.setData(f"playlist:{pl['id']}", ROLE_PATH)
                 pl_node.appendRow(pl_item)
 
-        # Expand "Directories" by default
+        # Expand "Directories" and select default directory if found
         dir_index = self.model.indexFromItem(dir_node)
         self.tree_view.expand(dir_index)
+
+        if default_directory:
+            target = self._find_item_by_name(dir_node, default_directory)
+            if target is not None:
+                target_index = self.model.indexFromItem(target)
+                self.tree_view.setCurrentIndex(target_index)
+                self.tree_view.clicked.emit(target_index)
+                return
+
+        self.tree_view.setCurrentIndex(dir_index)
+
+    @staticmethod
+    def _find_item_by_name(
+        parent: QStandardItem, name: str
+    ) -> QStandardItem | None:
+        """Recursively find a child item whose text starts with the given name."""
+        name_lower = name.lower()
+        for i in range(parent.rowCount()):
+            child = parent.child(i)
+            # Item text is like "NORMALIZED (42)", match on the directory name part
+            if child.text().lower().startswith(name_lower):
+                return child
+            found = DirectoryTreeWidget._find_item_by_name(child, name)
+            if found is not None:
+                return found
+        return None
 
     def _build_directory_nodes(
         self, parent_item: QStandardItem, dir_counts: dict[str, int]
@@ -278,7 +304,8 @@ class DirectoryNavigatorPlugin:
             for row in playlist_rows
         ]
 
-        self.widget.build_tree(filepaths, playlists)
+        default_dir = self.context.config.directory_navigator.default_directory
+        self.widget.build_tree(filepaths, playlists, default_directory=default_dir)
         logger.info(
             "[Directory Navigator] Tree built: %d tracks, %d playlists",
             len(filepaths),
@@ -300,12 +327,7 @@ class DirectoryNavigatorPlugin:
 
         db = self.context.database
 
-        if node_type == "all_tracks":
-            # Show all tracks - emit with all filepaths
-            rows = db.conn.execute("SELECT filepath FROM tracks").fetchall()  # type: ignore[attr-defined]
-            filepaths = [Path(row["filepath"]) for row in rows]
-
-        elif node_type == "directory":
+        if node_type == "directory":
             # Filter by directory (recursive: LIKE 'path%')
             rows = db.conn.execute(  # type: ignore[attr-defined]
                 "SELECT filepath FROM tracks WHERE filepath LIKE ?",

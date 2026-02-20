@@ -81,17 +81,15 @@ class GenreFilterProxyModel(QSortFilterProxyModel):
 
         track = tracks[source_row]
 
-        # Search filter
+        # Search filter: every word must appear in at least one field
         if self._search_text:
             artist = (track.get("artist") or "").lower()
             title = (track.get("title") or "").lower()
             filename = (track.get("filename") or "").lower()
-            if (
-                self._search_text not in artist
-                and self._search_text not in title
-                and self._search_text not in filename
-            ):
-                return False
+            haystack = f"{artist} {title} {filename}"
+            for word in self._search_text.split():
+                if word not in haystack:
+                    return False
 
         # Genre filter
         if not self._on_genres and not self._off_genres:

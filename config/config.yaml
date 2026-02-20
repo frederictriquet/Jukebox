@@ -244,6 +244,9 @@ cue_maker:
   overlap: 15.0  # Overlap between segments in seconds
   max_workers: 4  # Parallel workers for analysis
 
+directory_navigator:
+  default_directory: "NORMALIZED"
+
 plugins:
   enabled:
     - mode_switcher

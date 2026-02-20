@@ -215,6 +215,12 @@ class CueMakerConfig(BaseModel):
     max_workers: int = Field(ge=1, default=4)
 
 
+class DirectoryNavigatorConfig(BaseModel):
+    """Directory Navigator plugin configuration."""
+
+    default_directory: str = "NORMALIZED"
+
+
 class PluginsConfig(BaseModel):
     """Plugins configuration."""
 
@@ -245,6 +251,7 @@ class JukeboxConfig(BaseModel):
     file_manager: FileManagerConfig = Field(default_factory=FileManagerConfig)
     video_exporter: VideoExporterConfig = Field(default_factory=VideoExporterConfig)
     cue_maker: CueMakerConfig = Field(default_factory=CueMakerConfig)
+    directory_navigator: DirectoryNavigatorConfig = Field(default_factory=DirectoryNavigatorConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     logging: LoggingConfig
 

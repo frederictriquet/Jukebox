@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from plugins.cue_maker.model import CueSheet
+from plugins.cue_maker.model import CueSheet, ms_to_display_time
 
 if TYPE_CHECKING:
     from plugins.cue_maker.model import CueEntry
@@ -34,7 +34,7 @@ class CueExporter:
             IOError: If file cannot be written
             ValueError: If cue sheet has no confirmed entries
         """
-        entries = cue_sheet.get_confirmed_entries()
+        entries = cue_sheet.get_entries_for_export()
         if not entries:
             raise ValueError("No confirmed entries to export")
 
@@ -103,20 +103,9 @@ class CueExporter:
     def ms_to_display_time(ms: int) -> str:
         """Convert milliseconds to MM:SS for display.
 
-        Args:
-            ms: Time in milliseconds
-
-        Returns:
-            Time string in MM:SS format
-
-        Example:
-            >>> CueExporter.ms_to_display_time(185000)
-            '03:05'
+        Delegates to :func:`plugins.cue_maker.model.ms_to_display_time`.
         """
-        total_seconds = ms // 1000
-        minutes = total_seconds // 60
-        seconds = total_seconds % 60
-        return f"{minutes:02d}:{seconds:02d}"
+        return ms_to_display_time(ms)
 
     @staticmethod
     def display_time_to_ms(time_str: str) -> int | None:

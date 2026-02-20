@@ -131,9 +131,11 @@ class TestTrackList:
         track_list.add_track(path1, genre="H")
         track_list.add_track(path2, genre="W")
 
-        # Install a proxy that filters
+        # Install a proxy that filters on genre column
+        # In jukebox mode (default): ["waveform", "artist", "title", "genre", ...]
+        genre_col = track_list.track_model.cell_renderer.columns.index("genre")
         proxy = QSortFilterProxyModel()
-        proxy.setFilterKeyColumn(2)  # Genre column
+        proxy.setFilterKeyColumn(genre_col)
         proxy.setFilterFixedString("H")
         track_list.set_proxy_model(proxy)
 
@@ -167,8 +169,9 @@ class TestTrackList:
         assert track_list.count() == 3
 
         # With proxy filtering for "H": 2 tracks
+        genre_col = track_list.track_model.cell_renderer.columns.index("genre")
         proxy = QSortFilterProxyModel()
-        proxy.setFilterKeyColumn(2)  # Genre column
+        proxy.setFilterKeyColumn(genre_col)
         proxy.setFilterFixedString("H")
         track_list.set_proxy_model(proxy)
 

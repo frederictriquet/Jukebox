@@ -52,11 +52,12 @@ from plugins.cue_maker.constants import (
     ACTION_SEARCH,
     TableColumn,
 )
-from plugins.cue_maker.model import EntryStatus
+from plugins.cue_maker.model import EntryStatus, ms_to_display_time
 from plugins.cue_maker.table_model import CueTableModel
 
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol
+    from plugins.cue_maker.model import CueEntry
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ _ACTION_ICON_WIDTH = 22
 _HANDLE_TOLERANCE = 6
 _MIN_DURATION_MS = 1000
 _SNAP_THRESHOLD_PX = 5
-_AUDIO_EXTENSIONS = ('.mp3', '.flac', '.wav', '.aiff', '.aif', '.ogg', '.m4a')
+_AUDIO_EXTENSIONS = (".mp3", ".flac", ".wav", ".aiff", ".aif", ".ogg", ".m4a")
 
 
 class CueTimingBar(QWidget):
@@ -385,7 +386,6 @@ class CueMakerWidget(QWidget):
     # Signals
     mix_load_requested = Signal(str)  # filepath
     analyze_requested = Signal()
-    export_requested = Signal()
     import_requested = Signal(int)  # row index
     search_requested = Signal(int)  # row index
 
@@ -405,12 +405,12 @@ class CueMakerWidget(QWidget):
         self._highlight_region: pg.LinearRegionItem | None = None
         self._cursor_inside_region: bool | None = None
         self._mix_duration_s: float = 0.0
+        self._mix_filepath: str = ""
         self._mix_position_timer = QTimer()
         self._mix_position_timer.setInterval(100)
         self._mix_position_timer.timeout.connect(self._poll_mix_position)
         self._init_ui()
         self._connect_signals()
-        self._connect_player_events()
         # Accept drag and drop
         self.setAcceptDrops(True)
 
@@ -501,6 +501,7 @@ class CueMakerWidget(QWidget):
             if not isinstance(waveform_config.height, int):
                 waveform_config = None
         except (AttributeError, TypeError):
+            logger.debug("[Cue Maker] Waveform config not available, using defaults")
             waveform_config = None
         widget = WaveformWidget(waveform_config)
         return widget
@@ -555,13 +556,25 @@ class CueMakerWidget(QWidget):
         self.timing_bar.end_changed.connect(self._on_timing_bar_end_changed)
         self.timing_bar.region_changed.connect(self._on_timing_bar_region_changed)
 
-    def _connect_player_events(self) -> None:
+    def connect_player_events(self) -> None:
         """Connect to player and event bus for mix playback."""
         self.context.player.state_changed.connect(self._on_player_state_changed)
-        self.context.subscribe(Events.TRACK_LOADED, self._on_track_loaded_from_library)
-        self.context.subscribe(Events.MIX_POSITION_UPDATE, self._on_mix_position_update)
+        self.context.event_bus.subscribe(Events.TRACK_LOADED, self._on_track_loaded_from_library)
+        self.context.event_bus.subscribe(Events.MIX_POSITION_UPDATE, self._on_mix_position_update)
         self.waveform_widget.position_clicked.connect(self._on_waveform_seek)
 
+    def disconnect_player_events(self) -> None:
+        """Disconnect player and event bus subscriptions for mix playback."""
+        try:
+            self.context.player.state_changed.disconnect(self._on_player_state_changed)
+        except RuntimeError:
+            pass
+        self.context.event_bus.unsubscribe(Events.TRACK_LOADED, self._on_track_loaded_from_library)
+        self.context.event_bus.unsubscribe(Events.MIX_POSITION_UPDATE, self._on_mix_position_update)
+        try:
+            self.waveform_widget.position_clicked.disconnect(self._on_waveform_seek)
+        except RuntimeError:
+            pass
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # type: ignore  # noqa: N802
         """Accept drag events for audio files."""
@@ -630,22 +643,32 @@ class CueMakerWidget(QWidget):
         """Notify PlaybackController that the mix is taking over the player."""
         self.context.app.playback.release_track()
 
+    def _ensure_mix_loaded(self) -> bool:
+        """Load the mix into the player if not already loaded.
+
+        Returns:
+            True if the mix was freshly loaded (wasn't loaded before).
+        """
+        mix_path = self.model.sheet.mix_filepath
+        player = self.context.player
+        current = player.current_file
+        freshly_loaded = current is None or str(current) != mix_path
+        if freshly_loaded:
+            player.load(Path(mix_path))
+        self._take_over_player()
+        self._is_mix_playing = True
+        return freshly_loaded
+
     def _on_play_pause(self) -> None:
         """Toggle play/pause for the mix."""
-        player = self.context.player
-        mix_path = self.model.sheet.mix_filepath
-        if not mix_path:
+        if not self.model.sheet.mix_filepath:
             return
 
+        player = self.context.player
         if self._is_mix_playing and player.is_playing():
             player.pause()
         else:
-            # If mix is not currently loaded in the player, load it
-            current = player.current_file
-            if current is None or str(current) != mix_path:
-                player.load(Path(mix_path))
-            self._take_over_player()
-            self._is_mix_playing = True
+            self._ensure_mix_loaded()
             player.play()
 
     def _on_stop(self) -> None:
@@ -700,16 +723,9 @@ class CueMakerWidget(QWidget):
         self.waveform_widget.set_position(position)
 
         player = self.context.player
-        current = player.current_file
-        needs_load = current is None or str(current) != self.model.sheet.mix_filepath
+        freshly_loaded = self._ensure_mix_loaded()
 
-        if needs_load:
-            player.load(Path(self.model.sheet.mix_filepath))
-
-        self._take_over_player()
-        self._is_mix_playing = True
-
-        if needs_load or not player.is_playing():
+        if freshly_loaded or not player.is_playing():
             player.play()
             # VLC ignores seek when just started — small delay then seek
             QTimer.singleShot(50, lambda: player.set_position(position))
@@ -793,11 +809,10 @@ class CueMakerWidget(QWidget):
             self.waveform_widget.display_waveform(waveform_data)
 
             # Save to cache
-            mix_path = getattr(self, "_mix_filepath", None)
-            if mix_path:
+            if self._mix_filepath:
                 from plugins.cue_maker.cache import save_waveform_cache
 
-                save_waveform_cache(mix_path, waveform_data)
+                save_waveform_cache(self._mix_filepath, waveform_data)
 
         # Re-add highlight region (display_waveform clears all plot items)
         if self._selected_row >= 0:
@@ -808,6 +823,8 @@ class CueMakerWidget(QWidget):
     def _on_waveform_error(self, error_message: str) -> None:
         """Handle waveform generation error."""
         logger.warning("[Cue Maker] Waveform generation failed: %s", error_message)
+        self.context.emit(Events.STATUS_MESSAGE, message=f"Waveform error: {error_message}")
+        QMessageBox.warning(self, "Waveform Error", f"Waveform generation failed:\n{error_message}")
 
     def _on_row_selected(self, current: QModelIndex, _previous: QModelIndex) -> None:
         """Update timing bar / highlight when table row selection changes."""
@@ -914,6 +931,18 @@ class CueMakerWidget(QWidget):
         """Request search of entry's artist/title in the library."""
         self.search_requested.emit(row)
 
+    def _reselect_entry_after_sort(self, entry: CueEntry) -> int:
+        """Find an entry by identity after a re-sort and select it.
+
+        Returns:
+            The new row index, or -1 if not found.
+        """
+        for i in range(self.model.rowCount()):
+            if self.model.get_entry(i) is entry:
+                self.table_view.setCurrentIndex(self.model.index(i, 0))
+                return i
+        return -1
+
     def _on_timing_bar_start_changed(self, ms: int) -> None:
         """Handle drag of the start handle on the timing bar."""
         if self._selected_row < 0:
@@ -924,17 +953,13 @@ class CueMakerWidget(QWidget):
         # Keep end fixed: compute new duration after start moves
         end_ms = entry.start_time_ms + entry.duration_ms
         idx = self.model.index(self._selected_row, TableColumn.TIME)
-        minutes = (ms // 1000) // 60
-        seconds = (ms // 1000) % 60
-        self.model.setData(idx, f"{minutes:02d}:{seconds:02d}", Qt.ItemDataRole.EditRole)
+        self.model.setData(idx, ms_to_display_time(ms), Qt.ItemDataRole.EditRole)
         # Re-sort may have moved the entry — find it again
-        for i in range(self.model.rowCount()):
-            if self.model.get_entry(i) is entry:
-                self.table_view.setCurrentIndex(self.model.index(i, 0))
-                new_duration = end_ms - entry.start_time_ms
-                if new_duration > 0:
-                    self.model.update_duration(i, new_duration)
-                break
+        new_row = self._reselect_entry_after_sort(entry)
+        if new_row >= 0:
+            new_duration = end_ms - entry.start_time_ms
+            if new_duration > 0:
+                self.model.update_duration(new_row, new_duration)
         self._refresh_editor_fields()
 
     def _on_timing_bar_end_changed(self, ms: int) -> None:
@@ -962,23 +987,22 @@ class CueMakerWidget(QWidget):
             return
         # Update start time via setData (triggers re-sort)
         idx = self.model.index(self._selected_row, TableColumn.TIME)
-        minutes = (start_ms // 1000) // 60
-        seconds = (start_ms // 1000) % 60
-        self.model.setData(idx, f"{minutes:02d}:{seconds:02d}", Qt.ItemDataRole.EditRole)
+        self.model.setData(idx, ms_to_display_time(start_ms), Qt.ItemDataRole.EditRole)
         # Find entry after re-sort and set the exact duration
-        for i in range(self.model.rowCount()):
-            if self.model.get_entry(i) is entry:
-                self.table_view.setCurrentIndex(self.model.index(i, 0))
-                self.model.update_duration(i, duration_ms)
-                break
+        new_row = self._reselect_entry_after_sort(entry)
+        if new_row >= 0:
+            self.model.update_duration(new_row, duration_ms)
         self._refresh_editor_fields()
 
-    def _update_highlight_region(self) -> None:
-        """Update the highlight region on the waveform for the selected cue entry."""
-        # Remove existing highlight
+    def _remove_highlight_region(self) -> None:
+        """Remove the highlight region from the waveform."""
         if self._highlight_region is not None:
             self.waveform_widget.plot_widget.removeItem(self._highlight_region)
             self._highlight_region = None
+
+    def _update_highlight_region(self) -> None:
+        """Update the highlight region on the waveform for the selected cue entry."""
+        self._remove_highlight_region()
 
         # Reset color tracking so next poll re-evaluates
         self._cursor_inside_region = None
@@ -1059,12 +1083,11 @@ class CueMakerWidget(QWidget):
 
     def _on_export(self) -> None:
         """Export cue sheet to file."""
-        if not self.model.has_confirmed_entries():
+        if not self.model.has_entries():
             QMessageBox.warning(
                 self,
                 "Export",
-                "No confirmed entries to export.\n"
-                "Confirm at least one entry before exporting.",
+                "No confirmed entries to export.\nConfirm at least one entry before exporting.",
             )
             return
 
@@ -1129,7 +1152,7 @@ class CueMakerWidget(QWidget):
 
     def _update_export_button(self) -> None:
         """Enable export button when confirmed entries exist."""
-        self.export_btn.setEnabled(self.model.has_confirmed_entries())
+        self.export_btn.setEnabled(self.model.has_entries())
 
     # --- Public API for plugin ---
 
@@ -1170,15 +1193,11 @@ class CueMakerWidget(QWidget):
             self._mix_position_timer.stop()
             self.context.player.stop()
             self._is_mix_playing = False
-        if self._highlight_region is not None:
-            self.waveform_widget.plot_widget.removeItem(self._highlight_region)
-            self._highlight_region = None
+        self._remove_highlight_region()
 
     def cleanup_workers(self) -> None:
         """Stop any running background workers."""
-        if self._highlight_region is not None:
-            self.waveform_widget.plot_widget.removeItem(self._highlight_region)
-            self._highlight_region = None
+        self._remove_highlight_region()
         if self._waveform_worker is not None:
             self._waveform_worker.requestInterruption()
             self._waveform_worker.quit()

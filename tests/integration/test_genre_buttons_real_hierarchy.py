@@ -8,7 +8,7 @@ Tests that:
 
 from unittest.mock import Mock
 
-from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QPushButton, QWidget
 
 from plugins.search_and_filter import SearchAndFilterPlugin
 
@@ -46,9 +46,14 @@ def _make_plugin_with_codes(codes: list[tuple[str, str]]) -> SearchAndFilterPlug
 
 def test_toolbar_container_layout(qapp) -> None:  # type: ignore
     """Test that toolbar_container has 'Genres' label and buttons on same line."""
-    plugin = _make_plugin_with_codes([
-        ("H", "House"), ("D", "Deep"), ("T", "Trance"), ("W", "Weed"),
-    ])
+    plugin = _make_plugin_with_codes(
+        [
+            ("H", "House"),
+            ("D", "Deep"),
+            ("T", "Trance"),
+            ("W", "Weed"),
+        ]
+    )
     plugin._create_toolbar_buttons()
 
     container = plugin.toolbar_container

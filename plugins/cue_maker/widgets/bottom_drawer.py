@@ -67,7 +67,7 @@ class BottomDrawer(QWidget):
         if self._anim is not None:
             self._anim.stop()
 
-        self._anim = QPropertyAnimation(self._content, b"maximumHeight")
+        self._anim = QPropertyAnimation(self._content, b"maximumHeight", self)
         self._anim.setDuration(200)
         self._anim.setEasingCurve(QEasingCurve.Type.InOutQuart)
         self._anim.setStartValue(start)

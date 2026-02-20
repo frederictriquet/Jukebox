@@ -19,6 +19,7 @@ class SearchBar(QLineEdit):
         """
         super().__init__(parent)
         self.setPlaceholderText("Search tracks... (Ctrl+F to focus)")
+        self.setClearButtonEnabled(True)
 
         # Only take focus when explicitly clicked or via Ctrl+F
         self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
