@@ -163,3 +163,97 @@ class AnalyzeWorker(QThread):
             entries.append(entry)
 
         return entries
+
+
+class TargetedMatchWorker(QThread):
+    """QThread worker for targeted segment matching with extended pitch range.
+
+    Identifies a single track in a user-selected region of the mix.
+    Uses a wider stretch ratio range than the full analysis to handle
+    strong pitch/tempo shifts that the standard analysis misses.
+    """
+
+    progress = Signal(int, int, str)  # current, total, message
+    finished = Signal(object)  # Match | None
+    error = Signal(str)  # error message
+
+    def __init__(
+        self,
+        mix_path: str,
+        db_path: str,
+        start_ms: int,
+        end_ms: int,
+    ) -> None:
+        """Initialize targeted match worker.
+
+        Args:
+            mix_path: Path to the mix audio file
+            db_path: Path to the shazamix fingerprint database
+            start_ms: Start of the segment to analyse (milliseconds)
+            end_ms: End of the segment to analyse (milliseconds)
+        """
+        super().__init__()
+        self.mix_path = mix_path
+        self.db_path = db_path
+        self.start_ms = start_ms
+        self.end_ms = end_ms
+        _live_workers.append(self)
+
+    def run(self) -> None:
+        """Run targeted match in background thread.
+
+        Emits progress signals during analysis, then finished with
+        the best Match found or None if no match was found.
+        Emits error signal if the analysis raises an exception.
+        """
+        try:
+            from shazamix.database import FingerprintDB
+            from shazamix.fingerprint import Fingerprinter
+            from shazamix.matcher import Matcher
+
+            logger.info(
+                "[Analyzer] Targeted match: %s [%dms–%dms]",
+                self.mix_path,
+                self.start_ms,
+                self.end_ms,
+            )
+
+            db = FingerprintDB(self.db_path)
+            fingerprinter = Fingerprinter()
+            matcher = Matcher(db, fingerprinter)
+
+            def progress_callback(current: int, total: int, message: str) -> None:
+                logger.info("[Analyzer] Targeted: %s", message)
+                self.progress.emit(current, total, message)
+
+            match = matcher.match_segment(
+                self.mix_path,
+                self.start_ms,
+                self.end_ms,
+                progress_callback=progress_callback,
+            )
+
+            if self.isInterruptionRequested():
+                logger.info("[Analyzer] Targeted match cancelled")
+                return
+
+            if match:
+                logger.info(
+                    "[Analyzer] Targeted match found: %s – %s (confidence %.2f)",
+                    match.artist,
+                    match.title,
+                    match.confidence,
+                )
+            else:
+                logger.info("[Analyzer] Targeted match: no match found")
+
+            self.finished.emit(match)
+
+        except Exception as e:
+            logger.error("[Analyzer] Targeted match failed: %s", e, exc_info=True)
+            self.error.emit(str(e))
+        finally:
+            try:
+                _live_workers.remove(self)
+            except ValueError:
+                pass
