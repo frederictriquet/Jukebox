@@ -480,7 +480,7 @@ class CueMakerWidget(QWidget):
 
         self.targeted_match_btn = QPushButton("\U0001f50d")
         self.targeted_match_btn.setToolTip(
-            "Re-analyse selected region with extended pitch range (±16%)"
+            "Re-analyse selected region with extended pitch range (65%–155%)"
         )
         self.targeted_match_btn.setFixedWidth(32)
         self.targeted_match_btn.setEnabled(False)

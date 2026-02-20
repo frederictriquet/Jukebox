@@ -154,23 +154,23 @@ class Matcher:
         mix_path: str,
         start_ms: int,
         end_ms: int,
-        stretch_min: float = 0.84,
-        stretch_max: float = 1.17,
+        stretch_min: float = 0.65,
+        stretch_max: float = 1.55,
         stretch_step: float = 0.01,
         progress_callback: "callable | None" = None,
     ) -> "Match | None":
         """Identify the track in a specific segment of a mix with extended pitch range.
 
         Designed for re-analysis of segments not matched by analyze_mix().
-        Uses a wider stretch ratio range to tolerate stronger pitch/tempo shifts
-        (e.g. DJ key shifting up to ±16%).
+        Uses a wide stretch ratio range to tolerate strong pitch/tempo shifts
+        (e.g. a track slowed to 65% or sped up to 154% of its original tempo).
 
         Args:
             mix_path: Path to the mix audio file
             start_ms: Start of the segment to analyse (milliseconds)
             end_ms: End of the segment to analyse (milliseconds)
-            stretch_min: Lower bound of the tempo stretch range (default 0.84 = -16%)
-            stretch_max: Upper bound of the tempo stretch range (default 1.17 = +17%)
+            stretch_min: Lower bound of the tempo stretch range (default 0.65)
+            stretch_max: Upper bound of the tempo stretch range (default 1.55)
             stretch_step: Step size for the stretch ratio search (default 0.01)
             progress_callback: Optional callback(current, total, message)
 
