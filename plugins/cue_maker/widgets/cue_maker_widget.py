@@ -428,21 +428,9 @@ class CueMakerWidget(QWidget):
         self.waveform_widget = self._create_waveform()
         layout.addWidget(self.waveform_widget)
 
-        # --- Timing bar + targeted match button ---
-        timing_row = QHBoxLayout()
-        timing_row.setContentsMargins(0, 0, 0, 0)
-        timing_row.setSpacing(4)
+        # --- Timing bar (full width, aligned with waveform) ---
         self.timing_bar = CueTimingBar(self)
-        timing_row.addWidget(self.timing_bar, stretch=1)
-        self.targeted_match_btn = QPushButton("\U0001f50d")
-        self.targeted_match_btn.setToolTip(
-            "Re-analyse this region with extended pitch range (±16%)"
-        )
-        self.targeted_match_btn.setFixedWidth(32)
-        self.targeted_match_btn.setEnabled(False)
-        self.targeted_match_btn.clicked.connect(self._on_targeted_match)
-        timing_row.addWidget(self.targeted_match_btn)
-        layout.addLayout(timing_row)
+        layout.addWidget(self.timing_bar)
 
         # --- Middle: Table + Progress ---
         self.progress_bar = QProgressBar()
@@ -489,6 +477,15 @@ class CueMakerWidget(QWidget):
         self.analyze_btn.setEnabled(False)
         self.analyze_btn.clicked.connect(self.analyze_requested.emit)
         h.addWidget(self.analyze_btn)
+
+        self.targeted_match_btn = QPushButton("\U0001f50d")
+        self.targeted_match_btn.setToolTip(
+            "Re-analyse selected region with extended pitch range (±16%)"
+        )
+        self.targeted_match_btn.setFixedWidth(32)
+        self.targeted_match_btn.setEnabled(False)
+        self.targeted_match_btn.clicked.connect(self._on_targeted_match)
+        h.addWidget(self.targeted_match_btn)
 
         self.export_btn = QPushButton("Export CUE")
         self.export_btn.setToolTip("Export cue sheet to .cue file")
