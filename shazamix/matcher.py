@@ -149,6 +149,85 @@ class Matcher:
 
         return self._match_fingerprints(query_fps)
 
+    def match_segment(
+        self,
+        mix_path: str,
+        start_ms: int,
+        end_ms: int,
+        stretch_min: float = 0.84,
+        stretch_max: float = 1.17,
+        stretch_step: float = 0.01,
+        progress_callback: "callable | None" = None,
+    ) -> "Match | None":
+        """Identify the track in a specific segment of a mix with extended pitch range.
+
+        Designed for re-analysis of segments not matched by analyze_mix().
+        Uses a wider stretch ratio range to tolerate stronger pitch/tempo shifts
+        (e.g. DJ key shifting up to ±16%).
+
+        Args:
+            mix_path: Path to the mix audio file
+            start_ms: Start of the segment to analyse (milliseconds)
+            end_ms: End of the segment to analyse (milliseconds)
+            stretch_min: Lower bound of the tempo stretch range (default 0.84 = -16%)
+            stretch_max: Upper bound of the tempo stretch range (default 1.17 = +17%)
+            stretch_step: Step size for the stretch ratio search (default 0.01)
+            progress_callback: Optional callback(current, total, message)
+
+        Returns:
+            Best Match found, or None if no match exceeds the confidence threshold
+        """
+        import librosa
+
+        def log(msg: str) -> None:
+            if progress_callback:
+                progress_callback(-1, -1, msg)
+
+        start_s = start_ms / 1000.0
+        duration_s = (end_ms - start_ms) / 1000.0
+
+        log(f"Loading segment [{start_ms}ms–{end_ms}ms]…")
+        y, _ = librosa.load(
+            mix_path,
+            sr=self.fingerprinter.sample_rate,
+            mono=True,
+            offset=start_s,
+            duration=duration_s,
+        )
+
+        if len(y) == 0:
+            return None
+
+        log("Extracting fingerprints…")
+        query_fps = self.fingerprinter.extract_fingerprints_from_array(y)
+
+        if not query_fps:
+            return None
+
+        # Single bulk DB query for all unique hashes in this segment
+        unique_hashes = list({fp.hash for fp in query_fps})
+        log(f"Querying DB with {len(unique_hashes):,} hashes…")
+        db_results = self.db.query_fingerprints(unique_hashes)
+
+        if not db_results:
+            return None
+
+        db_by_hash: dict[int, list[tuple[int, int]]] = {}
+        for track_id, time_offset_ms, hash_val in db_results:
+            if hash_val not in db_by_hash:
+                db_by_hash[hash_val] = []
+            db_by_hash[hash_val].append((track_id, time_offset_ms))
+
+        # Extended stretch ratios for wider pitch tolerance
+        stretch_ratios = np.arange(stretch_min, stretch_max, stretch_step)
+
+        log(f"Matching with pitch range [{stretch_min:.0%}–{stretch_max:.0%}]…")
+        matches = self._match_fingerprints_with_db(
+            query_fps, db_by_hash, stretch_ratios=stretch_ratios
+        )
+
+        return matches[0] if matches else None
+
     def analyze_mix(
         self,
         mix_path: str,
@@ -307,6 +386,7 @@ class Matcher:
         self,
         segment_fps_list: list[list[Fingerprint]],
         progress_callback: callable | None = None,
+        stretch_ratios: "np.ndarray | None" = None,
     ) -> list[Match]:
         """Match all segments globally with tempo-aware search.
 
@@ -376,7 +456,8 @@ class Matcher:
         log(f"Analyzing {total_candidates:,} candidate tracks...")
 
         # Stretch ratios to try
-        stretch_ratios = np.arange(0.920, 1.081, 0.005)
+        if stretch_ratios is None:
+            stretch_ratios = np.arange(0.920, 1.081, 0.005)
         num_ratios = len(stretch_ratios)
         bin_width = 200  # ms
 
@@ -565,6 +646,7 @@ class Matcher:
         self,
         query_fps: list[Fingerprint],
         db_by_hash: dict[int, list[tuple[int, int]]],
+        stretch_ratios: "np.ndarray | None" = None,
     ) -> list[Match]:
         """Match segment fingerprints using pre-fetched DB results.
 
@@ -616,8 +698,9 @@ class Matcher:
         track_counts.sort(key=lambda x: -x[1])
         top_tracks = [t for t, c in track_counts[:100] if c >= self.min_matches]
 
-        # Stretch ratios to try (0.92 to 1.08 in 0.5% steps)
-        stretch_ratios = np.arange(0.920, 1.081, 0.005)
+        # Stretch ratios to try (0.92 to 1.08 in 0.5% steps by default)
+        if stretch_ratios is None:
+            stretch_ratios = np.arange(0.920, 1.081, 0.005)
 
         matches: list[Match] = []
         total_query_fps = len(query_fps)
