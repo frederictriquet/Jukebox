@@ -1,9 +1,6 @@
 """Tests for cue maker cache module."""
 
-from pathlib import Path
-from unittest.mock import Mock, patch
-
-import pytest
+from unittest.mock import patch
 
 from plugins.cue_maker.cache import load_cached_entries
 

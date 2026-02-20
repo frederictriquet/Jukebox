@@ -406,7 +406,7 @@ class TestCueMakerWidget:
         del context.config.waveform
 
         with caplog.at_level("DEBUG"):
-            widget = CueMakerWidget(context)
+            _widget = CueMakerWidget(context)  # noqa: F841
 
         # Should log debug message about using defaults
         assert any(
