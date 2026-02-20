@@ -386,6 +386,7 @@ class CueMakerWidget(QWidget):
     # Signals
     mix_load_requested = Signal(str)  # filepath
     analyze_requested = Signal()
+    targeted_match_requested = Signal(int, int)  # start_ms, end_ms
     import_requested = Signal(int)  # row index
     search_requested = Signal(int)  # row index
 
@@ -427,9 +428,21 @@ class CueMakerWidget(QWidget):
         self.waveform_widget = self._create_waveform()
         layout.addWidget(self.waveform_widget)
 
-        # --- Timing bar (draggable start/end handles) ---
+        # --- Timing bar + targeted match button ---
+        timing_row = QHBoxLayout()
+        timing_row.setContentsMargins(0, 0, 0, 0)
+        timing_row.setSpacing(4)
         self.timing_bar = CueTimingBar(self)
-        layout.addWidget(self.timing_bar)
+        timing_row.addWidget(self.timing_bar, stretch=1)
+        self.targeted_match_btn = QPushButton("\U0001f50d")
+        self.targeted_match_btn.setToolTip(
+            "Re-analyse this region with extended pitch range (±16%)"
+        )
+        self.targeted_match_btn.setFixedWidth(32)
+        self.targeted_match_btn.setEnabled(False)
+        self.targeted_match_btn.clicked.connect(self._on_targeted_match)
+        timing_row.addWidget(self.targeted_match_btn)
+        layout.addLayout(timing_row)
 
         # --- Middle: Table + Progress ---
         self.progress_bar = QProgressBar()
@@ -635,6 +648,7 @@ class CueMakerWidget(QWidget):
         if cached_entries:
             self.model.load_entries(cached_entries)
 
+        self._update_targeted_match_btn_state()
         logger.info("[Cue Maker] Mix loaded: %s", filepath)
 
     # --- Playback slots ---
@@ -832,6 +846,7 @@ class CueMakerWidget(QWidget):
             self._selected_row = -1
             self.timing_bar.clear_entry()
             self._update_highlight_region()
+            self._update_targeted_match_btn_state()
             return
 
         self._selected_row = current.row()
@@ -856,6 +871,7 @@ class CueMakerWidget(QWidget):
             row = self._selected_row
         if row < 0:
             self.timing_bar.clear_entry()
+            self._update_targeted_match_btn_state()
             return
         self._selected_row = row
         entry = self.model.get_entry(row)
@@ -872,6 +888,13 @@ class CueMakerWidget(QWidget):
                 snap_points.append(nxt.start_time_ms)
             self.timing_bar.set_snap_points(snap_points)
         self._update_highlight_region()
+        self._update_targeted_match_btn_state()
+
+    def _update_targeted_match_btn_state(self) -> None:
+        """Enable targeted match button when a mix is loaded and an entry is selected."""
+        mix_loaded = bool(self.model.sheet.mix_filepath)
+        row_selected = self._selected_row >= 0
+        self.targeted_match_btn.setEnabled(mix_loaded and row_selected)
 
     def _on_action_triggered(self, row: int, action_index: int) -> None:
         """Dispatch action from the actions column delegate."""
@@ -930,6 +953,15 @@ class CueMakerWidget(QWidget):
     def _on_search_in_library(self, row: int) -> None:
         """Request search of entry's artist/title in the library."""
         self.search_requested.emit(row)
+
+    def _on_targeted_match(self) -> None:
+        """Emit targeted_match_requested with the current timing bar region."""
+        if not self.timing_bar._has_entry:
+            return
+        start_ms = self.timing_bar._start_ms
+        end_ms = self.timing_bar._end_ms
+        if end_ms > start_ms:
+            self.targeted_match_requested.emit(start_ms, end_ms)
 
     def _reselect_entry_after_sort(self, entry: CueEntry) -> int:
         """Find an entry by identity after a re-sort and select it.
@@ -1186,6 +1218,28 @@ class CueMakerWidget(QWidget):
         self.progress_bar.setVisible(False)
         self.analyze_btn.setEnabled(True)
         QMessageBox.critical(self, "Analysis Error", error_message)
+
+    def on_targeted_match_complete(self, match: object) -> None:
+        """Handle targeted match completion (called by plugin).
+
+        Hides progress bar, re-evaluates button state.
+        If no match was found, informs the user.
+        """
+        self.progress_bar.setVisible(False)
+        self._update_targeted_match_btn_state()
+        if match is None:
+            QMessageBox.information(
+                self,
+                "Targeted Match",
+                "No match found in the selected region.\n\n"
+                "Try selecting a different part of the track or check the database.",
+            )
+
+    def on_targeted_match_error(self, error_message: str) -> None:
+        """Handle targeted match failure."""
+        self.progress_bar.setVisible(False)
+        self._update_targeted_match_btn_state()
+        QMessageBox.critical(self, "Targeted Match Error", error_message)
 
     def stop_mix_playback(self) -> None:
         """Stop mix playback if active."""
