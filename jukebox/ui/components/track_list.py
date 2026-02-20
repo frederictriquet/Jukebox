@@ -17,13 +17,17 @@ from PySide6.QtWidgets import QMenu, QTableView
 from jukebox.core.event_bus import Events
 from jukebox.ui.components.track_cell_renderer import CellRenderer
 
-# Column configuration
-COLUMNS = ["waveform", "filename", "genre", "rating", "duration", "stats"]
+# Column configuration per mode
+COLUMNS_JUKEBOX = ["waveform", "artist", "title", "genre", "rating", "duration", "stats"]
+COLUMNS_CURATING = ["waveform", "filename", "genre", "rating", "duration", "stats"]
+COLUMNS = COLUMNS_CURATING  # default (overridden by mode)
 
 # Column widths (in pixels)
 COLUMN_WIDTHS = {
     "waveform": 210,  # Waveform mini preview (200px waveform + padding)
     "filename": 350,
+    "artist": 175,
+    "title": 175,
     "genre": 80,
     "rating": 80,
     "duration": 80,
@@ -66,7 +70,8 @@ class TrackListModel(QAbstractTableModel):
             for code_config in config.genre_editor.codes:
                 genre_names[code_config.code] = code_config.name
 
-        self.cell_renderer = CellRenderer(COLUMNS, genre_names, mode)
+        columns = COLUMNS_JUKEBOX if mode == "jukebox" else COLUMNS_CURATING
+        self.cell_renderer = CellRenderer(columns, genre_names, mode)
         self.database = database
         self.event_bus = event_bus
 
@@ -106,7 +111,7 @@ class TrackListModel(QAbstractTableModel):
 
             # Emit dataChanged to update the view
             left_index = self.index(row, 0)
-            right_index = self.index(row, len(COLUMNS) - 1)
+            right_index = self.index(row, self.columnCount() - 1)
             self.dataChanged.emit(left_index, right_index, [])
 
     def _on_waveform_complete(self, track_id: int) -> None:
@@ -192,8 +197,11 @@ class TrackListModel(QAbstractTableModel):
         self.tracks[row]["has_stats"] = analysis is not None
 
         # Emit dataChanged to refresh the stats column only
-        stats_index = self.index(row, 5)  # Stats is column 5 (last)
-        self.dataChanged.emit(stats_index, stats_index, [])
+        columns = self.cell_renderer.columns
+        if "stats" in columns:
+            stats_col = columns.index("stats")
+            stats_index = self.index(row, stats_col)
+            self.dataChanged.emit(stats_index, stats_index, [])
 
     def _on_track_deleted(self, filepath: Path, deleted_row: int | None = None) -> None:
         """Handle track deletion event.
@@ -249,7 +257,7 @@ class TrackListModel(QAbstractTableModel):
 
     def columnCount(self, parent: QModelIndex | QPersistentModelIndex | None = None) -> int:
         """Get number of columns."""
-        return len(COLUMNS)
+        return len(self.cell_renderer.columns)
 
     def headerData(
         self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole
@@ -257,7 +265,10 @@ class TrackListModel(QAbstractTableModel):
         """Get header data."""
         if role == Qt.ItemDataRole.DisplayRole:
             if orientation == Qt.Orientation.Horizontal:
-                return COLUMNS[section].capitalize()
+                columns = self.cell_renderer.columns
+                if section < len(columns):
+                    return columns[section].capitalize()
+                return ""
             elif orientation == Qt.Orientation.Vertical:
                 # Row numbers in vertical header (like PyQT project)
                 return f"{section + 1}/{len(self.tracks)}"
@@ -363,20 +374,18 @@ class TrackListModel(QAbstractTableModel):
         return self.filepath_to_row.get(filepath, -1)
 
     def set_mode(self, mode: str) -> None:
-        """Update the display mode and refresh the view.
+        """Update the display mode, switching columns and refreshing the view.
 
         Args:
             mode: Application mode ("jukebox" or "curating")
         """
         if mode != self._mode:
             self._mode = mode
+            new_columns = COLUMNS_JUKEBOX if mode == "jukebox" else COLUMNS_CURATING
+            self.beginResetModel()
+            self.cell_renderer.columns = new_columns
             self.cell_renderer.set_mode(mode)
-            # Refresh filename column for all rows
-            if self.tracks:
-                filename_col = COLUMNS.index("filename")
-                top_left = self.index(0, filename_col)
-                bottom_right = self.index(len(self.tracks) - 1, filename_col)
-                self.dataChanged.emit(top_left, bottom_right, [])
+            self.endResetModel()
 
 
 class TrackList(QTableView):
@@ -423,7 +432,8 @@ class TrackList(QTableView):
         h_header.setStretchLastSection(False)  # Manual column sizing
 
         # Set column widths from configuration
-        for col_idx, col_name in enumerate(COLUMNS):
+        columns = COLUMNS_JUKEBOX if mode == "jukebox" else COLUMNS_CURATING
+        for col_idx, col_name in enumerate(columns):
             self.setColumnWidth(col_idx, COLUMN_WIDTHS[col_name])
 
         # Never take keyboard focus - global shortcuts always active
@@ -575,12 +585,16 @@ class TrackList(QTableView):
         self.playlists = playlists
 
     def set_mode(self, mode: str) -> None:
-        """Update the display mode.
+        """Update the display mode and reconfigure columns.
 
         Args:
             mode: Application mode ("jukebox" or "curating")
         """
         self._track_model.set_mode(mode)
+        # Reconfigure column widths for the new mode
+        columns = self._track_model.cell_renderer.columns
+        for col_idx, col_name in enumerate(columns):
+            self.setColumnWidth(col_idx, COLUMN_WIDTHS[col_name])
 
     def _on_row_clicked(self, index: QModelIndex) -> None:
         """Handle row click."""

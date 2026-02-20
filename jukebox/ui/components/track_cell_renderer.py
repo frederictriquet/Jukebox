@@ -59,6 +59,8 @@ class CellRenderer:
             "waveform": WaveformStyler(),
             "stats": StatsStyler(),
             "filename": FilenameStyler(mode),
+            "artist": ArtistStyler(),
+            "title": TitleStyler(),
             "genre": GenreStyler(genre_names or {}),
             "rating": RatingStyler(),
             "duration": DurationStyler(),
@@ -286,6 +288,30 @@ class RatingStyler(Styler):
         if not genre or "*" not in genre:
             return QColor(Qt.GlobalColor.red)
         return None
+
+
+class ArtistStyler(Styler):
+    """Styler for artist column."""
+
+    def display(self, data: Any, track: dict[str, Any]) -> str:
+        """Display artist name."""
+        return track.get("artist") or ""
+
+    def tooltip(self, data: Any, track: dict[str, Any]) -> str:
+        """Show filename in tooltip."""
+        return str(track["filepath"].name)
+
+
+class TitleStyler(Styler):
+    """Styler for title column."""
+
+    def display(self, data: Any, track: dict[str, Any]) -> str:
+        """Display track title."""
+        return track.get("title") or ""
+
+    def tooltip(self, data: Any, track: dict[str, Any]) -> str:
+        """Show filename in tooltip."""
+        return str(track["filepath"].name)
 
 
 class DurationStyler(Styler):

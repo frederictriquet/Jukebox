@@ -20,12 +20,12 @@ if TYPE_CHECKING:
 
 
 class ModeSwitcherPlugin:
-    """Plugin to switch between jukebox and curating modes."""
+    """Plugin to switch between jukebox, curating, and cue maker modes."""
 
     name = "mode_switcher"
     version = "1.0.0"
-    description = "Switch between jukebox and curating modes"
-    modes = ["jukebox", "curating"]  # Active in all modes
+    description = "Switch between application modes"
+    modes = ["jukebox", "curating", "cue_maker"]  # Active in all modes
 
     def __init__(self) -> None:
         """Initialize plugin."""
@@ -33,6 +33,7 @@ class ModeSwitcherPlugin:
         self.mode_manager: ModeManager | None = None
         self.jukebox_action: Any = None
         self.curating_action: Any = None
+        self.cue_maker_action: Any = None
 
     def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
@@ -40,7 +41,14 @@ class ModeSwitcherPlugin:
 
         # Create mode manager and store in app context
         initial_mode_str = getattr(context.config.ui, "mode", "jukebox")
-        initial_mode = AppMode.JUKEBOX if initial_mode_str == "jukebox" else AppMode.CURATING
+        if initial_mode_str == "jukebox":
+            initial_mode = AppMode.JUKEBOX
+        elif initial_mode_str == "curating":
+            initial_mode = AppMode.CURATING
+        elif initial_mode_str == "cue_maker":
+            initial_mode = AppMode.CUE_MAKER
+        else:
+            initial_mode = AppMode.JUKEBOX
 
         self.mode_manager = ModeManager(initial_mode)
         context.app.mode_manager = self.mode_manager
@@ -62,6 +70,11 @@ class ModeSwitcherPlugin:
             menu, "Curating Mode", lambda: self._set_mode(AppMode.CURATING)
         )
         self.curating_action.setCheckable(True)
+
+        self.cue_maker_action = ui_builder.add_menu_action(
+            menu, "Cue Maker Mode", lambda: self._set_mode(AppMode.CUE_MAKER)
+        )
+        self.cue_maker_action.setCheckable(True)
 
         # Set initial check based on current mode
         if self.mode_manager:
@@ -86,6 +99,8 @@ class ModeSwitcherPlugin:
             self.jukebox_action.setChecked(mode == AppMode.JUKEBOX)
         if self.curating_action:
             self.curating_action.setChecked(mode == AppMode.CURATING)
+        if self.cue_maker_action:
+            self.cue_maker_action.setChecked(mode == AppMode.CUE_MAKER)
 
     def _on_mode_changed(self, mode: AppMode) -> None:
         """Handle mode change and reload plugins."""
@@ -116,7 +131,7 @@ class ModeSwitcherPlugin:
         try:
             # Stop current playback and unload track
             main_window.player.unload()
-            main_window.position_timer.stop()
+            main_window.playback.stop()
 
             # Reset window title
             main_window.setWindowTitle(main_window.config.ui.window_title)
@@ -132,11 +147,14 @@ class ModeSwitcherPlugin:
             main_window.track_list.set_mode(mode.value)
 
             # Reload tracks for new mode (apply search if active)
-            search_query = main_window.search_bar.text().strip()
-            if search_query:
-                main_window._perform_search(search_query)
-            else:
-                main_window._load_tracks_from_db()
+            # In cue_maker mode, keep the existing library tracks as-is
+            # (search is handled by the proxy model, not database FTS5)
+            if mode != AppMode.CUE_MAKER:
+                search_query = main_window.search_bar.text().strip()
+                if search_query:
+                    main_window._perform_search(search_query)
+                else:
+                    main_window._load_tracks_from_db()
 
             logging.info(f"Switched to {mode.value} mode")
 

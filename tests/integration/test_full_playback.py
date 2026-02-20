@@ -32,7 +32,7 @@ class TestFullPlayback:
         assert window.player is not None
         assert window.controls is not None
         assert window.track_list is not None
-        assert window.position_timer is not None
+        assert window.playback is not None
 
     def test_volume_sync_integration(self, qapp, test_config):  # type: ignore
         """Test volume synchronization between components."""
@@ -52,12 +52,12 @@ class TestFullPlayback:
 
         # Play
         window._on_play()
-        assert window.position_timer.isActive()
+        assert window.playback._position_timer.isActive()
 
         # Pause
-        window._on_pause()
-        assert not window.position_timer.isActive()
+        window.playback.pause()
+        assert not window.playback._position_timer.isActive()
 
         # Stop
-        window._on_stop()
-        assert not window.position_timer.isActive()
+        window.playback.stop()
+        assert not window.playback._position_timer.isActive()

@@ -9,6 +9,8 @@ The matching algorithm:
 
 from __future__ import annotations
 
+import logging
+import math
 import os
 from collections import defaultdict
 from dataclasses import dataclass
@@ -23,6 +25,7 @@ from .database import FingerprintDB
 @dataclass
 class Match:
     """A detected track match in the mix."""
+
     track_id: int
     title: str | None
     artist: str | None
@@ -39,12 +42,32 @@ class Match:
 @dataclass
 class CueEntry:
     """A cue sheet entry."""
+
     start_time_ms: int
     track_id: int
     title: str | None
     artist: str | None
     filename: str
     confidence: float
+
+
+
+def _extract_segment_fps(
+    segment_data: np.ndarray,
+    segment_start_ms: int,
+    fp_kwargs: dict,
+) -> list[Fingerprint]:
+    """Extract fingerprints from one segment. Runs in subprocess."""
+    fingerprinter = Fingerprinter(**fp_kwargs)
+    fps = fingerprinter.extract_fingerprints_from_array(segment_data)
+    return [
+        Fingerprint(
+            hash=fp.hash,
+            time_offset_ms=fp.time_offset_ms + segment_start_ms,
+            freq_bin=fp.freq_bin,
+        )
+        for fp in fps
+    ]
 
 
 class Matcher:
@@ -111,7 +134,7 @@ class Matcher:
             # Take middle portion
             samples_to_take = int(max_duration_sec * sr)
             start = (len(y) - samples_to_take) // 2
-            y = y[start:start + samples_to_take]
+            y = y[start : start + samples_to_take]
 
         # Extract fingerprints
         query_fps = self.fingerprinter.extract_fingerprints_from_array(y)
@@ -133,10 +156,14 @@ class Matcher:
         overlap_sec: float = 15.0,
         progress_callback: callable | None = None,
         max_workers: int = 4,
-    ) -> list[Match]:
+        cancelled: callable | None = None,
+        precomputed_fingerprints: list[list[Fingerprint]] | None = None,
+    ) -> tuple[list[Match], list[list[Fingerprint]]]:
         """Analyze a mix file to identify all tracks used.
 
-        Splits the mix into overlapping segments and identifies each in parallel.
+        Splits the mix into overlapping segments, extracts fingerprints in
+        parallel using ProcessPoolExecutor, then matches globally across all
+        segments with tempo-aware search.
 
         Args:
             mix_path: Path to mix audio file
@@ -144,24 +171,64 @@ class Matcher:
             overlap_sec: Overlap between segments
             progress_callback: Optional callback(current, total, message) for progress
             max_workers: Number of parallel workers for segment analysis
+            cancelled: Optional callable returning True if analysis should be aborted
+            precomputed_fingerprints: If provided, skip audio loading and fingerprint
+                extraction; use these segment-grouped fingerprints directly for matching.
 
         Returns:
-            List of all matches found, merged and deduplicated
+            Tuple of (matches, segment-grouped fingerprints for caching)
         """
-        import librosa
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import logging
+
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+
+        logger = logging.getLogger(__name__)
+
+        def is_cancelled() -> bool:
+            return cancelled is not None and cancelled()
 
         def log(msg: str) -> None:
             if progress_callback:
                 progress_callback(-1, -1, msg)
 
-        log(f"Loading audio file...")
+        # Fast path: reuse precomputed fingerprints (skip audio + extraction)
+        if precomputed_fingerprints is not None:
+            log(f"Using cached fingerprints ({len(precomputed_fingerprints)} segments), matching...")
+            matches = self._match_global(
+                precomputed_fingerprints, progress_callback=progress_callback
+            )
+            log(f"Found {len(matches)} unique tracks")
+            return matches, precomputed_fingerprints
 
-        # Load full mix
-        y, sr = librosa.load(mix_path, sr=self.fingerprinter.sample_rate, mono=True)
+        import librosa
+
+        log("Loading audio file...")
+
+        # Decode via ffmpeg to avoid libsndfile ARM64 crash in non-main
+        # threads (mpg123 getcpuflags + setjmp bug).  Manual decode also
+        # avoids the librosa audioread deprecation warning.
+        import audioread.ffdec
+
+        target_sr = self.fingerprinter.sample_rate
+        with audioread.ffdec.FFmpegAudioFile(mix_path) as aro:
+            sr_native = aro.samplerate
+            n_channels = aro.channels
+            frames = []
+            for buf in aro:
+                frames.append(np.frombuffer(buf, dtype=np.int16))
+            y = np.concatenate(frames).astype(np.float32) / 32768.0
+            if n_channels > 1:
+                y = y.reshape(-1, n_channels).mean(axis=1)
+
+        if sr_native != target_sr:
+            y = librosa.resample(y, orig_sr=sr_native, target_sr=target_sr)
+        sr = target_sr
         duration_sec = len(y) / sr
 
         log(f"Mix duration: {duration_sec/60:.1f} minutes")
+
+        if is_cancelled():
+            return [], []
 
         # Calculate segment parameters
         segment_samples = int(segment_duration_sec * sr)
@@ -171,111 +238,375 @@ class Matcher:
         segments: list[tuple[int, np.ndarray]] = []
         position = 0
         while position < len(y):
-            segment = y[position:position + segment_samples]
+            segment = y[position : position + segment_samples]
             if len(segment) < sr * 5:
                 break
             segments.append((position, segment))
             position += hop_samples
 
         total_segments = len(segments)
-        log(f"Processing {total_segments} segments with {max_workers} workers...")
+        log(f"Extracting {total_segments} segments with {max_workers} workers...")
 
-        def process_segment(args: tuple[int, np.ndarray]) -> list[Match]:
-            """Process a single segment and return matches."""
-            pos, segment_data = args
-            segment_fps = self.fingerprinter.extract_fingerprints_from_array(segment_data)
+        # Phase 1 — Extraction with ProcessPoolExecutor (CPU-bound)
+        fp_kwargs = {
+            "sample_rate": self.fingerprinter.sample_rate,
+            "hop_length": self.fingerprinter.hop_length,
+            "n_bins": self.fingerprinter.n_bins,
+            "bins_per_octave": self.fingerprinter.bins_per_octave,
+            "peak_neighborhood": self.fingerprinter.peak_neighborhood,
+            "target_zone": self.fingerprinter.target_zone,
+            "fan_out": self.fingerprinter.fan_out,
+        }
 
-            if not segment_fps:
-                return []
-
-            # Adjust time offsets to be relative to mix start
-            segment_start_ms = int((pos / sr) * 1000)
-            adjusted_fps = [
-                Fingerprint(
-                    hash=fp.hash,
-                    time_offset_ms=fp.time_offset_ms + segment_start_ms,
-                    freq_bin=fp.freq_bin,
-                )
-                for fp in segment_fps
-            ]
-
-            return self._match_fingerprints(adjusted_fps)
-
-        all_matches: list[Match] = []
+        # segment_fps_list[i] = list of adjusted fps for segment i
+        segment_fps_list: list[list[Fingerprint]] = [[] for _ in range(total_segments)]
         completed = 0
 
-        # Process segments in parallel
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(process_segment, seg): seg[0] for seg in segments}
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            future_to_idx = {}
+            for idx, (pos, seg_data) in enumerate(segments):
+                if is_cancelled():
+                    break
+                segment_start_ms = int((pos / sr) * 1000)
+                future = executor.submit(
+                    _extract_segment_fps, seg_data, segment_start_ms, fp_kwargs
+                )
+                future_to_idx[future] = idx
 
-            for future in as_completed(futures):
-                pos = futures[future]
-                try:
-                    matches = future.result()
-                    all_matches.extend(matches)
-                except Exception as e:
-                    log(f"Error processing segment at {pos/sr:.1f}s: {e}")
+            for future in as_completed(future_to_idx):
+                if is_cancelled():
+                    # Cancel remaining futures
+                    for f in future_to_idx:
+                        f.cancel()
+                    return [], []
 
+                idx = future_to_idx[future]
+                segment_fps_list[idx] = future.result()
                 completed += 1
                 if progress_callback:
-                    progress_callback(completed, total_segments, f"Segment {completed}/{total_segments}")
+                    progress_callback(
+                        completed, total_segments, f"Extracting {completed}/{total_segments}"
+                    )
 
-        log(f"Merging {len(all_matches)} raw matches...")
+        if is_cancelled():
+            return [], []
 
-        # Merge and deduplicate matches
-        merged = self._merge_matches(all_matches)
+        total_fps = sum(len(seg) for seg in segment_fps_list)
+        log(f"Matching {total_fps} fingerprints ({total_segments} segments)...")
 
-        log(f"Found {len(merged)} unique tracks")
+        # Phase 2 — Global tempo-aware matching across all segments
+        matches = self._match_global(
+            segment_fps_list, progress_callback=progress_callback
+        )
 
-        return merged
+        log(f"Found {len(matches)} unique tracks")
 
-    def _match_fingerprints(self, query_fps: list[Fingerprint]) -> list[Match]:
-        """Match fingerprints against database using vectorized numpy operations.
+        return matches, segment_fps_list
 
-        Uses histogram-based temporal coherence:
-        1. For each matching hash, compute time offset (query_time - db_time)
-        2. Build histogram of time offsets per track
-        3. Peaks in histogram indicate true matches (aligned in time)
+    def _match_global(
+        self,
+        segment_fps_list: list[list[Fingerprint]],
+        progress_callback: callable | None = None,
+    ) -> list[Match]:
+        """Match all segments globally with tempo-aware search.
+
+        Accumulates all (query_time, db_time) pairs per track across ALL
+        segments, then runs tempo search on the combined data. Uses a
+        statistical significance test to separate real matches from random
+        hash collisions.
 
         Args:
-            query_fps: Query fingerprints
+            segment_fps_list: List of fingerprint lists, one per segment
+            progress_callback: Optional callback(current, total, message)
+
+        Returns:
+            List of matches (no merge needed — already global)
+        """
+        logger = logging.getLogger(__name__)
+
+        def log(msg: str) -> None:
+            if progress_callback:
+                progress_callback(-1, -1, msg)
+
+        # 1. Collect ALL unique hashes across all segments
+        all_unique_hashes: set[int] = set()
+        for seg_fps in segment_fps_list:
+            for fp in seg_fps:
+                all_unique_hashes.add(fp.hash)
+
+        if not all_unique_hashes:
+            return []
+
+        # 2. Single bulk DB query
+        log(f"Querying DB with {len(all_unique_hashes):,} unique hashes...")
+        all_db_matches = self.db.query_fingerprints(list(all_unique_hashes))
+        logger.info("[Matcher] Global: DB returned %d results", len(all_db_matches))
+
+        if not all_db_matches:
+            return []
+
+        # Index DB results by hash
+        db_by_hash: dict[int, list[tuple[int, int]]] = defaultdict(list)
+        for track_id, time_offset_ms, hash_val in all_db_matches:
+            db_by_hash[hash_val].append((track_id, time_offset_ms))
+
+        # 3. Collect all (track_id, query_time, db_time) triples across segments
+        #    Pre-group by track_id for efficiency
+        log("Building match candidates...")
+        track_data: dict[int, list[tuple[int, int]]] = defaultdict(list)
+        for seg_fps in segment_fps_list:
+            qt_by_hash: dict[int, int] = {}
+            for fp in seg_fps:
+                if fp.hash not in qt_by_hash:
+                    qt_by_hash[fp.hash] = fp.time_offset_ms
+            for hash_val, qt in qt_by_hash.items():
+                if hash_val in db_by_hash:
+                    for db_tid, db_time in db_by_hash[hash_val]:
+                        track_data[db_tid].append((qt, db_time))
+
+        # 4. Sort candidate tracks by triple count
+        candidate_tracks = [
+            (tid, len(pairs))
+            for tid, pairs in track_data.items()
+            if len(pairs) >= self.min_matches
+        ]
+        candidate_tracks.sort(key=lambda x: -x[1])
+
+        total_candidates = len(candidate_tracks)
+        log(f"Analyzing {total_candidates:,} candidate tracks...")
+
+        # Stretch ratios to try
+        stretch_ratios = np.arange(0.920, 1.081, 0.005)
+        num_ratios = len(stretch_ratios)
+        bin_width = 200  # ms
+
+        matches: list[Match] = []
+        track_info_cache: dict[int, dict | None] = {}
+
+        for idx, (track_id, raw_count) in enumerate(candidate_tracks):
+            pairs = track_data[track_id]
+
+            arr = np.array(pairs, dtype=np.float64)
+            t_qt = arr[:, 0]
+            t_dt = arr[:, 1]
+            n_pairs = len(pairs)
+
+            # Tempo search: find best stretch ratio
+            best_peak = 0
+            best_ratio = 1.0
+            best_center = 0
+
+            for ratio in stretch_ratios:
+                adjusted = t_qt - t_dt * ratio
+                adj_min, adj_max = adjusted.min(), adjusted.max()
+
+                if adj_max - adj_min < bin_width:
+                    peak = len(adjusted)
+                    center = int(np.median(adjusted))
+                else:
+                    bins = np.arange(adj_min, adj_max + bin_width, bin_width)
+                    hist, _ = np.histogram(adjusted, bins=bins)
+                    peak_idx = int(np.argmax(hist))
+                    peak = int(hist[peak_idx])
+                    center = int(bins[peak_idx] + bin_width // 2)
+
+                if peak > best_peak:
+                    best_peak = peak
+                    best_ratio = float(ratio)
+                    best_center = center
+
+            # Statistical significance test (3x noise threshold)
+            offset_range_ms = float(
+                t_qt.max() - t_qt.min() + t_dt.max() - t_dt.min()
+            )
+            num_bins = max(offset_range_ms / bin_width, 1.0)
+            lam = n_pairs / num_bins
+            log_term = math.log(num_bins * num_ratios)
+            noise_threshold = lam + 3.0 * math.sqrt(max(lam * log_term, 0.0))
+            required = max(3.0 * noise_threshold, 15.0)
+
+            if best_peak < required:
+                continue
+
+            # Build cluster around peak
+            adjusted = t_qt - t_dt * best_ratio
+            half_tol = self.time_tolerance_ms
+            cluster_mask = (adjusted >= best_center - half_tol) & (
+                adjusted <= best_center + half_tol
+            )
+            cluster_count = int(cluster_mask.sum())
+
+            cluster_qt = t_qt[cluster_mask]
+            cluster_dt = t_dt[cluster_mask]
+
+            query_start_ms = int(cluster_qt.min())
+            duration_ms = int(cluster_qt.max() - cluster_qt.min())
+            track_start_ms = int(cluster_dt.min())
+
+            # Require cross-segment evidence
+            if duration_ms < 15000:
+                continue
+
+            # Get track info
+            if track_id not in track_info_cache:
+                track_info_cache[track_id] = self.db.get_track_info(track_id)
+            track_info = track_info_cache[track_id]
+            if not track_info:
+                continue
+
+            # Confidence: how far above noise the peak is
+            significance = best_peak / noise_threshold if noise_threshold > 0 else 0
+            confidence = min(1.0, (significance - 1.0) / 4.0)
+
+            match = Match(
+                track_id=track_id,
+                title=track_info.get("title"),
+                artist=track_info.get("artist"),
+                filename=track_info.get("filename", ""),
+                filepath=track_info.get("filepath", ""),
+                confidence=confidence,
+                query_start_ms=query_start_ms,
+                track_start_ms=max(0, track_start_ms),
+                duration_ms=duration_ms,
+                match_count=cluster_count,
+                time_stretch_ratio=best_ratio,
+            )
+            matches.append(match)
+
+            if progress_callback and (idx + 1) % 100 == 0:
+                progress_callback(
+                    idx + 1, total_candidates, f"Matching {idx + 1}/{total_candidates}"
+                )
+
+        if progress_callback:
+            progress_callback(
+                total_candidates, total_candidates,
+                f"Matching {total_candidates}/{total_candidates}",
+            )
+
+        # Sort by confidence (most significant first)
+        matches.sort(key=lambda m: -m.confidence)
+
+        logger.info("[Matcher] Global: %d tracks identified", len(matches))
+        return matches
+
+    def _match_segments(
+        self,
+        segment_fps_list: list[list[Fingerprint]],
+        progress_callback: callable | None = None,
+    ) -> list[Match]:
+        """Match each segment's fingerprints independently against the database.
+
+        Performs a single bulk DB query for all unique hashes across all segments,
+        then dispatches results per segment for temporal coherence analysis.
+        This avoids repeated DB round-trips (the main bottleneck).
+
+        Args:
+            segment_fps_list: List of fingerprint lists, one per segment
+            progress_callback: Optional callback(current, total, message)
+
+        Returns:
+            List of raw matches from all segments
+        """
+        import logging
+        from collections import defaultdict
+
+        logger = logging.getLogger(__name__)
+
+        total = len(segment_fps_list)
+
+        # Collect ALL unique hashes across all segments
+        all_unique_hashes: set[int] = set()
+        for seg_fps in segment_fps_list:
+            for fp in seg_fps:
+                all_unique_hashes.add(fp.hash)
+
+        if not all_unique_hashes:
+            return []
+
+        # Single bulk DB query
+        logger.info(
+            "[Matcher] Querying DB with %d unique hashes from %d segments...",
+            len(all_unique_hashes),
+            total,
+        )
+        all_db_matches = self.db.query_fingerprints(list(all_unique_hashes))
+        logger.info("[Matcher] DB returned %d results", len(all_db_matches))
+
+        if not all_db_matches:
+            return []
+
+        # Index DB results by hash for fast per-segment dispatch
+        db_by_hash: dict[int, list[tuple[int, int]]] = defaultdict(list)
+        for track_id, time_offset_ms, hash_val in all_db_matches:
+            db_by_hash[hash_val].append((track_id, time_offset_ms))
+
+        # Match each segment independently using the pre-fetched DB results
+        all_matches: list[Match] = []
+        for i, seg_fps in enumerate(segment_fps_list):
+            if seg_fps:
+                matches = self._match_fingerprints_with_db(seg_fps, db_by_hash)
+                if matches:
+                    logger.info(
+                        "[Matcher] Segment %d/%d: %d fps -> %d matches",
+                        i + 1,
+                        total,
+                        len(seg_fps),
+                        len(matches),
+                    )
+                all_matches.extend(matches)
+            if progress_callback:
+                progress_callback(i + 1, total, f"Matching {i + 1}/{total}")
+
+        logger.info("[Matcher] Total: %d raw matches from %d segments", len(all_matches), total)
+        return all_matches
+
+    def _match_fingerprints_with_db(
+        self,
+        query_fps: list[Fingerprint],
+        db_by_hash: dict[int, list[tuple[int, int]]],
+    ) -> list[Match]:
+        """Match segment fingerprints using pre-fetched DB results.
+
+        Tempo-aware matching: DJ mixes involve BPM changes, so the time offset
+        between query and DB fingerprints is NOT constant but follows
+        query_time = mix_start + db_time * stretch_ratio.
+
+        For each candidate track, we search over stretch ratios (0.92–1.08)
+        and use histogram peak detection to find the best alignment.
+
+        Args:
+            query_fps: Query fingerprints for one segment
+            db_by_hash: Pre-fetched DB results indexed by hash
 
         Returns:
             List of matches
         """
-        # Get unique hashes to query
-        unique_hashes = list(set(fp.hash for fp in query_fps))
-        db_matches = self.db.query_fingerprints(unique_hashes)
-
-        if not db_matches:
-            return []
-
         # Build lookup: hash -> first query time
         query_time_by_hash: dict[int, int] = {}
         for fp in query_fps:
             if fp.hash not in query_time_by_hash:
                 query_time_by_hash[fp.hash] = fp.time_offset_ms
 
-        # Filter db_matches to only those with matching hashes and build arrays
-        filtered_matches = [
-            (track_id, db_time, hash_val)
-            for track_id, db_time, hash_val in db_matches
-            if hash_val in query_time_by_hash
-        ]
+        # Gather DB matches for this segment's hashes
+        filtered_matches: list[tuple[int, int, int]] = []
+        for hash_val, query_time in query_time_by_hash.items():
+            if hash_val in db_by_hash:
+                for track_id, db_time in db_by_hash[hash_val]:
+                    filtered_matches.append((track_id, db_time, hash_val))
 
         if not filtered_matches:
             return []
 
         # Convert to numpy arrays for vectorized operations
         db_track_ids = np.array([m[0] for m in filtered_matches], dtype=np.int32)
-        db_times = np.array([m[1] for m in filtered_matches], dtype=np.int32)
+        db_times = np.array([m[1] for m in filtered_matches], dtype=np.float64)
         db_hashes = np.array([m[2] for m in filtered_matches], dtype=np.int64)
 
         # Vectorized: get query times for each db match
-        query_times = np.array([query_time_by_hash[h] for h in db_hashes], dtype=np.int32)
-
-        # Compute all offsets at once
-        offsets = query_times - db_times
+        query_times = np.array(
+            [query_time_by_hash[h] for h in db_hashes], dtype=np.float64
+        )
 
         # Get unique tracks and their best matches
         unique_tracks = np.unique(db_track_ids)
@@ -285,70 +616,102 @@ class Matcher:
         track_counts.sort(key=lambda x: -x[1])
         top_tracks = [t for t, c in track_counts[:100] if c >= self.min_matches]
 
+        # Stretch ratios to try (0.92 to 1.08 in 0.5% steps)
+        stretch_ratios = np.arange(0.920, 1.081, 0.005)
+
         matches: list[Match] = []
         total_query_fps = len(query_fps)
         track_info_cache: dict[int, dict | None] = {}
+        bin_width = 200  # ms — wider bins for tempo-adjusted matching
 
         for track_id_np in top_tracks:
-            track_id = int(track_id_np)  # Convert numpy int to Python int
+            track_id = int(track_id_np)
 
-            # Get offsets for this track
+            # Get data for this track
             mask = db_track_ids == track_id_np
-            track_offsets = offsets[mask]
+            track_query_times = query_times[mask]
+            track_db_times = db_times[mask]
 
-            if len(track_offsets) < self.min_matches:
+            if len(track_query_times) < self.min_matches:
                 continue
 
-            # Fast histogram using numpy
-            bin_width = 100  # ms
-            if len(track_offsets) > 0:
-                min_off, max_off = track_offsets.min(), track_offsets.max()
-                if max_off - min_off < bin_width:
-                    # All offsets in one bin
-                    best_count = len(track_offsets)
-                    best_offset = int(np.median(track_offsets))
+            # Search over stretch ratios for best temporal coherence
+            best_peak = 0
+            best_ratio = 1.0
+            best_center = 0
+
+            for ratio in stretch_ratios:
+                adjusted = track_query_times - track_db_times * ratio
+                adj_min, adj_max = adjusted.min(), adjusted.max()
+
+                if adj_max - adj_min < bin_width:
+                    peak = len(adjusted)
+                    center = int(np.median(adjusted))
                 else:
-                    bins = np.arange(min_off, max_off + bin_width, bin_width)
-                    hist, edges = np.histogram(track_offsets, bins=bins)
-                    best_bin = np.argmax(hist)
-                    best_count = int(hist[best_bin])
-                    best_offset = int(edges[best_bin] + bin_width // 2)
+                    bins = np.arange(adj_min, adj_max + bin_width, bin_width)
+                    hist, _ = np.histogram(adjusted, bins=bins)
+                    idx = int(np.argmax(hist))
+                    peak = int(hist[idx])
+                    center = int(bins[idx] + bin_width // 2)
 
-                if best_count < self.min_matches:
-                    continue
+                if peak > best_peak:
+                    best_peak = peak
+                    best_ratio = float(ratio)
+                    best_center = center
 
-                # Get track info (cached)
-                if track_id not in track_info_cache:
-                    track_info_cache[track_id] = self.db.get_track_info(track_id)
-                track_info = track_info_cache[track_id]
+            # Quality gate: require min_matches in best bin
+            if best_peak < self.min_matches:
+                continue
 
-                if not track_info:
-                    continue
+            # Build cluster around peak with best ratio
+            adjusted = track_query_times - track_db_times * best_ratio
+            half_tol = self.time_tolerance_ms
+            cluster_mask = (adjusted >= best_center - half_tol) & (
+                adjusted <= best_center + half_tol
+            )
+            cluster_count = int(cluster_mask.sum())
 
-                # Calculate confidence
-                match_ratio = best_count / total_query_fps
-                confidence = min(1.0, match_ratio * 5)  # Simplified scoring
+            # Position in the MIX
+            cluster_qt = track_query_times[cluster_mask]
+            cluster_dt = track_db_times[cluster_mask]
+            query_start_ms = int(cluster_qt.min())
+            duration_ms = int(cluster_qt.max() - cluster_qt.min())
 
-                match = Match(
-                    track_id=track_id,
-                    title=track_info.get("title"),
-                    artist=track_info.get("artist"),
-                    filename=track_info.get("filename", ""),
-                    filepath=track_info.get("filepath", ""),
-                    confidence=confidence,
-                    query_start_ms=max(0, best_offset),
-                    track_start_ms=max(0, -best_offset),
-                    duration_ms=0,
-                    match_count=int(best_count),
-                    time_stretch_ratio=1.0,
-                )
-                matches.append(match)
+            # Position in the ORIGINAL TRACK
+            track_start_ms = int(cluster_dt.min())
+
+            # Get track info (cached)
+            if track_id not in track_info_cache:
+                track_info_cache[track_id] = self.db.get_track_info(track_id)
+            track_info = track_info_cache[track_id]
+
+            if not track_info:
+                continue
+
+            # Confidence based on peak bin count
+            match_ratio = best_peak / total_query_fps
+            confidence = min(1.0, match_ratio * 5)
+
+            match = Match(
+                track_id=track_id,
+                title=track_info.get("title"),
+                artist=track_info.get("artist"),
+                filename=track_info.get("filename", ""),
+                filepath=track_info.get("filepath", ""),
+                confidence=confidence,
+                query_start_ms=query_start_ms,
+                track_start_ms=max(0, track_start_ms),
+                duration_ms=duration_ms,
+                match_count=cluster_count,
+                time_stretch_ratio=best_ratio,
+            )
+            matches.append(match)
 
         # Sort by match count (most reliable metric)
         matches.sort(key=lambda m: -m.match_count)
 
-        # Filter by minimum confidence and keep top results
-        matches = [m for m in matches if m.confidence >= self.min_confidence][:20]
+        # Filter by minimum confidence and keep top results per segment
+        matches = [m for m in matches if m.confidence >= self.min_confidence][:50]
 
         return matches
 
@@ -394,6 +757,9 @@ class Matcher:
     def _merge_matches(self, matches: list[Match]) -> list[Match]:
         """Merge overlapping matches for the same track.
 
+        After merging, filters out weak matches that were only found in a
+        single segment (likely false positives from hash collisions).
+
         Args:
             matches: List of matches (may have duplicates)
 
@@ -416,6 +782,7 @@ class Matcher:
 
             # Merge overlapping matches
             current = track_matches[0]
+            segment_count = 1
 
             for m in track_matches[1:]:
                 # Check if overlapping (within 30 seconds)
@@ -423,7 +790,7 @@ class Matcher:
                     # Merge: extend duration, sum match count, average confidence
                     new_end = max(
                         current.query_start_ms + current.duration_ms,
-                        m.query_start_ms + m.duration_ms
+                        m.query_start_ms + m.duration_ms,
                     )
                     current = Match(
                         track_id=current.track_id,
@@ -438,11 +805,15 @@ class Matcher:
                         match_count=current.match_count + m.match_count,
                         time_stretch_ratio=(current.time_stretch_ratio + m.time_stretch_ratio) / 2,
                     )
+                    segment_count += 1
                 else:
-                    merged.append(current)
+                    if segment_count >= 2:
+                        merged.append(current)
                     current = m
+                    segment_count = 1
 
-            merged.append(current)
+            if segment_count >= 2:
+                merged.append(current)
 
         # Sort by query position
         merged.sort(key=lambda m: m.query_start_ms)

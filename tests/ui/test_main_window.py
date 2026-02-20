@@ -16,42 +16,42 @@ class TestMainWindow:
         assert window.controls is not None
         assert window.track_list is not None
 
-    def test_position_timer_exists(self, qapp, test_config):  # type: ignore
-        """Test position timer is created."""
+    def test_playback_controller_exists(self, qapp, test_config):  # type: ignore
+        """Test playback controller with position timer is created."""
         window = MainWindow(test_config)
 
-        assert window.position_timer is not None
-        assert window.position_timer.interval() == 100
-        assert not window.position_timer.isActive()
+        assert window.playback is not None
+        assert window.playback._position_timer.interval() == 100
+        assert not window.playback._position_timer.isActive()
 
     def test_play_starts_timer(self, qapp, test_config):  # type: ignore
         """Test play button starts position timer."""
         window = MainWindow(test_config)
 
-        assert not window.position_timer.isActive()
+        assert not window.playback._position_timer.isActive()
 
         window._on_play()
 
-        assert window.position_timer.isActive()
+        assert window.playback._position_timer.isActive()
 
     def test_pause_stops_timer(self, qapp, test_config):  # type: ignore
         """Test pause button stops position timer."""
         window = MainWindow(test_config)
 
         window._on_play()
-        assert window.position_timer.isActive()
+        assert window.playback._position_timer.isActive()
 
-        window._on_pause()
-        assert not window.position_timer.isActive()
+        window.playback.pause()
+        assert not window.playback._position_timer.isActive()
 
     def test_stop_emits_position_update(self, qapp, test_config):  # type: ignore
         """Test stop emits position update event."""
         window = MainWindow(test_config)
 
         window._on_play()
-        window._on_stop()
+        window.playback.stop()
 
-        assert not window.position_timer.isActive()
+        assert not window.playback._position_timer.isActive()
 
     def test_initial_volume(self, qapp, test_config):  # type: ignore
         """Test initial volume is set from config."""

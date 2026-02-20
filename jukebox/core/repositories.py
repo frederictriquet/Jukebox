@@ -91,6 +91,10 @@ class TrackRepository(BaseRepository):
         Returns:
             List of matching tracks
         """
+        # Escape FTS5 special characters by quoting each term
+        terms = query.split()
+        safe_query = " ".join(f'"{t}"' for t in terms) if terms else query
+
         if mode:
             cursor = self._conn.execute(
                 """
@@ -101,7 +105,7 @@ class TrackRepository(BaseRepository):
                 ORDER BY rank
                 LIMIT ?
             """,
-                (query, mode, limit),
+                (safe_query, mode, limit),
             )
         else:
             cursor = self._conn.execute(
@@ -113,7 +117,7 @@ class TrackRepository(BaseRepository):
                 ORDER BY rank
                 LIMIT ?
             """,
-                (query, limit),
+                (safe_query, limit),
             )
         return cursor.fetchall()
 

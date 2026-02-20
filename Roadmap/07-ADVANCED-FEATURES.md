@@ -511,6 +511,20 @@ Interactive directory navigation for jukebox mode. Allows users to browse and fi
 - [x] Documentation (inline + README plugin + CLAUDE.md)
 - [x] Capitalisation (3 patterns créés dans SERENA)
 
+### Cue Maker Mode (Terminé ✅)
+- [x] **DONE** - Complété 2026-02-19, prêt pour merge
+- [x] ModeManager: support 3 modes (JUKEBOX, CURATING, CUE_MAKER)
+- [x] Core model: CueEntry + CueSheet + EntryStatus enums
+- [x] Analyzer: ShazamixWorker pour analyse asynchrone
+- [x] Exporter: CueExporter pour export format CUE standard
+- [x] Table model: CueTableModel + column definitions
+- [x] Main widget: CueMakerWidget avec waveform et contrôles
+- [x] Plugin integration: Drawer layout, tab UI, state management
+- [x] Search & Filter: Dual button set (toolbar + drawer) + proxy-only filtering
+- [x] Mode switching: Preserve layout, handle widget reparenting
+- [x] Comprehensive tests (70+ unit + integration tests)
+- [x] Documentation (inline + patterns + bug capitalization)
+
 ---
 
 ## Prochaine Phase

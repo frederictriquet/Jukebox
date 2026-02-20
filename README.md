@@ -143,6 +143,31 @@ plugins:
     - genre_filter
 ```
 
+#### Cue Maker
+Create cue sheets for DJ mixes with automatic track recognition in cue_maker mode.
+
+- **Status**: ✅ Stable
+- **Mode**: Cue Maker
+- **Description**: Dedicated mode for analyzing DJ mixes and generating standard .cue files. Uses audio fingerprinting (shazamix) to automatically identify tracks in a mix, with manual editing capabilities.
+- **Features**:
+  - Automatic track identification via audio fingerprinting
+  - Manual timestamp and metadata editing
+  - Waveform visualization with cue point markers
+  - Import metadata from Jukebox library
+  - Import existing .cue files for editing
+  - Export to standard CUE format (compatible with CDJs, Rekordbox, VirtualDJ)
+  - Intelligent caching of fingerprints and waveforms
+- **Documentation**: See [plugins/cue_maker/README.md](plugins/cue_maker/README.md)
+
+Enable in `config/config.yaml`:
+```yaml
+plugins:
+  enabled:
+    - cue_maker
+```
+
+Switch to Cue Maker mode: **Mode** → **Cue Maker Mode**
+
 ### Plugin Development
 
 See [CLAUDE.md](CLAUDE.md#plugin-development) for plugin development guide and architecture details.

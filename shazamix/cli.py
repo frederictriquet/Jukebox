@@ -227,15 +227,27 @@ def cmd_analyze(args: argparse.Namespace) -> int:
                 print(f"[{current}/{total}] {message} - {rate:.1f} seg/s - ETA: {remaining:.0f}s")
                 last_progress[0] = current
 
+    # Try loading cached fingerprints
+    from plugins.cue_maker.cache import load_cached_fingerprints, save_fingerprints_cache
+
+    cached_fps = load_cached_fingerprints(args.file)
+    if cached_fps is not None:
+        print(f"[*] Using cached fingerprints ({len(cached_fps)} segments)")
+
     start = time.time()
-    matches = matcher.analyze_mix(
+    matches, fingerprints = matcher.analyze_mix(
         args.file,
         segment_duration_sec=args.segment,
         overlap_sec=args.overlap,
         progress_callback=progress_callback,
         max_workers=args.workers,
+        precomputed_fingerprints=cached_fps,
     )
     elapsed = time.time() - start
+
+    # Save fingerprints to cache if freshly extracted
+    if cached_fps is None and fingerprints:
+        save_fingerprints_cache(args.file, fingerprints)
 
     if not matches:
         print("\nNo tracks identified.")

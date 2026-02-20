@@ -10,6 +10,7 @@ class AppMode(Enum):
 
     JUKEBOX = "jukebox"
     CURATING = "curating"
+    CUE_MAKER = "cue_maker"
 
 
 class ModeManager(QObject):
@@ -61,6 +62,8 @@ class ModeManager(QObject):
         return self._current_mode == AppMode.CURATING
 
     def toggle_mode(self) -> None:
-        """Toggle between jukebox and curating modes."""
-        new_mode = AppMode.CURATING if self.is_jukebox_mode() else AppMode.JUKEBOX
-        self.set_mode(new_mode)
+        """Cycle through all application modes (JUKEBOX → CURATING → CUE_MAKER → JUKEBOX)."""
+        mode_cycle = [AppMode.JUKEBOX, AppMode.CURATING, AppMode.CUE_MAKER]
+        current_index = mode_cycle.index(self._current_mode)
+        next_index = (current_index + 1) % len(mode_cycle)
+        self.set_mode(mode_cycle[next_index])

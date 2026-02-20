@@ -4,15 +4,9 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QApplication,
-    QFileDialog,
-    QHBoxLayout,
     QMainWindow,
-    QMessageBox,
-    QProgressDialog,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -22,6 +16,7 @@ from jukebox.core.config import JukeboxConfig
 from jukebox.core.database import Database
 from jukebox.core.event_bus import EventBus, Events
 from jukebox.core.mode_manager import AppMode, ModeManager
+from jukebox.core.playback_controller import PlaybackController
 from jukebox.core.plugin_manager import PluginContext, PluginManager
 from jukebox.core.shortcut_manager import ShortcutManager
 from jukebox.ui.components.player_controls import PlayerControls
@@ -29,8 +24,8 @@ from jukebox.ui.components.search_bar import SearchBar
 from jukebox.ui.components.track_cell_renderer import WaveformStyler
 from jukebox.ui.components.track_list import TrackList
 from jukebox.ui.ui_builder import UIBuilder
-from jukebox.utils.metadata import MetadataExtractor
-from jukebox.utils.scanner import FileScanner
+
+logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
@@ -60,6 +55,9 @@ class MainWindow(QMainWindow):
         # Event bus
         self.event_bus = EventBus()
 
+        # Playback controller — owns position polling and POSITION_UPDATE emission
+        self.playback = PlaybackController(self.player, self.event_bus, self.database, parent=self)
+
         # Subscribe to events
         self.event_bus.subscribe(Events.TRACKS_ADDED, self._on_tracks_changed)
         # Subscribe to TRACK_DELETED early so MainWindow is called BEFORE TrackListModel
@@ -74,11 +72,6 @@ class MainWindow(QMainWindow):
         self.event_bus.subscribe(
             Events.POSITION_SEEKING_PROVIDED, self._on_position_seeking_provided
         )
-
-        # Timer for updating position
-        self.position_timer = QTimer()
-        self.position_timer.setInterval(100)
-        self.position_timer.timeout.connect(self._update_position)
 
         # Fallback position slider (if no plugin provides position seeking)
         self.fallback_position_slider: Any = None
@@ -99,21 +92,15 @@ class MainWindow(QMainWindow):
         central = QWidget()
         layout = QVBoxLayout()
 
-        # Toolbar
-        toolbar = QHBoxLayout()
-        self.add_files_btn = QPushButton("Add Files...")
-        self.scan_dir_btn = QPushButton("Scan Directory...")
-        self.add_files_btn.clicked.connect(self._add_files)
-        self.scan_dir_btn.clicked.connect(self._scan_directory)
-        toolbar.addWidget(self.add_files_btn)
-        toolbar.addWidget(self.scan_dir_btn)
-        toolbar.addStretch()
-        layout.addLayout(toolbar)
-
         # Search bar
         self.search_bar = SearchBar()
         self.search_bar.search_triggered.connect(self._perform_search)
         layout.addWidget(self.search_bar)
+
+        # Placeholder for genre filter buttons (populated by search_and_filter plugin)
+        self.genre_buttons_area = QWidget()
+        self.genre_buttons_area.setFixedHeight(0)  # hidden until plugin populates it
+        layout.addWidget(self.genre_buttons_area, stretch=0)
 
         # Configure waveform cache size from config
         WaveformStyler.configure(self.config.ui.waveform_cache_size)
@@ -149,15 +136,20 @@ class MainWindow(QMainWindow):
         # Drag and drop
         self.track_list.files_dropped.connect(self._on_files_dropped)
 
-        # Player controls
+        # Player controls → playback controller
         self.controls.play_clicked.connect(self._on_play)
-        self.controls.pause_clicked.connect(self._on_pause)
-        self.controls.stop_clicked.connect(self._on_stop)
+        self.controls.pause_clicked.connect(self.playback.pause)
+        self.controls.stop_clicked.connect(self.playback.stop)
         self.controls.volume_changed.connect(self.player.set_volume)
 
         # Player feedback
         self.player.volume_changed.connect(self.controls.set_volume)
-        self.player.state_changed.connect(self._on_player_state_changed)
+
+        # Playback controller → UI
+        self.playback.track_started.connect(self._on_track_started)
+
+        # Playlist management
+        self.track_list.add_to_playlist_requested.connect(self._on_add_to_playlist)
 
     def _register_shortcuts(self) -> None:
         """Register default keyboard shortcuts."""
@@ -166,8 +158,8 @@ class MainWindow(QMainWindow):
 
         # Playback controls
         self.shortcut_manager.register(shortcuts.play_pause, self._toggle_play_pause)
-        self.shortcut_manager.register(shortcuts.pause, self._on_pause)
-        self.shortcut_manager.register(shortcuts.stop, self._on_stop)
+        self.shortcut_manager.register(shortcuts.pause, self.playback.pause)
+        self.shortcut_manager.register(shortcuts.stop, self.playback.stop)
 
         # Volume controls
         self.shortcut_manager.register(shortcuts.volume_up, self._increase_volume)
@@ -183,7 +175,7 @@ class MainWindow(QMainWindow):
     def _toggle_play_pause(self) -> None:
         """Toggle between play and pause."""
         if self.player.is_playing():
-            self._on_pause()
+            self.playback.pause()
         else:
             self._on_play()
 
@@ -197,62 +189,24 @@ class MainWindow(QMainWindow):
         current = self.player.get_volume()
         self.player.set_volume(max(0, current - 10))
 
-    def _add_files(self) -> None:
-        """Open file dialog to add audio files."""
-        formats = " ".join(f"*.{fmt}" for fmt in self.config.audio.supported_formats)
-        files, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Select Audio Files",
-            str(self.config.audio.music_directory),
-            f"Audio Files ({formats});;All Files (*)",
-        )
+    def _perform_search(self, query: str) -> None:
+        """Perform FTS5 search within current mode.
 
-        if files:
-            mode = self._get_current_mode()
-            for file in files:
-                filepath = Path(file)
-                metadata = MetadataExtractor.extract(filepath)
-                self.database.add_track(metadata, mode=mode)
+        No-op in cue_maker mode: search is handled entirely by GenreFilterProxyModel
+        (search_and_filter plugin). Reloading from the database in cue_maker mode
+        would return 0 tracks because no tracks have mode='cue_maker' in the DB.
+        """
+        mode = self._get_current_mode()
 
-            self._load_tracks_from_db()
-
-    def _scan_directory(self) -> None:
-        """Scan directory for audio files."""
-        directory = QFileDialog.getExistingDirectory(
-            self, "Select Music Directory", str(self.config.audio.music_directory)
-        )
-
-        if not directory:
+        # In cue_maker mode, search is handled by the proxy model (search_and_filter plugin)
+        # Don't clear/reload tracks from database as there are no "cue_maker" mode tracks
+        if mode == "cue_maker":
             return
 
-        progress = QProgressDialog("Scanning...", "Cancel", 0, 100, self)
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-
-        def update_progress(current: int, total: int) -> None:
-            progress.setValue(int(current / total * 100))
-            QApplication.processEvents()
-
-        mode = self._get_current_mode()
-        scanner = FileScanner(
-            self.database, self.config.audio.supported_formats, update_progress, mode=mode
-        )
-        added = scanner.scan_directory(Path(directory), recursive=True)
-
-        progress.close()
-        QMessageBox.information(self, "Scan Complete", f"Added {added} tracks to {mode} mode")
-        self._load_tracks_from_db()
-
-        # Emit event to notify plugins (start batch processing)
-        if added > 0:
-            self.event_bus.emit(Events.TRACKS_ADDED)
-
-    def _perform_search(self, query: str) -> None:
-        """Perform FTS5 search within current mode."""
         # Save current playing track
         current_track = self.player.current_file if self.player.current_file else None
 
         self.track_list.clear_tracks()
-        mode = self._get_current_mode()
         if not query:
             tracks = self.database.get_all_tracks(mode=mode)
         else:
@@ -320,8 +274,7 @@ class MainWindow(QMainWindow):
 
         # Stop current playback if the deleted file was playing
         if was_deleted_file_playing:
-            self.player.stop()
-            # Timer is managed by _on_player_state_changed
+            self.playback.stop()
             logging.debug("[MainWindow] Stopped playback of deleted track")
 
             # Calculate next track to play BEFORE the model removes the row
@@ -415,26 +368,8 @@ class MainWindow(QMainWindow):
         self.event_bus.emit(Events.TRACKS_ADDED)
 
     def _load_and_play(self, filepath: Path) -> None:
-        """Load and play selected track.
-
-        Args:
-            filepath: Path to audio file
-        """
-        if self.player.load(filepath):
-            # Get track ID and emit event
-            if self.database.conn:
-                track = self.database.conn.execute(
-                    "SELECT id FROM tracks WHERE filepath = ?", (str(filepath),)
-                ).fetchone()
-                if track:
-                    logging.debug(f"[MainWindow] Emitting TRACK_LOADED: id={track['id']}")
-                    self.event_bus.emit(Events.TRACK_LOADED, track_id=track["id"])
-                else:
-                    logging.error(f"[MainWindow] Could not find track in database: {filepath}")
-
-            self.player.play()
-            self.setWindowTitle(f"{self.config.ui.window_title} - {filepath.name}")
-            # Timer is managed by _on_player_state_changed
+        """Load and play selected track via the playback controller."""
+        self.playback.load_and_play(filepath)
 
     def _on_play(self) -> None:
         """Handle play button click."""
@@ -445,47 +380,41 @@ class MainWindow(QMainWindow):
                 self.track_list.selectRow(0)
                 selected = self.track_list.get_selected_track()
             if selected:
-                self._load_and_play(selected)
+                self.playback.load_and_play(selected)
                 return
 
-        self.player.play()
-        # Timer is managed by _on_player_state_changed
+        self.playback.play()
 
-    def _on_pause(self) -> None:
-        """Handle pause button click."""
-        self.player.pause()
-        # Timer is managed by _on_player_state_changed
+    def _on_track_started(self, filepath: str) -> None:
+        """Update window title when a library track starts playing."""
+        self.setWindowTitle(f"{self.config.ui.window_title} - {Path(filepath).name}")
 
-    def _on_stop(self) -> None:
-        """Handle stop button click."""
-        self.player.stop()
-        # Timer and position reset are managed by _on_player_state_changed
-
-    def _on_player_state_changed(self, state: str) -> None:
-        """Handle player state changes (from any source, including plugins).
-
-        Centralizes position timer management - all play/pause/stop actions
-        trigger this via the player's state_changed signal.
-        """
-        if state == "playing":
-            self.position_timer.start()
-        elif state == "paused":
-            self.position_timer.stop()
-        elif state == "stopped":
-            self.position_timer.stop()
-            self.event_bus.emit(Events.POSITION_UPDATE, position=0.0)
-
-    def _update_position(self) -> None:
-        """Update position based on player position."""
-        if self.player.is_playing():
-            position = self.player.get_position()
-            # Emit for plugins (waveform cursor)
-            self.event_bus.emit(Events.POSITION_UPDATE, position=position)
-            # Update fallback slider if exists
-            if self.fallback_position_slider and self.fallback_position_slider.isVisible():
-                self.fallback_position_slider.blockSignals(True)
-                self.fallback_position_slider.setValue(int(position * 1000))
-                self.fallback_position_slider.blockSignals(False)
+    def _on_add_to_playlist(self, filepath: Path, playlist_id: int) -> None:
+        """Add a track to a playlist in the database."""
+        if not self.database.conn:
+            return
+        # Find track ID from filepath
+        row = self.database.conn.execute(
+            "SELECT id FROM tracks WHERE filepath = ?", (str(filepath),)
+        ).fetchone()
+        if not row:
+            return
+        track_id = row["id"]
+        # Get next position
+        pos_row = self.database.conn.execute(
+            "SELECT COALESCE(MAX(position), 0) + 1 AS next_pos FROM playlist_tracks WHERE playlist_id = ?",
+            (playlist_id,),
+        ).fetchone()
+        next_pos = pos_row["next_pos"] if pos_row else 1
+        try:
+            self.database.conn.execute(
+                "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)",
+                (playlist_id, track_id, next_pos),
+            )
+            self.database.conn.commit()
+            logger.info("Added track %s to playlist %d", filepath.name, playlist_id)
+        except Exception:
+            logger.exception("Failed to add track to playlist")
 
     def _load_plugins(self) -> None:
         """Load all plugins."""
@@ -518,6 +447,7 @@ class MainWindow(QMainWindow):
             self.fallback_position_slider.sliderMoved.connect(
                 lambda val: self.player.set_position(val / 1000.0)
             )
+            self.event_bus.subscribe(Events.POSITION_UPDATE, self._update_fallback_slider)
             # Add to bottom layout
             central = self.centralWidget()
             layout = central.layout() if central else None
@@ -537,6 +467,13 @@ class MainWindow(QMainWindow):
         This prevents MainWindow from adding a fallback position slider.
         """
         self._position_seeking_provided = True
+
+    def _update_fallback_slider(self, position: float) -> None:
+        """Update fallback position slider from POSITION_UPDATE event."""
+        if self.fallback_position_slider and self.fallback_position_slider.isVisible():
+            self.fallback_position_slider.blockSignals(True)
+            self.fallback_position_slider.setValue(int(position * 1000))
+            self.fallback_position_slider.blockSignals(False)
 
     def _on_select_next_track(self) -> None:
         """Handle SELECT_NEXT_TRACK event."""
