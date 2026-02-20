@@ -110,6 +110,16 @@ class PlaybackController(QObject):
         """Stop playback."""
         self._player.stop()
 
+    def release_track(self) -> None:
+        """Release the current library track.
+
+        Allows external controllers (e.g., cue_maker plugin) to take over
+        the player without interfering with library track position polling.
+        After calling this, the position timer will not emit POSITION_UPDATE
+        until a new library track is loaded via load_and_play().
+        """
+        self._current_track_filepath = None
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------

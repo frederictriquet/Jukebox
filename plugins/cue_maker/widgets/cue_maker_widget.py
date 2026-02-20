@@ -23,11 +23,9 @@ from PySide6.QtGui import (
     QColor,
     QDragEnterEvent,
     QDropEvent,
-    QKeySequence,
     QPainter,
     QPen,
     QPolygon,
-    QShortcut,
 )
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -49,11 +47,12 @@ from PySide6.QtWidgets import (
 from jukebox.core.event_bus import Events
 from plugins.cue_maker.constants import (
     ACTION_DELETE,
+    ACTION_IMPORT,
     ACTION_INSERT,
-    ACTION_SNAP_NEXT,
-    ACTION_SNAP_PREV,
+    ACTION_SEARCH,
     TableColumn,
 )
+from plugins.cue_maker.model import EntryStatus
 from plugins.cue_maker.table_model import CueTableModel
 
 if TYPE_CHECKING:
@@ -65,12 +64,15 @@ logger = logging.getLogger(__name__)
 _ACTIONS = [
     (ACTION_DELETE, "Delete entry"),
     (ACTION_INSERT, "Insert entry after"),
+    (ACTION_IMPORT, "Import from library track"),
+    (ACTION_SEARCH, "Search in library"),
 ]
 _ACTION_ICON_WIDTH = 22
 
 _HANDLE_TOLERANCE = 6
 _MIN_DURATION_MS = 1000
 _SNAP_THRESHOLD_PX = 5
+_AUDIO_EXTENSIONS = ('.mp3', '.flac', '.wav', '.aiff', '.aif', '.ogg', '.m4a')
 
 
 class CueTimingBar(QWidget):
@@ -269,6 +271,23 @@ class ActionsDelegate(QStyledItemDelegate):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
+    @staticmethod
+    def _actions_for_index(
+        index: QModelIndex,
+    ) -> list[tuple[str, str, int]]:
+        """Return (icon, tooltip, global_action_index) tuples visible for this row."""
+        actions: list[tuple[str, str, int]] = []
+        for i, (icon, tooltip) in enumerate(_ACTIONS):
+            if icon == ACTION_IMPORT:
+                # Only show import button for manual entries
+                model = index.model()
+                if model is not None:
+                    entry = model.get_entry(index.row())
+                    if entry is None or entry.status != EntryStatus.MANUAL:
+                        continue
+            actions.append((icon, tooltip, i))
+        return actions
+
     def paint(
         self,
         painter: QPainter,
@@ -294,7 +313,7 @@ class ActionsDelegate(QStyledItemDelegate):
         y = option.rect.top()
         h = option.rect.height()
 
-        for icon, _tooltip in _ACTIONS:
+        for icon, _tooltip, _gi in self._actions_for_index(index):
             icon_rect = QRect(x, y, _ACTION_ICON_WIDTH, h)
             painter.drawText(icon_rect, Qt.AlignmentFlag.AlignCenter, icon)
             x += _ACTION_ICON_WIDTH
@@ -312,11 +331,13 @@ class ActionsDelegate(QStyledItemDelegate):
         if event.type() != QEvent.Type.MouseButtonRelease:
             return False
 
+        actions = self._actions_for_index(index)
         x_click = event.position().x() - option.rect.left() - 2  # type: ignore[union-attr]
-        action_idx = int(x_click // _ACTION_ICON_WIDTH)
+        visual_idx = int(x_click // _ACTION_ICON_WIDTH)
 
-        if 0 <= action_idx < len(_ACTIONS):
-            self.action_triggered.emit(index.row(), action_idx)
+        if 0 <= visual_idx < len(actions):
+            _icon, _tooltip, global_idx = actions[visual_idx]
+            self.action_triggered.emit(index.row(), global_idx)
             return True
         return False
 
@@ -331,15 +352,16 @@ class ActionsDelegate(QStyledItemDelegate):
         if event.type() != QEvent.Type.ToolTip:
             return super().helpEvent(event, view, option, index)
 
+        actions = self._actions_for_index(index)
         x_hover = event.pos().x() - option.rect.left() - 2  # type: ignore[union-attr]
-        action_idx = int(x_hover // _ACTION_ICON_WIDTH)
+        visual_idx = int(x_hover // _ACTION_ICON_WIDTH)
 
-        if 0 <= action_idx < len(_ACTIONS):
+        if 0 <= visual_idx < len(actions):
             from PySide6.QtWidgets import QToolTip
 
             QToolTip.showText(
                 event.globalPos(),  # type: ignore[union-attr]
-                _ACTIONS[action_idx][1],
+                actions[visual_idx][1],
                 view,
             )
             return True
@@ -364,6 +386,8 @@ class CueMakerWidget(QWidget):
     mix_load_requested = Signal(str)  # filepath
     analyze_requested = Signal()
     export_requested = Signal()
+    import_requested = Signal(int)  # row index
+    search_requested = Signal(int)  # row index
 
     def __init__(self, context: PluginContextProtocol, parent: QWidget | None = None) -> None:
         """Initialize cue maker widget.
@@ -379,6 +403,7 @@ class CueMakerWidget(QWidget):
         self._waveform_worker = None
         self._is_mix_playing: bool = False
         self._highlight_region: pg.LinearRegionItem | None = None
+        self._cursor_inside_region: bool | None = None
         self._mix_duration_s: float = 0.0
         self._mix_position_timer = QTimer()
         self._mix_position_timer.setInterval(100)
@@ -458,6 +483,11 @@ class CueMakerWidget(QWidget):
         self.export_btn.clicked.connect(self._on_export)
         h.addWidget(self.export_btn)
 
+        self.import_cue_btn = QPushButton("Import CUE")
+        self.import_cue_btn.setToolTip("Import cue sheet from .cue file")
+        self.import_cue_btn.clicked.connect(self._on_import_cue)
+        h.addWidget(self.import_cue_btn)
+
         group.setLayout(h)
         return group
 
@@ -510,6 +540,8 @@ class CueMakerWidget(QWidget):
 
         # Selection change
         table.selectionModel().currentRowChanged.connect(self._on_row_selected)
+        # Double-click: play mix from entry start
+        table.doubleClicked.connect(self._on_entry_double_clicked)
 
         return table
 
@@ -531,33 +563,50 @@ class CueMakerWidget(QWidget):
         self.waveform_widget.position_clicked.connect(self._on_waveform_seek)
 
 
-    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # type: ignore
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # type: ignore  # noqa: N802
         """Accept drag events for audio files."""
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
             # Check if any URL is an audio file
             for url in urls:
                 path = url.toLocalFile()
-                if path.lower().endswith(('.mp3', '.flac', '.wav', '.aiff', '.aif', '.ogg', '.m4a')):
+                if path.lower().endswith(_AUDIO_EXTENSIONS):
                     event.acceptProposedAction()
                     return
         event.ignore()
 
-    def dropEvent(self, event: QDropEvent) -> None:  # type: ignore
+    def dropEvent(self, event: QDropEvent) -> None:  # type: ignore  # noqa: N802
         """Handle dropped audio files."""
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
             # Load the first audio file dropped
             for url in urls:
                 path = url.toLocalFile()
-                if path.lower().endswith(('.mp3', '.flac', '.wav', '.aiff', '.aif', '.ogg', '.m4a')):
+                if path.lower().endswith(_AUDIO_EXTENSIONS):
                     self._load_mix_file(path)
                     event.acceptProposedAction()
                     return
         event.ignore()
 
     def _load_mix_file(self, filepath: str) -> None:
-        """Load a mix file (used by both Load button and drag-drop)."""
+        """Load a mix file (used by both Load button and drag-drop).
+
+        Resets the current state first: stops playback, clears the cuesheet
+        and waveform so we start fresh with the new mix.
+        """
+        # 1. Stop current mix playback if active
+        self.stop_mix_playback()
+
+        # 2. Clear the cuesheet
+        self.model.clear()
+
+        # 3. Clear the waveform (done inside _start_waveform_generation too,
+        #    but do it early so the UI feels responsive)
+        self.waveform_widget.clear_waveform()
+        self._mix_duration_s = 0.0
+        self._selected_row = -1
+
+        # 4. Load the new mix
         self.mix_path_label.setText(Path(filepath).name)
         self.mix_path_label.setStyleSheet("")
         self.model.set_metadata(filepath, Path(filepath).stem, "")
@@ -579,7 +628,7 @@ class CueMakerWidget(QWidget):
 
     def _take_over_player(self) -> None:
         """Notify PlaybackController that the mix is taking over the player."""
-        self.context.app.playback._current_track_filepath = None
+        self.context.app.playback.release_track()
 
     def _on_play_pause(self) -> None:
         """Toggle play/pause for the mix."""
@@ -626,10 +675,11 @@ class CueMakerWidget(QWidget):
             self._is_mix_playing = False
 
     def _poll_mix_position(self) -> None:
-        """Poll player position and emit MIX_POSITION_UPDATE."""
+        """Poll player position, update cursor and highlight region color."""
         if self._is_mix_playing and self.context.player.is_playing():
             position = self.context.player.get_position()
             self.context.emit(Events.MIX_POSITION_UPDATE, position=position)
+            self._update_region_color(position)
 
     def _on_mix_position_update(self, position: float) -> None:
         """Update waveform cursor from mix position event."""
@@ -771,6 +821,17 @@ class CueMakerWidget(QWidget):
         self._refresh_editor_fields()
         self._update_highlight_region()
 
+    def _on_entry_double_clicked(self, index: QModelIndex) -> None:
+        """Play the mix starting from the double-clicked entry's start time."""
+        if not index.isValid():
+            return
+        entry = self.model.get_entry(index.row())
+        if entry is None or self._mix_duration_s <= 0:
+            return
+        position = (entry.start_time_ms / 1000.0) / self._mix_duration_s
+        position = max(0.0, min(position, 1.0))
+        self._on_waveform_seek(position)
+
     def _refresh_editor_fields(self) -> None:
         """Re-read current selection and update timing bar / highlight."""
         row = self.table_view.currentIndex().row()
@@ -803,6 +864,10 @@ class CueMakerWidget(QWidget):
             self._on_delete_entry()
         elif action_index == 1:
             self._on_insert_entry_after()
+        elif action_index == 2:
+            self._on_import_from_library(row)
+        elif action_index == 3:
+            self._on_search_in_library(row)
 
     def _on_delete_entry(self) -> None:
         """Delete the selected entry."""
@@ -827,13 +892,27 @@ class CueMakerWidget(QWidget):
         if new_start <= entry.start_time_ms:
             new_start = entry.start_time_ms + 1000
         self.model.add_manual_entry(new_start, "", "")
-        # Select the newly inserted entry (identity search after re-sort)
+        # Select the newly inserted entry (search from end for most recent match)
         new_start_rounded = round(new_start / 1000) * 1000
-        for i in range(self.model.rowCount()):
+        for i in range(self.model.rowCount() - 1, -1, -1):
             e = self.model.get_entry(i)
-            if e and e.start_time_ms == new_start_rounded and e.artist == "" and e.title == "":
+            if (
+                e
+                and e.start_time_ms == new_start_rounded
+                and e.artist == ""
+                and e.title == ""
+                and e.status == EntryStatus.MANUAL
+            ):
                 self.table_view.setCurrentIndex(self.model.index(i, 0))
                 break
+
+    def _on_import_from_library(self, row: int) -> None:
+        """Request import of library track info into the given row."""
+        self.import_requested.emit(row)
+
+    def _on_search_in_library(self, row: int) -> None:
+        """Request search of entry's artist/title in the library."""
+        self.search_requested.emit(row)
 
     def _on_timing_bar_start_changed(self, ms: int) -> None:
         """Handle drag of the start handle on the timing bar."""
@@ -901,6 +980,9 @@ class CueMakerWidget(QWidget):
             self.waveform_widget.plot_widget.removeItem(self._highlight_region)
             self._highlight_region = None
 
+        # Reset color tracking so next poll re-evaluates
+        self._cursor_inside_region = None
+
         if self._selected_row < 0:
             return
 
@@ -924,7 +1006,7 @@ class CueMakerWidget(QWidget):
         x_start = (start_time_s / mix_duration) * expected_length
         x_end = (end_time_s / mix_duration) * expected_length
 
-        logger.info(
+        logger.debug(
             "[Cue Maker] Highlight row=%d: cue=[%.1fs → %.1fs, dur=%.1fs] "
             "highlight=[x_start=%.1f, x_end=%.1f, width=%.1f] "
             "mix_duration=%.1fs expected_length=%d",
@@ -941,10 +1023,39 @@ class CueMakerWidget(QWidget):
 
         self._highlight_region = pg.LinearRegionItem(
             values=[x_start, x_end],
-            brush=pg.mkBrush(100, 180, 255, 50),
+            brush=self._BRUSH_OUTSIDE,
             movable=False,
         )
         self.waveform_widget.plot_widget.addItem(self._highlight_region)
+
+    # Highlight region brushes: inside (green tint) vs outside (blue tint)
+    _BRUSH_INSIDE = pg.mkBrush(100, 255, 140, 60)
+    _BRUSH_OUTSIDE = pg.mkBrush(100, 180, 255, 50)
+
+    def _update_region_color(self, position: float) -> None:
+        """Update highlight region color based on cursor position.
+
+        Args:
+            position: Playback position as a 0.0-1.0 ratio
+        """
+        if self._highlight_region is None:
+            return
+
+        region_range = self._highlight_region.getRegion()
+        expected_length = self.waveform_widget.expected_length
+        if expected_length <= 0:
+            return
+
+        cursor_x = position * expected_length
+        inside = region_range[0] <= cursor_x <= region_range[1]
+
+        if inside != self._cursor_inside_region:
+            self._cursor_inside_region = inside
+            brush = self._BRUSH_INSIDE if inside else self._BRUSH_OUTSIDE
+            self._highlight_region.setBrush(brush)
+            # Force full repaint of the region
+            self._highlight_region.update()
+            self.waveform_widget.plot_widget.update()
 
     def _on_export(self) -> None:
         """Export cue sheet to file."""
@@ -952,7 +1063,8 @@ class CueMakerWidget(QWidget):
             QMessageBox.warning(
                 self,
                 "Export",
-                "No entries to export.\nAdd at least one entry first.",
+                "No confirmed entries to export.\n"
+                "Confirm at least one entry before exporting.",
             )
             return
 
@@ -972,6 +1084,48 @@ class CueMakerWidget(QWidget):
                 logger.info("[Cue Maker] Exported to %s", filepath)
             except (ValueError, OSError) as e:
                 QMessageBox.critical(self, "Export Error", str(e))
+
+    def _on_import_cue(self) -> None:
+        """Import a cue sheet from a .cue file, replacing current entries."""
+        reply = QMessageBox.question(
+            self,
+            "Import CUE",
+            "Loading a CUE file will replace the current cue sheet.\nContinue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        cue_config = getattr(self.context.config, "cue_maker", None)
+        start_dir = ""
+        if cue_config and hasattr(cue_config, "mix_directory"):
+            start_dir = str(cue_config.mix_directory.expanduser())
+
+        filepath, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import CUE File",
+            start_dir,
+            "CUE Files (*.cue);;All Files (*)",
+        )
+        if not filepath:
+            return
+
+        try:
+            from plugins.cue_maker.exporter import CueExporter
+
+            entries = CueExporter.parse(filepath)
+            self.model.load_entries(entries)
+            self._selected_row = -1
+            self.timing_bar.clear_entry()
+            QMessageBox.information(
+                self,
+                "Import CUE",
+                f"Imported {len(entries)} tracks from:\n{Path(filepath).name}",
+            )
+            logger.info("[Cue Maker] Imported %d entries from %s", len(entries), filepath)
+        except (ValueError, OSError) as e:
+            QMessageBox.critical(self, "Import Error", str(e))
 
     def _update_export_button(self) -> None:
         """Enable export button when confirmed entries exist."""

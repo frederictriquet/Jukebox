@@ -219,6 +219,11 @@ def load_cached_entries(mix_path: str) -> list | None:
         ]
         logger.info("[Cache] Loaded %d cached entries for %s", len(entries), mix_path)
         return entries
-    except Exception:
-        logger.warning("[Cache] Failed to read entries cache for %s", mix_path, exc_info=True)
+    except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
+        logger.warning(
+            "[Cache] Failed to read entries cache for %s (%s: %s)",
+            mix_path,
+            type(e).__name__,
+            e,
+        )
         return None

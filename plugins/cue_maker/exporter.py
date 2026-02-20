@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from plugins.cue_maker.model import CueSheet
+
+if TYPE_CHECKING:
+    from plugins.cue_maker.model import CueEntry
 
 logger = logging.getLogger(__name__)
 
@@ -149,3 +153,90 @@ class CueExporter:
             Escaped text
         """
         return text.replace('"', '\\"')
+
+    @staticmethod
+    def cue_time_to_ms(cue_time: str) -> int:
+        """Convert CUE time format MM:SS:FF to milliseconds.
+
+        Args:
+            cue_time: Time string in MM:SS:FF format (FF = 1/75th second frames)
+
+        Returns:
+            Time in milliseconds
+        """
+        parts = cue_time.split(":")
+        if len(parts) != 3:
+            return 0
+        minutes = int(parts[0])
+        seconds = int(parts[1])
+        frames = int(parts[2])
+        return int((minutes * 60 + seconds + frames / 75.0) * 1000)
+
+    @staticmethod
+    def parse(filepath: str | Path) -> list[CueEntry]:
+        """Parse a .cue file and return a list of CueEntry objects.
+
+        Args:
+            filepath: Path to the .cue file
+
+        Returns:
+            List of CueEntry objects parsed from the file
+
+        Raises:
+            OSError: If file cannot be read
+            ValueError: If file contains no valid tracks
+        """
+        import re
+
+        from plugins.cue_maker.model import CueEntry, EntryStatus
+
+        filepath = Path(filepath)
+        content = filepath.read_text(encoding="utf-8")
+
+        entries: list[CueEntry] = []
+        current_artist = ""
+        current_title = ""
+        current_index_ms = 0
+
+        for line in content.splitlines():
+            line = line.strip()
+
+            # Track-level PERFORMER
+            match = re.match(r'PERFORMER\s+"(.*)"', line)
+            if match:
+                current_artist = match.group(1).replace('\\"', '"')
+                continue
+
+            # Track-level TITLE
+            match = re.match(r'TITLE\s+"(.*)"', line)
+            if match:
+                current_title = match.group(1).replace('\\"', '"')
+                continue
+
+            # INDEX 01 marks track start
+            match = re.match(r"INDEX\s+01\s+(\d+:\d+:\d+)", line)
+            if match:
+                current_index_ms = CueExporter.cue_time_to_ms(match.group(1))
+                entries.append(
+                    CueEntry(
+                        start_time_ms=current_index_ms,
+                        artist=current_artist,
+                        title=current_title,
+                        confidence=1.0,
+                        duration_ms=0,
+                        status=EntryStatus.CONFIRMED,
+                    )
+                )
+                # Reset per-track fields
+                current_artist = ""
+                current_title = ""
+
+        if not entries:
+            raise ValueError("No valid tracks found in CUE file")
+
+        # Compute durations from gaps between consecutive entries
+        for i in range(len(entries) - 1):
+            entries[i].duration_ms = entries[i + 1].start_time_ms - entries[i].start_time_ms
+
+        logger.info("[Cue Exporter] Parsed %d entries from %s", len(entries), filepath)
+        return entries
