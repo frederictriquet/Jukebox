@@ -55,6 +55,12 @@ Experiment modes (require --expected and --incorrect):
         --expected "/path/to/correct.mp3" --incorrect "/path/to/wrong.mp3" \
         --exp-combined --window-size 30 --rerank-window 90
 
+    # Exp 5: Tempo drift root cause analysis
+    uv run scripts/diagnose_match.py --mix /path/to/mix.mp3 \
+        --start 0 --end 330000 \
+        --expected "/path/to/correct.mp3" --incorrect "/path/to/wrong.mp3" \
+        --exp-tempo-drift
+
     # Run ALL experiments at once
     uv run scripts/diagnose_match.py --mix /path/to/mix.mp3 \
         --start 0 --end 330000 \
@@ -865,6 +871,178 @@ def _run_exp_combined(
         print(f"  #{i + 1:>3d}  score={score} ({seconds:.1f}s) sim={sim:.4f} | {name}{marker}")
 
 
+def _run_exp_tempo_drift(
+    matcher: Matcher,
+    y_query: np.ndarray,
+    sr: int,
+    expected_id: int,
+    incorrect_id: int,
+    db: FingerprintDB,
+) -> None:
+    """Experiment 5: Tempo drift root cause analysis.
+
+    Tests whether tempo compensation (time-stretching the reference) improves
+    the sustained run for the expected track vs the incorrect one.
+
+    ROOT CAUSE: DJs typically play tracks at ±2-8% tempo.  Stage 1 (fingerprint)
+    compensates by testing 15 stretch ratios.  Stage 2 (MFCC+chroma) does NOT,
+    causing progressive frame drift that limits sustained runs for true matches
+    while coincidental false positives are unaffected.
+
+    This experiment:
+    1. Tests ratios 0.92..1.08 (step 0.01) on both tracks
+    2. Computes combined run, chroma run, and final score at each ratio
+    3. Identifies the optimal ratio for each track
+    4. Shows whether tempo compensation would fix the false positive
+    """
+    import librosa
+
+    hop = 2048
+    slide_step = 15
+    min_overlap = 30
+
+    _print_header("EXPERIMENT 5: TEMPO DRIFT ROOT CAUSE ANALYSIS")
+
+    # Compute query features once
+    query_combined = Matcher._compute_combined_frame_features(y_query, sr, hop)
+    query_chroma = librosa.feature.chroma_cqt(y=y_query, sr=sr, hop_length=hop)
+    qn = np.linalg.norm(query_chroma, axis=0, keepdims=True)
+    qn[qn == 0] = 1.0
+    query_chroma_normed = query_chroma / qn
+
+    ratios = [round(0.92 + i * 0.01, 2) for i in range(17)]  # 0.92..1.08
+
+    for label, track_id in [("EXPECTED", expected_id), ("INCORRECT", incorrect_id)]:
+        track_info = db.get_track_info(track_id)
+        if not track_info:
+            print(f"\n  {label}: Track {track_id} not found")
+            continue
+        filepath = track_info.get("filepath", "")
+        if not filepath or not Path(filepath).exists():
+            print(f"\n  {label}: File not found: {filepath}")
+            continue
+
+        name = "{} - {}".format(
+            track_info.get("artist", "?"), track_info.get("title", "?")
+        )
+        print(f"\n  --- {label}: {name} (id={track_id}) ---")
+        print(
+            f"  {'Ratio':>6s}  {'Comb run':>9s}  {'Comb s':>7s}  {'Comb sim':>9s}  "
+            f"{'Chro run':>9s}  {'Chro s':>7s}  {'Chro sim':>9s}  "
+            f"{'Score':>6s}  {'Score s':>8s}"
+        )
+        print(f"  {'-' * 95}")
+
+        best_score = 0
+        best_ratio = 1.0
+        best_comb_run = 0
+        best_comb_ratio = 1.0
+        baseline_score = 0
+        baseline_comb = 0
+        baseline_chro = 0
+
+        for ratio in ratios:
+            y_ref, _ = librosa.load(filepath, sr=sr, mono=True)
+            if ratio != 1.0:
+                y_ref = librosa.effects.time_stretch(y_ref, rate=ratio)
+
+            ref_combined = Matcher._compute_combined_frame_features(y_ref, sr, hop)
+            ref_chroma = librosa.feature.chroma_cqt(y=y_ref, sr=sr, hop_length=hop)
+            rn = np.linalg.norm(ref_chroma, axis=0, keepdims=True)
+            rn[rn == 0] = 1.0
+            ref_chroma_normed = ref_chroma / rn
+
+            if ref_combined.shape[1] < min_overlap:
+                continue
+
+            comb_run, comb_sim = Matcher._best_sustained_run(
+                query_combined, ref_combined, slide_step, min_overlap, 0.80
+            )
+            chro_run, chro_sim = Matcher._best_sustained_run(
+                query_chroma_normed, ref_chroma_normed, slide_step, min_overlap, 0.92
+            )
+
+            score = min(comb_run, chro_run)
+            comb_s = comb_run * hop / sr
+            chro_s = chro_run * hop / sr
+            score_s = score * hop / sr
+
+            marker = ""
+            if ratio == 1.00:
+                marker = "  << baseline"
+                baseline_score = score
+                baseline_comb = comb_run
+                baseline_chro = chro_run
+            if score > best_score:
+                best_score = score
+                best_ratio = ratio
+            if comb_run > best_comb_run:
+                best_comb_run = comb_run
+                best_comb_ratio = ratio
+
+            print(
+                f"  {ratio:6.2f}  {comb_run:9d}  {comb_s:6.1f}s  {comb_sim:9.4f}  "
+                f"{chro_run:9d}  {chro_s:6.1f}s  {chro_sim:9.4f}  "
+                f"{score:6d}  {score_s:7.1f}s{marker}"
+            )
+
+        # Summary for this track
+        if baseline_score > 0 or best_score > 0:
+            comb_improvement = (
+                (best_comb_run - baseline_comb) / baseline_comb * 100
+                if baseline_comb > 0
+                else 0
+            )
+            score_improvement = (
+                (best_score - baseline_score) / baseline_score * 100
+                if baseline_score > 0
+                else 0
+            )
+            print(f"\n  Summary for {label}:")
+            print(
+                f"    Baseline (1.00): combined={baseline_comb} frames, "
+                f"chroma={baseline_chro} frames, score={baseline_score} frames"
+            )
+            print(
+                f"    Best combined run: {best_comb_run} frames at ratio={best_comb_ratio:.2f} "
+                f"({comb_improvement:+.0f}%)"
+            )
+            print(
+                f"    Best final score: {best_score} frames at ratio={best_ratio:.2f} "
+                f"({score_improvement:+.0f}%)"
+            )
+
+    # ---- Verdict ----
+    print(f"\n  {'=' * 70}")
+    print("  TEMPO DRIFT VERDICT")
+    print(f"  {'=' * 70}")
+    print(
+        "\n  If the EXPECTED track shows a dramatic improvement (>100%) at a "
+        "specific ratio"
+    )
+    print(
+        "  while the INCORRECT track shows only moderate variation (<50%), "
+        "this confirms"
+    )
+    print("  that TEMPO DRIFT is the root cause of the false positive.")
+    print(
+        "\n  Mechanism: The DJ played the track at a different tempo. "
+        "match_segment_by_mfcc()"
+    )
+    print(
+        "  does NOT time-stretch references (unlike Stage 1 fingerprinting "
+        "which tests"
+    )
+    print(
+        "  15 ratios). The progressive frame misalignment limits the sustained "
+        "run for"
+    )
+    print(
+        "  the true match, allowing coincidental false positives to win by "
+        "narrow margins."
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Diagnose shazamix matcher false positives",
@@ -893,6 +1071,8 @@ def main() -> None:
                            help="Exp 3: Windowed screening (split query into windows)")
     exp_group.add_argument("--exp-combined", action="store_true",
                            help="Exp 4: Combined improved pipeline")
+    exp_group.add_argument("--exp-tempo-drift", action="store_true",
+                           help="Exp 5: Tempo drift root cause analysis")
     exp_group.add_argument("--exp-all", action="store_true",
                            help="Run ALL experiments")
     exp_group.add_argument("--window-size", type=int, default=30,
@@ -908,10 +1088,12 @@ def main() -> None:
         args.exp_windows = True
         args.exp_windowed_screening = True
         args.exp_combined = True
+        args.exp_tempo_drift = True
 
     any_experiment = (
         args.exp_scoring or args.exp_windows
         or args.exp_windowed_screening or args.exp_combined
+        or args.exp_tempo_drift
     )
 
     # Validate inputs
@@ -1028,6 +1210,10 @@ def main() -> None:
             _run_exp_combined(
                 matcher, str(mix_path), args.start, args.end, args.window_size,
                 args.rerank_window, args.top_n, track_ids_of_interest, db,
+            )
+        if args.exp_tempo_drift:
+            _run_exp_tempo_drift(
+                matcher, screening["audio"], screening["sr"], exp_id, inc_id, db,
             )
         return
 
@@ -1186,6 +1372,11 @@ def main() -> None:
                 args.top_n,
                 track_ids_of_interest,
                 db,
+            )
+
+        if args.exp_tempo_drift:
+            _run_exp_tempo_drift(
+                matcher, screening["audio"], screening["sr"], exp_id, inc_id, db,
             )
 
 
