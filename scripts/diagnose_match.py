@@ -29,11 +29,44 @@ Usage:
     uv run scripts/diagnose_match.py --mix /path/to/mix.mp3 \
         --start 0 --end 330000 --top-n 500
 
+Experiment modes (require --expected and --incorrect):
+
+    # Exp 1: Compare alternative scoring formulas
+    uv run scripts/diagnose_match.py --mix /path/to/mix.mp3 \
+        --start 0 --end 330000 \
+        --expected "/path/to/correct.mp3" --incorrect "/path/to/wrong.mp3" \
+        --exp-scoring
+
+    # Exp 2: Test multiple sub-segment time windows
+    uv run scripts/diagnose_match.py --mix /path/to/mix.mp3 \
+        --start 0 --end 330000 \
+        --expected "/path/to/correct.mp3" --incorrect "/path/to/wrong.mp3" \
+        --exp-windows
+
+    # Exp 3: Windowed screening (split query into 30s windows)
+    uv run scripts/diagnose_match.py --mix /path/to/mix.mp3 \
+        --start 0 --end 330000 \
+        --expected "/path/to/correct.mp3" --incorrect "/path/to/wrong.mp3" \
+        --exp-windowed-screening --window-size 30
+
+    # Exp 4: Combined improved pipeline (windowed screening + sub-segment rerank)
+    uv run scripts/diagnose_match.py --mix /path/to/mix.mp3 \
+        --start 0 --end 330000 \
+        --expected "/path/to/correct.mp3" --incorrect "/path/to/wrong.mp3" \
+        --exp-combined --window-size 30 --rerank-window 90
+
+    # Run ALL experiments at once
+    uv run scripts/diagnose_match.py --mix /path/to/mix.mp3 \
+        --start 0 --end 330000 \
+        --expected "/path/to/correct.mp3" --incorrect "/path/to/wrong.mp3" \
+        --exp-all
+
 Outputs:
     - Stage 2a screening: compact MFCC+chroma cosine similarity ranking
     - Stage 2b re-ranking: dual-feature sustained run scores
     - Comparison between expected vs incorrect tracks (if provided)
     - Position of expected track in candidate rankings
+    - Experiment results (if experiment flags used)
 """
 
 from __future__ import annotations
@@ -304,6 +337,534 @@ def _print_reranking_entry(label: str, data: dict) -> None:
           f"sim={data['final_sim']:.4f}")
 
 
+# ============================================================
+# Experiment functions
+# ============================================================
+
+
+def _run_exp_scoring(
+    matcher: Matcher,
+    y_query: np.ndarray,
+    sr: int,
+    expected_id: int,
+    incorrect_id: int,
+) -> None:
+    """Experiment 1: Compare alternative scoring formulas.
+
+    Tests whether different combinations of run length and similarity
+    would correctly rank the expected track above the incorrect one.
+    """
+    import librosa
+
+    hop = 2048
+    slide_step = 15
+    min_overlap = 30
+
+    _print_header("EXPERIMENT 1: SCORING ALTERNATIVES")
+
+    results = {}
+    for track_id in [expected_id, incorrect_id]:
+        track_info = matcher.db.get_track_info(track_id)
+        if not track_info:
+            print(f"  ERROR: Track {track_id} not found")
+            return
+        filepath = track_info.get("filepath", "")
+        if not filepath or not Path(filepath).exists():
+            print(f"  ERROR: File not found: {filepath}")
+            return
+
+        y_ref, _ = librosa.load(filepath, sr=sr, mono=True)
+
+        query_combined = Matcher._compute_combined_frame_features(y_query, sr, hop)
+        ref_combined = Matcher._compute_combined_frame_features(y_ref, sr, hop)
+
+        query_chroma = librosa.feature.chroma_cqt(y=y_query, sr=sr, hop_length=hop)
+        qn = np.linalg.norm(query_chroma, axis=0, keepdims=True)
+        qn[qn == 0] = 1.0
+        query_chroma_normed = query_chroma / qn
+
+        ref_chroma = librosa.feature.chroma_cqt(y=y_ref, sr=sr, hop_length=hop)
+        rn = np.linalg.norm(ref_chroma, axis=0, keepdims=True)
+        rn[rn == 0] = 1.0
+        ref_chroma_normed = ref_chroma / rn
+
+        comb_run, comb_sim = Matcher._best_sustained_run(
+            query_combined, ref_combined, slide_step, min_overlap, 0.80
+        )
+        chro_run, chro_sim = Matcher._best_sustained_run(
+            query_chroma_normed, ref_chroma_normed, slide_step, min_overlap, 0.92
+        )
+
+        results[track_id] = {
+            "comb_run": comb_run,
+            "comb_sim": comb_sim,
+            "chro_run": chro_run,
+            "chro_sim": chro_sim,
+            "info": track_info,
+        }
+
+    exp = results[expected_id]
+    inc = results[incorrect_id]
+
+    formulas = [
+        (
+            "min(run)              [current]",
+            lambda r: min(r["comb_run"], r["chro_run"]),
+        ),
+        (
+            "min(run) * min(sim)",
+            lambda r: min(r["comb_run"], r["chro_run"]) * min(r["comb_sim"], r["chro_sim"]),
+        ),
+        (
+            "min(run * sim)",
+            lambda r: min(r["comb_run"] * r["comb_sim"], r["chro_run"] * r["chro_sim"]),
+        ),
+        (
+            "harmonic_mean(run)",
+            lambda r: (
+                2 * r["comb_run"] * r["chro_run"] / max(r["comb_run"] + r["chro_run"], 1)
+            ),
+        ),
+        (
+            "geometric_mean(run)",
+            lambda r: (max(r["comb_run"], 0) * max(r["chro_run"], 0)) ** 0.5,
+        ),
+        (
+            "min(run) * sim^2",
+            lambda r: (
+                min(r["comb_run"], r["chro_run"]) * min(r["comb_sim"], r["chro_sim"]) ** 2
+            ),
+        ),
+    ]
+
+    exp_name = "{} - {}".format(exp["info"].get("artist", "?"), exp["info"].get("title", "?"))
+    inc_name = "{} - {}".format(inc["info"].get("artist", "?"), inc["info"].get("title", "?"))
+
+    print(f"\n  Expected: {exp_name}")
+    print(f"    comb_run={exp['comb_run']}, comb_sim={exp['comb_sim']:.4f}")
+    print(f"    chro_run={exp['chro_run']}, chro_sim={exp['chro_sim']:.4f}")
+    print(f"\n  Incorrect: {inc_name}")
+    print(f"    comb_run={inc['comb_run']}, comb_sim={inc['comb_sim']:.4f}")
+    print(f"    chro_run={inc['chro_run']}, chro_sim={inc['chro_sim']:.4f}")
+
+    print(f"\n  {'Formula':<35s}  {'Expected':>10s}  {'Incorrect':>10s}  Winner")
+    print(f"  {'-' * 75}")
+    for name, fn in formulas:
+        e_score = fn(exp)
+        i_score = fn(inc)
+        winner = "EXPECTED" if e_score > i_score else "incorrect" if i_score > e_score else "tie"
+        marker = " <<" if winner == "EXPECTED" else ""
+        print(f"  {name:<35s}  {e_score:>10.2f}  {i_score:>10.2f}  {winner}{marker}")
+
+
+def _run_exp_windows(
+    matcher: Matcher,
+    mix_path: str,
+    segment_start_ms: int,
+    segment_end_ms: int,
+    expected_id: int,
+    incorrect_id: int,
+) -> None:
+    """Experiment 2: Test multiple sub-segment time windows.
+
+    Re-ranks expected vs incorrect track using different time windows
+    within the original segment to find which sub-segments discriminate best.
+    """
+    import librosa
+
+    sr = matcher.fingerprinter.sample_rate
+    hop = 2048
+    slide_step = 15
+    min_overlap = 30
+
+    _print_header("EXPERIMENT 2: SUB-SEGMENT WINDOWS")
+
+    segment_dur_s = (segment_end_ms - segment_start_ms) / 1000.0
+
+    # Generate windows (relative to segment start, in seconds)
+    windows = [
+        (0, 60),
+        (0, 90),
+        (0, 120),
+        (30, 90),
+        (30, 120),
+        (60, 120),
+        (60, 180),
+        (90, 180),
+        (120, 210),
+    ]
+    # Add full segment
+    windows.append((0, int(segment_dur_s)))
+    # Filter out windows that exceed segment duration
+    windows = [(s, e) for s, e in windows if e <= segment_dur_s + 1]
+
+    # Load reference tracks once
+    track_refs: dict[int, dict] = {}
+    for track_id in [expected_id, incorrect_id]:
+        info = matcher.db.get_track_info(track_id)
+        if not info:
+            print(f"  ERROR: Track {track_id} not found")
+            return
+        fp = info.get("filepath", "")
+        if not fp or not Path(fp).exists():
+            print(f"  ERROR: File not found: {fp}")
+            return
+        y_ref, _ = librosa.load(fp, sr=sr, mono=True)
+        ref_combined = Matcher._compute_combined_frame_features(y_ref, sr, hop)
+        ref_chroma = librosa.feature.chroma_cqt(y=y_ref, sr=sr, hop_length=hop)
+        rn = np.linalg.norm(ref_chroma, axis=0, keepdims=True)
+        rn[rn == 0] = 1.0
+        ref_chroma_normed = ref_chroma / rn
+        track_refs[track_id] = {
+            "combined": ref_combined,
+            "chroma": ref_chroma_normed,
+            "info": info,
+        }
+
+    exp_name = "{} - {}".format(
+        track_refs[expected_id]["info"].get("artist", "?"),
+        track_refs[expected_id]["info"].get("title", "?"),
+    )
+    inc_name = "{} - {}".format(
+        track_refs[incorrect_id]["info"].get("artist", "?"),
+        track_refs[incorrect_id]["info"].get("title", "?"),
+    )
+
+    print(f"  Expected: {exp_name} (id={expected_id})")
+    print(f"  Incorrect: {inc_name} (id={incorrect_id})")
+    print(f"  Testing {len(windows)} windows...")
+
+    print(f"\n  {'Window (s)':<15s}  {'Exp score':>10s}  {'Inc score':>10s}  Winner")
+    print(f"  {'-' * 60}")
+
+    for w_start_s, w_end_s in windows:
+        offset_s = segment_start_ms / 1000.0 + w_start_s
+        duration_s = w_end_s - w_start_s
+        y_win, _ = librosa.load(
+            mix_path, sr=sr, mono=True, offset=offset_s, duration=duration_s
+        )
+        if len(y_win) == 0:
+            continue
+
+        q_combined = Matcher._compute_combined_frame_features(y_win, sr, hop)
+        q_chroma = librosa.feature.chroma_cqt(y=y_win, sr=sr, hop_length=hop)
+        qn = np.linalg.norm(q_chroma, axis=0, keepdims=True)
+        qn[qn == 0] = 1.0
+        q_chroma_normed = q_chroma / qn
+
+        scores = {}
+        for tid in [expected_id, incorrect_id]:
+            ref = track_refs[tid]
+            if ref["combined"].shape[1] < min_overlap:
+                scores[tid] = 0
+                continue
+            comb_run, _ = Matcher._best_sustained_run(
+                q_combined, ref["combined"], slide_step, min_overlap, 0.80
+            )
+            chro_run, _ = Matcher._best_sustained_run(
+                q_chroma_normed, ref["chroma"], slide_step, min_overlap, 0.92
+            )
+            scores[tid] = min(comb_run, chro_run)
+
+        e_score = scores[expected_id]
+        i_score = scores[incorrect_id]
+        winner = "EXPECTED" if e_score > i_score else "incorrect" if i_score > e_score else "tie"
+        marker = " <<" if winner == "EXPECTED" else ""
+        label = "{}-{}".format(w_start_s, w_end_s)
+        print(f"  {label:<15s}  {e_score:>10d}  {i_score:>10d}  {winner}{marker}")
+
+
+def _run_exp_windowed_screening(
+    matcher: Matcher,
+    mix_path: str,
+    start_ms: int,
+    end_ms: int,
+    window_size_s: int,
+    top_n: int,
+    track_ids_of_interest: list[int],
+    show_top: int,
+    db: FingerprintDB,
+) -> dict:
+    """Experiment 3: Windowed screening.
+
+    Instead of computing a single summary for the full segment, splits the
+    query into N-second windows and takes the max cosine similarity per track
+    across all windows. This improves discrimination for long segments.
+
+    Returns dict with ranking results.
+    """
+    import librosa
+
+    sr = matcher.fingerprinter.sample_rate
+
+    _print_header("EXPERIMENT 3: WINDOWED SCREENING")
+
+    mfcc_summaries = matcher.db.get_all_audio_features("mfcc_summary")
+    chroma_summaries = matcher.db.get_all_audio_features("chroma_summary")
+    both_ids = set(mfcc_summaries.keys()) & set(chroma_summaries.keys())
+
+    start_s = start_ms / 1000.0
+    duration_s = (end_ms - start_ms) / 1000.0
+    y, _ = librosa.load(mix_path, sr=sr, mono=True, offset=start_s, duration=duration_s)
+
+    # Split into windows
+    window_samples = window_size_s * sr
+    n_windows = max(1, len(y) // window_samples)
+    windows = []
+    for i in range(n_windows):
+        w_start = i * window_samples
+        w_end = min((i + 1) * window_samples, len(y))
+        if w_end - w_start > sr:  # At least 1 second
+            windows.append(y[w_start:w_end])
+
+    print(f"  Segment: {start_ms}ms - {end_ms}ms ({duration_s:.1f}s)")
+    print(f"  Window size: {window_size_s}s")
+    print(f"  Number of windows: {len(windows)}")
+    print(f"  Tracks with features: {len(both_ids)}")
+
+    # Precompute query summaries for each window
+    t0 = time.time()
+    query_features: list[tuple[np.ndarray, float]] = []
+    for w in windows:
+        q_mfcc = Matcher.compute_mfcc_summary(w, sr)
+        q_chroma = Matcher.compute_chroma_summary(w, sr)
+        q_mn = np.linalg.norm(q_mfcc)
+        q_cn = np.linalg.norm(q_chroma)
+        if q_mn == 0 or q_cn == 0:
+            continue
+        q_combined = np.concatenate([q_mfcc / q_mn, q_chroma / q_cn])
+        q_norm = float(np.linalg.norm(q_combined))
+        query_features.append((q_combined, q_norm))
+
+    # For each track, compute max cosine similarity across windows
+    track_max: dict[int, float] = {}
+    for track_id in both_ids:
+        m = mfcc_summaries[track_id]
+        c = chroma_summaries[track_id]
+        mn = np.linalg.norm(m)
+        cn = np.linalg.norm(c)
+        if mn == 0 or cn == 0:
+            continue
+        ref_combined = np.concatenate([m / mn, c / cn])
+        rn = float(np.linalg.norm(ref_combined))
+
+        max_sim = 0.0
+        for q_feat, q_norm in query_features:
+            sim = float(np.dot(q_feat, ref_combined) / (q_norm * rn))
+            if sim > max_sim:
+                max_sim = sim
+        track_max[track_id] = max_sim
+
+    elapsed = time.time() - t0
+
+    # Sort by score
+    ranked = sorted(track_max.items(), key=lambda x: -x[1])
+
+    # Find positions of interest
+    positions: dict[int, int] = {}
+    for tid in track_ids_of_interest:
+        for i, (sid, _) in enumerate(ranked):
+            if sid == tid:
+                positions[tid] = i
+                break
+        else:
+            positions[tid] = -1
+
+    print(f"  Scored: {len(ranked)}")
+    print(f"  Time: {elapsed:.1f}s")
+
+    # Show positions of interest
+    if track_ids_of_interest:
+        print("\n  Tracks of interest:")
+        for tid in track_ids_of_interest:
+            pos = positions.get(tid, -1)
+            info = db.get_track_info(tid)
+            name = "?"
+            if info:
+                name = "{} - {}".format(info.get("artist", "?"), info.get("title", "?"))
+            if pos >= 0:
+                score = ranked[pos][1]
+                print(f"    id={tid}: rank #{pos + 1}, score={score:.4f} | {name}")
+            else:
+                print(f"    id={tid}: NOT FOUND | {name}")
+
+    # Show top results
+    top = ranked[:show_top]
+    print(f"\n  Top {len(top)} results:")
+    interest_set = set(track_ids_of_interest)
+    for i, (tid, score) in enumerate(top):
+        info = db.get_track_info(tid)
+        name = "?"
+        if info:
+            name = "{} - {}".format(info.get("artist", "?"), info.get("title", "?"))
+        marker = " << INTEREST" if tid in interest_set else ""
+        print(f"  #{i + 1:>3d}  score={score:.4f}  | {name}{marker}")
+
+    return {
+        "ranked": ranked,
+        "positions": positions,
+        "audio": y,
+        "sr": sr,
+        "n_windows": len(windows),
+    }
+
+
+def _run_exp_combined(
+    matcher: Matcher,
+    mix_path: str,
+    start_ms: int,
+    end_ms: int,
+    window_size_s: int,
+    rerank_window_s: int,
+    top_n: int,
+    track_ids_of_interest: list[int],
+    db: FingerprintDB,
+) -> None:
+    """Experiment 4: Combined improved pipeline.
+
+    1. Windowed screening (Stage 2a improved) to get candidates
+    2. Sub-segment re-ranking on top candidates (Stage 2b with shorter window)
+    """
+    import librosa
+
+    _print_header("EXPERIMENT 4: COMBINED IMPROVED PIPELINE")
+
+    sr = matcher.fingerprinter.sample_rate
+
+    # Step 1: Windowed screening
+    print(f"  Step 1: Windowed screening (window={window_size_s}s)")
+
+    mfcc_summaries = matcher.db.get_all_audio_features("mfcc_summary")
+    chroma_summaries = matcher.db.get_all_audio_features("chroma_summary")
+    both_ids = set(mfcc_summaries.keys()) & set(chroma_summaries.keys())
+
+    start_s = start_ms / 1000.0
+    duration_s = (end_ms - start_ms) / 1000.0
+    y, _ = librosa.load(mix_path, sr=sr, mono=True, offset=start_s, duration=duration_s)
+
+    window_samples = window_size_s * sr
+    n_windows = max(1, len(y) // window_samples)
+    windows = []
+    for i in range(n_windows):
+        w_start = i * window_samples
+        w_end = min((i + 1) * window_samples, len(y))
+        if w_end - w_start > sr:
+            windows.append(y[w_start:w_end])
+
+    query_features: list[tuple[np.ndarray, float]] = []
+    for w in windows:
+        q_mfcc = Matcher.compute_mfcc_summary(w, sr)
+        q_chroma = Matcher.compute_chroma_summary(w, sr)
+        q_mn = np.linalg.norm(q_mfcc)
+        q_cn = np.linalg.norm(q_chroma)
+        if q_mn == 0 or q_cn == 0:
+            continue
+        q_combined = np.concatenate([q_mfcc / q_mn, q_chroma / q_cn])
+        q_norm = float(np.linalg.norm(q_combined))
+        query_features.append((q_combined, q_norm))
+
+    track_max: dict[int, float] = {}
+    for track_id in both_ids:
+        m = mfcc_summaries[track_id]
+        c = chroma_summaries[track_id]
+        mn = np.linalg.norm(m)
+        cn = np.linalg.norm(c)
+        if mn == 0 or cn == 0:
+            continue
+        ref_combined = np.concatenate([m / mn, c / cn])
+        rn = float(np.linalg.norm(ref_combined))
+        max_sim = 0.0
+        for q_feat, q_norm in query_features:
+            sim = float(np.dot(q_feat, ref_combined) / (q_norm * rn))
+            if sim > max_sim:
+                max_sim = sim
+        track_max[track_id] = max_sim
+
+    ranked_screening = sorted(track_max.items(), key=lambda x: -x[1])
+    candidates = [tid for tid, _ in ranked_screening[:top_n]]
+
+    # Ensure interest tracks are included
+    for tid in track_ids_of_interest:
+        if tid not in candidates:
+            candidates.append(tid)
+
+    # Show screening positions for interest tracks
+    interest_set = set(track_ids_of_interest)
+    for tid in track_ids_of_interest:
+        for i, (sid, sc) in enumerate(ranked_screening):
+            if sid == tid:
+                info = db.get_track_info(tid)
+                name = "?"
+                if info:
+                    name = "{} - {}".format(info.get("artist", "?"), info.get("title", "?"))
+                print(f"    Screening rank #{i + 1}: {name} (score={sc:.4f})")
+                break
+
+    # Step 2: Re-rank with sub-segment
+    rerank_duration = min(rerank_window_s, duration_s)
+    print(f"\n  Step 2: Re-ranking top {len(candidates)} with {rerank_duration:.0f}s window")
+
+    y_rerank, _ = librosa.load(
+        mix_path, sr=sr, mono=True, offset=start_s, duration=rerank_duration
+    )
+
+    hop = 2048
+    slide_step = 15
+    min_overlap = 30
+
+    query_combined = Matcher._compute_combined_frame_features(y_rerank, sr, hop)
+    query_chroma = librosa.feature.chroma_cqt(y=y_rerank, sr=sr, hop_length=hop)
+    qn = np.linalg.norm(query_chroma, axis=0, keepdims=True)
+    qn[qn == 0] = 1.0
+    query_chroma_normed = query_chroma / qn
+
+    t0 = time.time()
+    rerank_results: list[tuple[int, int, float, dict]] = []
+    for tid in candidates:
+        info = db.get_track_info(tid)
+        if not info:
+            continue
+        fp = info.get("filepath", "")
+        if not fp or not Path(fp).exists():
+            continue
+        try:
+            y_ref, _ = librosa.load(fp, sr=sr, mono=True)
+            if len(y_ref) == 0:
+                continue
+            ref_combined = Matcher._compute_combined_frame_features(y_ref, sr, hop)
+            ref_chroma = librosa.feature.chroma_cqt(y=y_ref, sr=sr, hop_length=hop)
+            rn = np.linalg.norm(ref_chroma, axis=0, keepdims=True)
+            rn[rn == 0] = 1.0
+            ref_chroma_normed = ref_chroma / rn
+
+            if ref_combined.shape[1] < min_overlap:
+                continue
+
+            comb_run, comb_sim = Matcher._best_sustained_run(
+                query_combined, ref_combined, slide_step, min_overlap, 0.80
+            )
+            chro_run, chro_sim = Matcher._best_sustained_run(
+                query_chroma_normed, ref_chroma_normed, slide_step, min_overlap, 0.92
+            )
+            score = min(comb_run, chro_run)
+            avg_sim = min(comb_sim, chro_sim) if score > 0 else 0.0
+
+            rerank_results.append((tid, score, avg_sim, info))
+        except Exception:
+            continue
+
+    elapsed = time.time() - t0
+    rerank_results.sort(key=lambda r: (-r[1], -r[2]))
+
+    print(f"  Re-ranking time: {elapsed:.1f}s")
+    print(f"\n  Final ranking (top {min(20, len(rerank_results))}):")
+    for i, (tid, score, sim, info) in enumerate(rerank_results[:20]):
+        name = "{} - {}".format(info.get("artist", "?"), info.get("title", "?"))
+        marker = " << INTEREST" if tid in interest_set else ""
+        seconds = score * hop / sr
+        print(f"  #{i + 1:>3d}  score={score} ({seconds:.1f}s) sim={sim:.4f} | {name}{marker}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Diagnose shazamix matcher false positives",
@@ -322,7 +883,36 @@ def main() -> None:
     parser.add_argument("--screening-only", action="store_true",
                         help="Only run Stage 2a screening, skip re-ranking")
 
+    # Experiment modes
+    exp_group = parser.add_argument_group("experiments")
+    exp_group.add_argument("--exp-scoring", action="store_true",
+                           help="Exp 1: Compare alternative scoring formulas")
+    exp_group.add_argument("--exp-windows", action="store_true",
+                           help="Exp 2: Test multiple sub-segment time windows")
+    exp_group.add_argument("--exp-windowed-screening", action="store_true",
+                           help="Exp 3: Windowed screening (split query into windows)")
+    exp_group.add_argument("--exp-combined", action="store_true",
+                           help="Exp 4: Combined improved pipeline")
+    exp_group.add_argument("--exp-all", action="store_true",
+                           help="Run ALL experiments")
+    exp_group.add_argument("--window-size", type=int, default=30,
+                           help="Window size in seconds for windowed experiments (default 30)")
+    exp_group.add_argument("--rerank-window", type=int, default=90,
+                           help="Re-ranking window in seconds for combined pipeline (default 90)")
+
     args = parser.parse_args()
+
+    # --exp-all enables all experiments
+    if args.exp_all:
+        args.exp_scoring = True
+        args.exp_windows = True
+        args.exp_windowed_screening = True
+        args.exp_combined = True
+
+    any_experiment = (
+        args.exp_scoring or args.exp_windows
+        or args.exp_windowed_screening or args.exp_combined
+    )
 
     # Validate inputs
     mix_path = Path(args.mix)
@@ -407,8 +997,38 @@ def main() -> None:
                 break
         _print_screening_entry(i, tid, combined, mfcc, chroma, db, marker)
 
-    if args.screening_only:
+    if args.screening_only and not any_experiment:
         print("\n  (--screening-only: skipping Stage 2b)")
+        return
+
+    if args.screening_only and any_experiment:
+        print("\n  (--screening-only: skipping Stage 2b, running experiments below)")
+        # Skip to experiments section at the end
+        if "EXPECTED" not in tracks_of_interest or "INCORRECT" not in tracks_of_interest:
+            print("\n  WARNING: Experiments require both --expected and --incorrect tracks.")
+            return
+
+        exp_id = tracks_of_interest["EXPECTED"]["id"]
+        inc_id = tracks_of_interest["INCORRECT"]["id"]
+
+        if args.exp_scoring:
+            _run_exp_scoring(
+                matcher, screening["audio"], screening["sr"], exp_id, inc_id
+            )
+        if args.exp_windows:
+            _run_exp_windows(
+                matcher, str(mix_path), args.start, args.end, exp_id, inc_id
+            )
+        if args.exp_windowed_screening:
+            _run_exp_windowed_screening(
+                matcher, str(mix_path), args.start, args.end, args.window_size,
+                args.top_n, track_ids_of_interest, args.show_top, db,
+            )
+        if args.exp_combined:
+            _run_exp_combined(
+                matcher, str(mix_path), args.start, args.end, args.window_size,
+                args.rerank_window, args.top_n, track_ids_of_interest, db,
+            )
         return
 
     # ---- Stage 2b: Re-ranking ----
@@ -521,6 +1141,52 @@ def main() -> None:
                 print(f"\n  CONCLUSION: Expected track scores HIGHER in re-ranking.")
                 print("  The false positive may be a Stage 2a screening issue "
                       "(expected track filtered out).")
+
+    # ---- Experiment modes ----
+    if any_experiment:
+        if "EXPECTED" not in tracks_of_interest or "INCORRECT" not in tracks_of_interest:
+            print("\n  WARNING: Experiments require both --expected and --incorrect tracks.")
+            print("  Skipping experiments.")
+            return
+
+        exp_id = tracks_of_interest["EXPECTED"]["id"]
+        inc_id = tracks_of_interest["INCORRECT"]["id"]
+
+        if args.exp_scoring:
+            _run_exp_scoring(
+                matcher, screening["audio"], screening["sr"], exp_id, inc_id
+            )
+
+        if args.exp_windows:
+            _run_exp_windows(
+                matcher, str(mix_path), args.start, args.end, exp_id, inc_id
+            )
+
+        if args.exp_windowed_screening:
+            _run_exp_windowed_screening(
+                matcher,
+                str(mix_path),
+                args.start,
+                args.end,
+                args.window_size,
+                args.top_n,
+                track_ids_of_interest,
+                args.show_top,
+                db,
+            )
+
+        if args.exp_combined:
+            _run_exp_combined(
+                matcher,
+                str(mix_path),
+                args.start,
+                args.end,
+                args.window_size,
+                args.rerank_window,
+                args.top_n,
+                track_ids_of_interest,
+                db,
+            )
 
 
 if __name__ == "__main__":
