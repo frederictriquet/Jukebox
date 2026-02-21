@@ -8,21 +8,25 @@ Focus on:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 
+if TYPE_CHECKING:
+    from shazamix.matcher import Matcher
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _unit_columns(arr: np.ndarray) -> np.ndarray:
     """Return *arr* with each column L2-normalised."""
     norms = np.linalg.norm(arr, axis=0, keepdims=True)
     norms[norms == 0] = 1.0
-    return arr / norms
+    return np.asarray(arr / norms)
 
 
 def _sine_audio(duration_sec: float = 1.0, sr: int = 22050) -> np.ndarray:
@@ -31,7 +35,7 @@ def _sine_audio(duration_sec: float = 1.0, sr: int = 22050) -> np.ndarray:
     return (np.sin(2 * np.pi * 440 * t) * 0.5).astype(np.float32)
 
 
-def _make_matcher() -> "Matcher":  # type: ignore[name-defined]
+def _make_matcher() -> Matcher:  # noqa: F821
     """Return a Matcher with mocked DB and fingerprinter."""
     from shazamix.matcher import Matcher
 
@@ -45,6 +49,7 @@ def _make_matcher() -> "Matcher":  # type: ignore[name-defined]
 # TestBestSustainedRun
 # ---------------------------------------------------------------------------
 
+
 class TestBestSustainedRun:
     """Unit tests for Matcher._best_sustained_run()."""
 
@@ -53,7 +58,9 @@ class TestBestSustainedRun:
         from shazamix.matcher import Matcher
 
         feat = _unit_columns(np.random.rand(32, 100))
-        run, avg = Matcher._best_sustained_run(feat, feat, slide_step=10, min_overlap=10, threshold=0.9)
+        run, avg = Matcher._best_sustained_run(
+            feat, feat, slide_step=10, min_overlap=10, threshold=0.9
+        )
         assert run == 100
         assert avg == pytest.approx(1.0, abs=0.01)
 
@@ -88,21 +95,23 @@ class TestBestSustainedRun:
         # Use constant features (all frames identical) so any alignment offset
         # gives sim=1.0, making the run detection fully deterministic.
         # q and r share the same constant feature → always sim=1.0.
-        T = 60
-        q = np.zeros((4, T))
+        frame_count = 60
+        q = np.zeros((4, frame_count))
         q[0, :] = 1.0  # all frames identical, pointing in dim 0
         r = q.copy()
 
-        # With identical constant features, the best run equals T.
+        # With identical constant features, the best run equals frame_count.
         run, avg = Matcher._best_sustained_run(q, r, slide_step=1, min_overlap=5, threshold=0.9)
-        assert run == T
+        assert run == frame_count
 
     def test_returns_avg_sim_in_best_run(self) -> None:
         """avg_sim reflects actual similarities inside the winning run."""
         from shazamix.matcher import Matcher
 
         feat = _unit_columns(np.random.rand(32, 50))
-        run, avg = Matcher._best_sustained_run(feat, feat, slide_step=5, min_overlap=5, threshold=0.9)
+        run, avg = Matcher._best_sustained_run(
+            feat, feat, slide_step=5, min_overlap=5, threshold=0.9
+        )
         assert 0.9 <= avg <= 1.0 + 1e-6  # within threshold, at most 1.0
 
     def test_slide_step_coarser_still_finds_match(self) -> None:
@@ -119,7 +128,9 @@ class TestBestSustainedRun:
         r = q.copy()
 
         run_fine, _ = Matcher._best_sustained_run(q, r, slide_step=1, min_overlap=5, threshold=0.9)
-        run_coarse, _ = Matcher._best_sustained_run(q, r, slide_step=20, min_overlap=5, threshold=0.9)
+        run_coarse, _ = Matcher._best_sustained_run(
+            q, r, slide_step=20, min_overlap=5, threshold=0.9
+        )
         # A coarser step skips some offsets, so it may not land on the exact
         # peak overlap.  We only verify that a substantial match is detected
         # (within one slide_step of the fine-grained result).
@@ -130,6 +141,7 @@ class TestBestSustainedRun:
 # ---------------------------------------------------------------------------
 # TestComputeCombinedFrameFeatures
 # ---------------------------------------------------------------------------
+
 
 class TestComputeCombinedFrameFeatures:
     """Unit tests for Matcher._compute_combined_frame_features()."""
@@ -149,8 +161,9 @@ class TestComputeCombinedFrameFeatures:
         y = _sine_audio(2.0)
         features = Matcher._compute_combined_frame_features(y, sr=22050, hop=2048)
         norms = np.linalg.norm(features, axis=0)
-        np.testing.assert_allclose(norms, 1.0, atol=0.01,
-                                    err_msg="Not all columns are unit-normalised")
+        np.testing.assert_allclose(
+            norms, 1.0, atol=0.01, err_msg="Not all columns are unit-normalised"
+        )
 
     def test_output_has_positive_frame_count(self) -> None:
         """A 1-second audio should produce at least one frame."""
@@ -184,12 +197,13 @@ class TestComputeCombinedFrameFeatures:
 # TestMatchSegmentByMfcc
 # ---------------------------------------------------------------------------
 
+
 class TestMatchSegmentByMfcc:
     """Integration tests for Matcher.match_segment_by_mfcc()."""
 
     # ---- helpers -----------------------------------------------------------
 
-    def _matcher(self) -> "Matcher":  # type: ignore[name-defined]
+    def _matcher(self) -> Matcher:  # noqa: F821
         return _make_matcher()
 
     def _query_audio(self, dur: float = 5.0) -> np.ndarray:
@@ -222,15 +236,15 @@ class TestMatchSegmentByMfcc:
         """Returns None when the preloaded audio array is empty."""
         m = self._matcher()
         m.db.get_all_audio_features.return_value = {}
-        result = m.match_segment_by_mfcc("fake.mp3", 0, 5000,
-                                          preloaded_audio=np.array([], dtype=np.float32))
+        result = m.match_segment_by_mfcc(
+            "fake.mp3", 0, 5000, preloaded_audio=np.array([], dtype=np.float32)
+        )
         assert result is None
 
     # ---- no sustained match ------------------------------------------------
 
     def test_returns_none_when_no_sustained_match(self) -> None:
         """Returns None when reference audio has no similarity to the query."""
-        from shazamix.matcher import Matcher
 
         m = self._matcher()
         sr = 22050
@@ -261,7 +275,7 @@ class TestMatchSegmentByMfcc:
 
     def test_returns_match_when_reference_equals_query(self) -> None:
         """Returns a Match when the reference audio is identical to the query."""
-        from shazamix.matcher import Matcher, Match
+        from shazamix.matcher import Match
 
         m = self._matcher()
         sr = 22050
@@ -292,7 +306,6 @@ class TestMatchSegmentByMfcc:
 
     def test_match_metadata_from_db(self) -> None:
         """Match fields are populated from DB track info."""
-        from shazamix.matcher import Matcher, Match
 
         m = self._matcher()
         sr = 22050
@@ -313,8 +326,7 @@ class TestMatchSegmentByMfcc:
 
         start_ms, end_ms = 1000, 6000
         with patch("librosa.load", return_value=(y, sr)):
-            result = m.match_segment_by_mfcc("mix.mp3", start_ms, end_ms,
-                                              preloaded_audio=y)
+            result = m.match_segment_by_mfcc("mix.mp3", start_ms, end_ms, preloaded_audio=y)
 
         assert result is not None
         assert result.track_id == 42
@@ -324,7 +336,6 @@ class TestMatchSegmentByMfcc:
 
     def test_best_candidate_wins(self) -> None:
         """When two candidates exist, the one matching the query wins."""
-        from shazamix.matcher import Matcher, Match
 
         m = self._matcher()
         sr = 22050
@@ -356,14 +367,14 @@ class TestMatchSegmentByMfcc:
         m.db.get_track_info.side_effect = _track_info
 
         silence = np.zeros(sr * 5, dtype=np.float32)
-        call_count = [0]
 
-        def _load(path, sr=None, mono=True):
-            call_count[0] += 1
+        def _load(
+            path: str, sr: int | None = None, mono: bool = True
+        ) -> tuple[np.ndarray, int]:
             # Return the matching audio for track 1's file, silence for track 2.
             if "1.mp3" in path:
-                return y, sr
-            return silence, sr
+                return y, sr or 22050
+            return silence, sr or 22050
 
         with patch("librosa.load", side_effect=_load):
             result = m.match_segment_by_mfcc("mix.mp3", 0, 5000, preloaded_audio=y)
@@ -373,7 +384,6 @@ class TestMatchSegmentByMfcc:
 
     def test_progress_callback_called(self) -> None:
         """progress_callback receives at least one message during processing."""
-        from shazamix.matcher import Matcher
 
         m = self._matcher()
         sr = 22050
@@ -385,8 +395,10 @@ class TestMatchSegmentByMfcc:
             fake_mfcc if key == "mfcc_summary" else fake_chroma
         )
         m.db.get_track_info.return_value = {
-            "artist": "A", "title": "T",
-            "filepath": "/f.mp3", "filename": "f.mp3",
+            "artist": "A",
+            "title": "T",
+            "filepath": "/f.mp3",
+            "filename": "f.mp3",
         }
 
         messages: list[str] = []
@@ -395,9 +407,7 @@ class TestMatchSegmentByMfcc:
             messages.append(msg)
 
         with patch("librosa.load", return_value=(y, sr)):
-            m.match_segment_by_mfcc("fake.mp3", 0, 5000,
-                                     preloaded_audio=y,
-                                     progress_callback=_cb)
+            m.match_segment_by_mfcc("fake.mp3", 0, 5000, preloaded_audio=y, progress_callback=_cb)
 
         assert len(messages) > 0
         # Should see Stage 2a and Stage 2b messages
@@ -407,7 +417,6 @@ class TestMatchSegmentByMfcc:
 
     def test_loads_mix_when_no_preloaded_audio(self) -> None:
         """When preloaded_audio is None, librosa.load is called for the mix."""
-        from shazamix.matcher import Matcher
 
         m = self._matcher()
         sr = 22050
@@ -421,8 +430,10 @@ class TestMatchSegmentByMfcc:
             fake_mfcc if key == "mfcc_summary" else fake_chroma
         )
         m.db.get_track_info.return_value = {
-            "artist": "A", "title": "T",
-            "filepath": "/ref.mp3", "filename": "ref.mp3",
+            "artist": "A",
+            "title": "T",
+            "filepath": "/ref.mp3",
+            "filename": "ref.mp3",
         }
 
         with patch("librosa.load", return_value=(y, sr)) as mock_load:
