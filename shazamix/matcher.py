@@ -1,6 +1,27 @@
 """Match audio fingerprints against the database to identify tracks.
 
-The matching algorithm:
+Public API
+----------
+``Matcher.analyze_mix(mix_path, ...)``
+    Full-mix analysis: extracts fingerprints over overlapping segments and
+    returns all identified tracks.  Call this from ``AnalyzeWorker``.
+
+``Matcher.match_segment(mix_path, start_ms, end_ms, ...)``
+    Targeted re-analysis of a single time range.  Designed for re-analysis of
+    segments missed by ``analyze_mix()``.  Uses a two-stage pipeline:
+
+    1. **Fingerprint + time-stretch**: tries multiple stretch rates (default
+       ±35%, step 5%) to handle key-locked mixes.
+    2. **MFCC+chroma fallback**: dual-feature timbral similarity when
+       fingerprinting fails.  Requires ``precompute_audio_features()`` to have
+       been run on the library beforehand.
+
+``Matcher.precompute_audio_features(progress_callback, cancelled)``
+    Pre-computes MFCC and chroma summaries for all indexed tracks.  Must be run
+    once before ``match_segment()`` can use its MFCC fallback.
+
+Internal pipeline
+-----------------
 1. Extract fingerprints from the query audio (mix segment)
 2. Query the database for matching hashes
 3. Use temporal coherence to validate matches

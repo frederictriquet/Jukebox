@@ -9,6 +9,7 @@ Le plugin Cue Maker permet d'analyser un mix DJ (fichier audio continu) et de g�
 ## Fonctionnalités
 
 - **Analyse automatique** : Reconnaissance des morceaux dans un mix via fingerprinting audio
+- **Match ciblé** : Ré-analyse d'un segment précis pour les morceaux non identifiés (voir ci-dessous)
 - **Édition manuelle** : Correction des métadonnées (artiste, titre, timestamps)
 - **Ajout manuel** : Insertion de morceaux non détectés automatiquement
 - **Import de bibliothèque** : Récupération des métadonnées depuis la bibliothèque Jukebox
@@ -37,6 +38,28 @@ Le plugin Cue Maker permet d'analyser un mix DJ (fichier audio continu) et de g�
    - Cliquer sur "+" dans la colonne Actions pour insérer un morceau
    - Cliquer sur "⬇" pour importer les métadonnées depuis la bibliothèque
 5. **Exporter** : Cliquer sur "Export" pour générer le fichier .cue
+
+### Targeted Match — Re-identification d'un segment
+
+Quand l'analyse automatique ne reconnaît pas un morceau (confiance trop faible, pitch fortement modifié), le Targeted Match permet de relancer une analyse plus poussée sur un extrait précis.
+
+**Prérequis** : La base de données shazamix doit contenir des features audio pré-calculées.
+Pour les calculer : `uv run shazamix precompute-features` (à lancer une seule fois).
+
+**Workflow** :
+
+1. Sélectionner une ligne dans la table (un morceau non identifié)
+2. Dans la zone d'édition en bas, ajuster les handles start/end de la barre temporelle sur une partie représentative du morceau (idéalement 20–60 secondes de la section la plus caractéristique)
+3. Cliquer sur **⊙ Targeted Match** dans la toolbar ou dans la zone timing bar
+4. L'analyse tourne en arrière-plan (progress bar visible)
+5. Si un match est trouvé, les métadonnées (artiste, titre, confiance) sont appliquées à la ligne sélectionnée
+
+**Algorithme en deux étapes** :
+
+- **Stage 1 — Fingerprinting avec time-stretch** : teste plusieurs ratios de tempo (±35% par pas de 5%) pour compenser le key-lock des DJs
+- **Stage 2 — Similarité timbrale MFCC+chroma** : si le fingerprinting échoue, compare les features MFCC et chroma de la base de données (méthode plus robuste aux fortes variations de tempo)
+
+> **Note** : La confiance est généralement plus faible qu'avec l'analyse globale (segment court). Un score > 0.85 est fiable ; entre 0.7 et 0.85, vérifier manuellement.
 
 ### Actions disponibles
 
@@ -126,16 +149,28 @@ class CueSheet:
 
 #### AnalyzeWorker (analyzer.py)
 
-Thread d'analyse asynchrone qui :
+Thread d'analyse asynchrone pour le mix complet :
 1. Charge le mix audio
 2. Extrait les fingerprints audio (ou charge depuis cache)
 3. Matche contre la base de données shazamix
 4. Émet les résultats via signaux Qt
 
 **Signaux** :
-- `progress(current, total, message)` - Progression de l'analyse
-- `finished(entries)` - Analyse terminée avec succès
-- `error(error_message)` - Erreur durant l'analyse
+- `progress(current, total, message)` — Progression de l'analyse
+- `finished(entries)` — Analyse terminée avec succès
+- `error(error_message)` — Erreur durant l'analyse
+
+#### TargetedMatchWorker (analyzer.py)
+
+Thread de match ciblé pour ré-analyser un segment précis :
+- Reçoit `start_ms` / `end_ms` (région sélectionnée dans CueTimingBar)
+- Appelle `Matcher.match_segment()` avec pipeline deux étapes (fingerprint + MFCC)
+- Supporte l'annulation via `isInterruptionRequested()`
+
+**Signaux** :
+- `progress(current, total, message)` — Progression de l'analyse
+- `finished(match)` — Match trouvé (objet `Match`) ou `None`
+- `error(error_message)` — Erreur durant l'analyse
 
 #### CueExporter (exporter.py)
 
@@ -197,7 +232,12 @@ uv run pytest tests/plugins/test_cue_maker_widget.py
 uv run pytest tests/plugins/test_cue_maker_cache.py
 ```
 
-**Couverture actuelle** : 127 tests, couverture du module cue_maker > 85%
+**Couverture actuelle** : 147 tests (+ 20 tests shazamix/matcher), couverture du module cue_maker > 85%
+
+Les tests shazamix sont dans `tests/shazamix/` :
+```bash
+uv run pytest tests/shazamix/test_matcher.py -v
+```
 
 ## Limitations et futures améliorations
 
