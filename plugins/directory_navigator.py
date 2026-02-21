@@ -283,6 +283,12 @@ class DirectoryNavigatorPlugin:
         if self.widget is None:
             return
 
+        # Skip rebuild when dock is hidden (curating/cue_maker mode).
+        # activate() will rebuild the tree when switching back to jukebox.
+        dock = self.widget.parent()
+        if dock and hasattr(dock, "isVisible") and not dock.isVisible():
+            return
+
         db = self.context.database
 
         # Get all filepaths
