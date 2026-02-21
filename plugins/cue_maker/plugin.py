@@ -12,7 +12,7 @@ from plugins.cue_maker.widgets.bottom_drawer import BottomDrawer
 
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
-    from plugins.cue_maker.analyzer import AnalyzeWorker
+    from plugins.cue_maker.analyzer import AnalyzeWorker, TargetedMatchWorker
     from plugins.cue_maker.widgets.cue_maker_widget import CueMakerWidget
 
 logger = logging.getLogger(__name__)
@@ -42,6 +42,8 @@ class CueMakerPlugin:
         self._ui_builder: UIBuilderProtocol | None = None
         self.main_widget: CueMakerWidget | None = None
         self._analyzer: AnalyzeWorker | None = None
+        self._targeted_worker: TargetedMatchWorker | None = None
+        self._targeted_row: int = -1
         self._cue_context_action: Any | None = None
         self._original_central: QWidget | None = None
         self._nav_dock: Any | None = None
@@ -250,6 +252,7 @@ class CueMakerPlugin:
         if self.main_widget:
             self.main_widget.import_requested.connect(self._on_import_from_library)
             self.main_widget.search_requested.connect(self._on_search_in_library)
+            self.main_widget.targeted_match_requested.connect(self._on_targeted_match)
             self.main_widget.connect_player_events()
 
         logger.debug("[Cue Maker] Activated for %s mode", mode)
@@ -276,8 +279,17 @@ class CueMakerPlugin:
             try:
                 self.main_widget.import_requested.disconnect(self._on_import_from_library)
                 self.main_widget.search_requested.disconnect(self._on_search_in_library)
+                self.main_widget.targeted_match_requested.disconnect(self._on_targeted_match)
             except RuntimeError:
                 pass
+
+        # Stop any running targeted match worker
+        if self._targeted_worker is not None and self._targeted_worker.isRunning():
+            self._targeted_worker.requestInterruption()
+            self._targeted_worker.quit()
+            self._targeted_worker.wait(5000)
+        self._targeted_worker = None
+        self._targeted_row = -1
 
         # Remove widgets from drawer layout before restoring
         # This includes search_bar, track_list, controls, and waveform_widget
@@ -360,6 +372,12 @@ class CueMakerPlugin:
                 self._analyzer.quit()
                 self._analyzer.wait(5000)
             self._analyzer = None
+        if self._targeted_worker is not None:
+            if self._targeted_worker.isRunning():
+                self._targeted_worker.requestInterruption()
+                self._targeted_worker.quit()
+                self._targeted_worker.wait(5000)
+            self._targeted_worker = None
         if self.main_widget:
             self.main_widget.cleanup_workers()
         self.main_widget = None
@@ -439,6 +457,125 @@ class CueMakerPlugin:
             n = len(entries)
             msg = f"Cue Maker: Found {n} track{'s' if n != 1 else ''} in mix"
             self.context.emit(Events.STATUS_MESSAGE, message=msg)
+
+    # --- Targeted match ---
+
+    def _on_targeted_match(self, start_ms: int, end_ms: int) -> None:
+        """Start a targeted match worker for the given segment.
+
+        Captures the currently selected row so the result is applied to the
+        right entry even if the selection changes during the async analysis.
+
+        Args:
+            start_ms: Start of the segment to analyse (milliseconds)
+            end_ms: End of the segment to analyse (milliseconds)
+        """
+        if not self.main_widget or not self.context:
+            return
+
+        mix_path = self.main_widget.model.sheet.mix_filepath
+        if not mix_path:
+            return
+
+        cue_config = getattr(self.context.config, "cue_maker", None)
+        db_path = str(cue_config.shazamix_db_path.expanduser()) if cue_config else ""
+        if not db_path:
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(
+                self.main_widget,
+                "Configuration",
+                "No shazamix database path configured.\nSet shazamix_db_path in config.yaml.",
+            )
+            return
+
+        # Capture the row to update when analysis completes
+        self._targeted_row = self.main_widget._selected_row
+
+        from plugins.cue_maker.analyzer import TargetedMatchWorker
+
+        self._targeted_worker = TargetedMatchWorker(mix_path, db_path, start_ms, end_ms)
+        self._targeted_worker.setObjectName("CueMaker-TargetedWorker")
+        self._targeted_worker.progress.connect(self.main_widget.set_analysis_progress)
+        self._targeted_worker.finished.connect(self._on_targeted_match_done)
+        self._targeted_worker.error.connect(self.main_widget.on_targeted_match_error)
+
+        self.main_widget.targeted_match_btn.setEnabled(False)
+        self.main_widget.set_analysis_progress(-1, 0, "Targeted match in progress…")
+        self._targeted_worker.start()
+
+        from jukebox.core.event_bus import Events
+
+        self.context.emit(
+            Events.STATUS_MESSAGE,
+            message=f"Cue Maker: Targeted match [{start_ms // 1000}s – {end_ms // 1000}s]…",
+        )
+        logger.info(
+            "[Cue Maker] Targeted match started for row %d [%dms–%dms]",
+            self._targeted_row,
+            start_ms,
+            end_ms,
+        )
+
+    def _on_targeted_match_done(self, match: object) -> None:
+        """Handle targeted match completion.
+
+        Applies the match to the captured row (if found), then updates the UI.
+
+        Args:
+            match: shazamix Match object or None if no match was found
+        """
+        if not self.main_widget:
+            return
+
+        # Apply match to the originally targeted row
+        if match is not None and self._targeted_row >= 0:
+            entry = self.main_widget.model.get_entry(self._targeted_row)
+            if entry is not None:
+                from plugins.cue_maker.model import EntryStatus
+
+                entry.artist = getattr(match, "artist", None) or "Unknown Artist"
+                entry.title = getattr(match, "title", None) or "Unknown Title"
+                entry.confidence = getattr(match, "confidence", 0.0)
+                entry.filepath = getattr(match, "filepath", "") or ""
+                entry.track_id = getattr(match, "track_id", None)
+                duration_ms = getattr(match, "duration_ms", 0) or 0
+                if duration_ms > 0:
+                    entry.duration_ms = duration_ms
+                entry.status = EntryStatus.PENDING
+
+                model = self.main_widget.model
+                model.dataChanged.emit(
+                    model.index(self._targeted_row, 0),
+                    model.index(self._targeted_row, model.columnCount() - 1),
+                    [],
+                )
+                # Refresh timing bar if the targeted row is still selected
+                if self.main_widget._selected_row == self._targeted_row:
+                    self.main_widget._refresh_editor_fields()
+
+                logger.info(
+                    "[Cue Maker] Targeted match applied to row %d: %s – %s",
+                    self._targeted_row,
+                    entry.artist,
+                    entry.title,
+                )
+
+        # Update UI (hides progress bar, re-enables button, shows dialog if no match)
+        self.main_widget.on_targeted_match_complete(match)
+
+        if self.context:
+            from jukebox.core.event_bus import Events
+
+            if match:
+                artist = getattr(match, "artist", "?")
+                title = getattr(match, "title", "?")
+                msg = f"Cue Maker: Match found – {artist} — {title}"
+            else:
+                msg = "Cue Maker: No targeted match found"
+            self.context.emit(Events.STATUS_MESSAGE, message=msg)
+
+        self._targeted_row = -1
 
     # --- Track addition to cue sheet ---
 

@@ -77,6 +77,18 @@ class FingerprintDB:
             )
         """)
 
+        # Audio feature summaries (MFCC etc.) for similarity matching
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS audio_features (
+                track_id INTEGER NOT NULL,
+                feature_type TEXT NOT NULL,
+                feature_data BLOB NOT NULL,
+                computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (track_id, feature_type),
+                FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+            )
+        """)
+
         conn.commit()
         conn.close()
 
@@ -307,3 +319,68 @@ class FingerprintDB:
         conn.execute("DELETE FROM fingerprint_status")
         conn.commit()
         conn.close()
+
+    def store_audio_features(
+        self, track_id: int, feature_type: str, features: "np.ndarray"
+    ) -> None:
+        """Store audio feature vector for a track.
+
+        Args:
+            track_id: Track ID
+            feature_type: Feature type identifier (e.g. 'mfcc_summary')
+            features: Numpy array of feature values
+        """
+        import numpy as np
+
+        conn = self._get_connection()
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO audio_features (track_id, feature_type, feature_data)
+            VALUES (?, ?, ?)
+            """,
+            (track_id, feature_type, features.astype(np.float32).tobytes()),
+        )
+        conn.commit()
+        conn.close()
+
+    def get_all_audio_features(
+        self, feature_type: str
+    ) -> "dict[int, np.ndarray]":
+        """Load all audio features of a given type.
+
+        Args:
+            feature_type: Feature type identifier (e.g. 'mfcc_summary')
+
+        Returns:
+            Dict mapping track_id to feature numpy array
+        """
+        import numpy as np
+
+        conn = self._get_connection()
+        rows = conn.execute(
+            "SELECT track_id, feature_data FROM audio_features WHERE feature_type = ?",
+            (feature_type,),
+        ).fetchall()
+        conn.close()
+
+        result: dict[int, np.ndarray] = {}
+        for track_id, blob in rows:
+            result[track_id] = np.frombuffer(blob, dtype=np.float32)
+        return result
+
+    def count_audio_features(self, feature_type: str) -> int:
+        """Count tracks with a given audio feature type.
+
+        Args:
+            feature_type: Feature type identifier
+
+        Returns:
+            Number of tracks with this feature type stored
+        """
+        conn = self._get_connection()
+        row = conn.execute(
+            "SELECT COUNT(*) FROM audio_features WHERE feature_type = ?",
+            (feature_type,),
+        ).fetchone()
+        conn.close()
+        return row[0] if row else 0

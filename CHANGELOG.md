@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+- **Cue Maker — Targeted Match** (`plugins/cue_maker`, `shazamix`)
+  - New "Targeted Match" feature for re-analysing unidentified segments
+  - Select a region on the timing bar and click ⊙ to launch a focused analysis
+  - Two-stage matching pipeline:
+    1. Fingerprint matching with time-stretch pre-processing (±35%, step 5%)
+    2. Dual-feature MFCC+chroma fallback with `min(combined_run, chroma_run)` scoring
+  - New `Matcher.match_segment()` public API in `shazamix/matcher.py`
+  - New `Matcher.match_segment_by_mfcc()` for timbral similarity matching
+  - New `TargetedMatchWorker` QThread in `plugins/cue_maker/analyzer.py`
+  - Cancellation support in all async analysis loops
+  - 20 new unit tests for the shazamix matching engine
+
 - **Genre Filter Plugin**
   - Interactive genre filtering for jukebox mode
   - Toolbar buttons with 3-state toggle (indifferent/on/off)

@@ -525,6 +525,17 @@ Interactive directory navigation for jukebox mode. Allows users to browse and fi
 - [x] Comprehensive tests (70+ unit + integration tests)
 - [x] Documentation (inline + patterns + bug capitalization)
 
+### Targeted Match Cue Maker (Terminé ✅)
+- [x] **DONE** - Complété 2026-02-21
+- [x] ADR-003 créé (decision API + UI)
+- [x] Matcher.match_segment() implémenté avec two-stage pipeline
+- [x] TargetedMatchWorker créé avec cancellation support
+- [x] Bouton UI (timing bar + toolbar avec ⊙ icon)
+- [x] 20 tests pour match_segment(), match_segment_by_mfcc() + worker
+- [x] Integration tests avec CueMakerWidget, cancellation tested
+- [x] Documentation (CHANGELOG + README cue_maker + module docstring)
+- [x] Capitalisation (pattern-shazamix-two-stage-matching + std-worker-cancellation)
+
 ---
 
 ## Prochaine Phase
