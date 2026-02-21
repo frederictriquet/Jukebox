@@ -11,15 +11,16 @@ from __future__ import annotations
 
 import logging
 import math
-import os
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Iterator
 
 import numpy as np
 
-from .fingerprint import Fingerprinter, Fingerprint
 from .database import FingerprintDB
+from .fingerprint import Fingerprint, Fingerprinter
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -49,7 +50,6 @@ class CueEntry:
     artist: str | None
     filename: str
     confidence: float
-
 
 
 def _extract_segment_fps(
@@ -157,8 +157,9 @@ class Matcher:
         stretch_min: float = 0.85,
         stretch_max: float = 1.35,
         stretch_step: float = 0.05,
-        progress_callback: "callable | None" = None,
-    ) -> "Match | None":
+        progress_callback: Callable[..., object] | None = None,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> Match | None:
         """Identify the track in a specific segment of a mix.
 
         Designed for re-analysis of segments not matched by analyze_mix().
@@ -183,6 +184,7 @@ class Matcher:
             stretch_max: Upper bound for time-stretch rate (default 1.35)
             stretch_step: Step size for time-stretch rate search (default 0.05)
             progress_callback: Optional callback(current, total, message)
+            cancelled: Optional callable returning True to abort early
 
         Returns:
             Best Match found, or None if no match exceeds the confidence threshold
@@ -219,6 +221,8 @@ class Matcher:
         best_match_count = 0
 
         for i, rate in enumerate(rates):
+            if cancelled and cancelled():
+                return None
             rate = float(round(rate, 4))
             log(f"Trying time-stretch rate {rate:.2f} ({i + 1}/{total_rates})…")
 
@@ -281,11 +285,12 @@ class Matcher:
             end_ms,
             progress_callback=progress_callback,
             preloaded_audio=y,
+            cancelled=cancelled,
         )
         return mfcc_match
 
     @staticmethod
-    def compute_mfcc_summary(y: "np.ndarray", sr: int = 22050) -> "np.ndarray":
+    def compute_mfcc_summary(y: np.ndarray, sr: int = 22050) -> np.ndarray:
         """Compute a compact MFCC summary vector for an audio signal.
 
         The summary concatenates mean, standard-deviation and delta-mean of
@@ -302,15 +307,17 @@ class Matcher:
         import librosa
 
         mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=20, hop_length=2048)
-        summary = np.concatenate([
-            mfcc.mean(axis=1),
-            mfcc.std(axis=1),
-            np.diff(mfcc, axis=1).mean(axis=1),
-        ])
+        summary = np.concatenate(
+            [
+                mfcc.mean(axis=1),
+                mfcc.std(axis=1),
+                np.diff(mfcc, axis=1).mean(axis=1),
+            ]
+        )
         return summary.astype(np.float32)
 
     @staticmethod
-    def compute_chroma_summary(y: "np.ndarray", sr: int = 22050) -> "np.ndarray":
+    def compute_chroma_summary(y: np.ndarray, sr: int = 22050) -> np.ndarray:
         """Compute a compact chroma summary vector for an audio signal.
 
         The summary concatenates mean, standard-deviation and delta-mean of
@@ -327,17 +334,21 @@ class Matcher:
         import librosa
 
         chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=2048)
-        summary = np.concatenate([
-            chroma.mean(axis=1),
-            chroma.std(axis=1),
-            np.diff(chroma, axis=1).mean(axis=1),
-        ])
+        summary = np.concatenate(
+            [
+                chroma.mean(axis=1),
+                chroma.std(axis=1),
+                np.diff(chroma, axis=1).mean(axis=1),
+            ]
+        )
         return summary.astype(np.float32)
 
     @staticmethod
     def _compute_combined_frame_features(
-        y: "np.ndarray", sr: int, hop: int,
-    ) -> "np.ndarray":
+        y: np.ndarray,
+        sr: int,
+        hop: int,
+    ) -> np.ndarray:
         """Compute combined chroma+MFCC features per frame.
 
         Returns a (32, T) array where each column is a unit-normalised vector
@@ -366,12 +377,12 @@ class Matcher:
 
     @staticmethod
     def _best_sustained_run(
-        query_feat: "np.ndarray",
-        ref_feat: "np.ndarray",
+        query_feat: np.ndarray,
+        ref_feat: np.ndarray,
         slide_step: int,
         min_overlap: int,
         threshold: float,
-    ) -> "tuple[int, float]":
+    ) -> tuple[int, float]:
         """Find the longest sustained run of frame similarity above threshold.
 
         Slides *ref_feat* along *query_feat* and returns the length of the
@@ -397,16 +408,11 @@ class Matcher:
                 continue
 
             sims = np.sum(
-                query_feat[:, mix_s:mix_s + overlap]
-                * ref_feat[:, ref_s:ref_s + overlap],
+                query_feat[:, mix_s : mix_s + overlap] * ref_feat[:, ref_s : ref_s + overlap],
                 axis=0,
             )
             above = sims >= threshold
-            boundaries = np.where(
-                np.diff(
-                    np.concatenate(([False], above, [False])).astype(int)
-                )
-            )[0]
+            boundaries = np.where(np.diff(np.concatenate(([False], above, [False])).astype(int)))[0]
             if len(boundaries) >= 2:
                 runs = boundaries[1::2] - boundaries[::2]
                 run_len = int(runs.max())
@@ -421,17 +427,17 @@ class Matcher:
 
     def _alignment_rerank(
         self,
-        candidates: "list[tuple[int, float]]",
-        query_features: "np.ndarray",
+        candidates: list[tuple[int, float]],
+        query_features: np.ndarray,
         sr: int,
         hop: int,
         sim_threshold: float,
         slide_step: int,
         min_overlap: int,
         feature_type: str,
-        log: "callable | None" = None,
+        log: callable | None = None,
         log_every: int = 10,
-    ) -> "list[tuple[int, int, float]]":
+    ) -> list[tuple[int, int, float]]:
         """Re-rank candidates by full-alignment sustained similarity.
 
         For each candidate, loads the reference audio, computes per-frame
@@ -476,11 +482,15 @@ class Matcher:
 
                 if feature_type == "combined":
                     ref_features = self._compute_combined_frame_features(
-                        y_ref, sr, hop,
+                        y_ref,
+                        sr,
+                        hop,
                     )
                 else:
                     ref_chroma = librosa.feature.chroma_cqt(
-                        y=y_ref, sr=sr, hop_length=hop,
+                        y=y_ref,
+                        sr=sr,
+                        hop_length=hop,
                     )
                     rn = np.linalg.norm(ref_chroma, axis=0, keepdims=True)
                     rn[rn == 0] = 1.0
@@ -501,17 +511,13 @@ class Matcher:
                         continue
 
                     sims = np.sum(
-                        query_features[:, mix_s:mix_s + overlap]
-                        * ref_features[:, ref_s:ref_s + overlap],
+                        query_features[:, mix_s : mix_s + overlap]
+                        * ref_features[:, ref_s : ref_s + overlap],
                         axis=0,
                     )
                     above = sims >= sim_threshold
                     boundaries = np.where(
-                        np.diff(
-                            np.concatenate(
-                                ([False], above, [False])
-                            ).astype(int)
-                        )
+                        np.diff(np.concatenate(([False], above, [False])).astype(int))
                     )[0]
                     if len(boundaries) >= 2:
                         runs = boundaries[1::2] - boundaries[::2]
@@ -540,10 +546,11 @@ class Matcher:
         mix_path: str,
         start_ms: int,
         end_ms: int,
-        progress_callback: "callable | None" = None,
-        preloaded_audio: "np.ndarray | None" = None,
+        progress_callback: Callable[..., object] | None = None,
+        preloaded_audio: np.ndarray | None = None,
         top_n: int = 200,
-    ) -> "Match | None":
+        cancelled: Callable[[], bool] | None = None,
+    ) -> Match | None:
         """Identify a track by audio feature similarity (two-stage).
 
         **Stage 2a** — combined MFCC+chroma screening using compact summaries
@@ -572,6 +579,7 @@ class Matcher:
             preloaded_audio: Optional pre-loaded audio array (mono, at
                 ``self.fingerprinter.sample_rate``). Avoids double loading.
             top_n: Number of candidates from compact screening (default 200)
+            cancelled: Optional callable returning True to abort early
 
         Returns:
             Best Match found, or None
@@ -590,8 +598,7 @@ class Matcher:
         chroma_summaries = self.db.get_all_audio_features("chroma_summary")
         both_ids = set(mfcc_summaries.keys()) & set(chroma_summaries.keys())
         if not both_ids:
-            log("No audio feature summaries in database. "
-                "Run feature pre-computation first.")
+            log("No audio feature summaries in database. " "Run feature pre-computation first.")
             return None
 
         log(f"Loaded features for {len(both_ids)} tracks")
@@ -603,7 +610,11 @@ class Matcher:
             duration_s = (end_ms - start_ms) / 1000.0
             log(f"Loading mix segment [{start_ms}ms–{end_ms}ms]…")
             y, _ = librosa.load(
-                mix_path, sr=sr, mono=True, offset=start_s, duration=duration_s,
+                mix_path,
+                sr=sr,
+                mono=True,
+                offset=start_s,
+                duration=duration_s,
             )
 
         if len(y) == 0:
@@ -634,9 +645,7 @@ class Matcher:
                 continue
             ref_combined = np.concatenate([m / mn, c / cn])
             rn = np.linalg.norm(ref_combined)
-            cos_sim = float(
-                np.dot(q_combined, ref_combined) / (q_combined_norm * rn)
-            )
+            cos_sim = float(np.dot(q_combined, ref_combined) / (q_combined_norm * rn))
             scores.append((track_id, cos_sim))
 
         if not scores:
@@ -662,8 +671,7 @@ class Matcher:
         # Score = min(combined_run, chroma_run) — eliminates false
         # positives that score well in only one metric.
         # ------------------------------------------------------------------
-        log(f"Stage 2b: Sustained chroma+MFCC re-ranking "
-            f"({len(candidates)} tracks)…")
+        log(f"Stage 2b: Sustained chroma+MFCC re-ranking " f"({len(candidates)} tracks)…")
 
         query_combined = self._compute_combined_frame_features(y, sr, hop)
         query_chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=hop)
@@ -674,6 +682,10 @@ class Matcher:
         results: list[tuple[int, int, float]] = []
 
         for idx, (track_id, _compact_score) in enumerate(candidates):
+            if cancelled and cancelled():
+                log("Re-ranking cancelled.")
+                return None
+
             track_info = self.db.get_track_info(track_id)
             if not track_info:
                 continue
@@ -688,10 +700,14 @@ class Matcher:
 
                 # Compute both feature types from the same audio load
                 ref_combined = self._compute_combined_frame_features(
-                    y_ref, sr, hop,
+                    y_ref,
+                    sr,
+                    hop,
                 )
                 ref_chroma = librosa.feature.chroma_cqt(
-                    y=y_ref, sr=sr, hop_length=hop,
+                    y=y_ref,
+                    sr=sr,
+                    hop_length=hop,
                 )
                 rn = np.linalg.norm(ref_chroma, axis=0, keepdims=True)
                 rn[rn == 0] = 1.0
@@ -701,12 +717,18 @@ class Matcher:
                     continue
 
                 comb_run, comb_sim = self._best_sustained_run(
-                    query_combined, ref_combined,
-                    slide_step, min_overlap, 0.80,
+                    query_combined,
+                    ref_combined,
+                    slide_step,
+                    min_overlap,
+                    0.80,
                 )
                 chro_run, chro_sim = self._best_sustained_run(
-                    query_chroma_normed, ref_chroma_normed,
-                    slide_step, min_overlap, 0.92,
+                    query_chroma_normed,
+                    ref_chroma_normed,
+                    slide_step,
+                    min_overlap,
+                    0.92,
                 )
 
                 score = min(comb_run, chro_run)
@@ -716,6 +738,12 @@ class Matcher:
                     results.append((track_id, score, avg_sim))
 
             except Exception:
+                logger.debug(
+                    "Failed to load/process track %d (%s), skipping",
+                    track_id,
+                    filepath,
+                    exc_info=True,
+                )
                 continue
 
             if (idx + 1) % 20 == 0:
@@ -756,9 +784,9 @@ class Matcher:
 
     def precompute_audio_features(
         self,
-        progress_callback: "callable | None" = None,
+        progress_callback: callable | None = None,
         max_workers: int = 1,
-        cancelled: "callable | None" = None,
+        cancelled: callable | None = None,
     ) -> int:
         """Compute and store MFCC and chroma summaries for all indexed tracks.
 
@@ -785,8 +813,7 @@ class Matcher:
         existing_mfcc = self.db.get_all_audio_features("mfcc_summary")
         existing_chroma = self.db.get_all_audio_features("chroma_summary")
         to_process = [
-            t for t in tracks
-            if t["id"] not in existing_mfcc or t["id"] not in existing_chroma
+            t for t in tracks if t["id"] not in existing_mfcc or t["id"] not in existing_chroma
         ]
 
         total = len(to_process)
@@ -871,11 +898,7 @@ class Matcher:
         Returns:
             Tuple of (matches, segment-grouped fingerprints for caching)
         """
-        import logging
-
         from concurrent.futures import ProcessPoolExecutor, as_completed
-
-        logger = logging.getLogger(__name__)
 
         def is_cancelled() -> bool:
             return cancelled is not None and cancelled()
@@ -886,7 +909,9 @@ class Matcher:
 
         # Fast path: reuse precomputed fingerprints (skip audio + extraction)
         if precomputed_fingerprints is not None:
-            log(f"Using cached fingerprints ({len(precomputed_fingerprints)} segments), matching...")
+            log(
+                f"Using cached fingerprints ({len(precomputed_fingerprints)} segments), matching..."
+            )
             matches = self._match_global(
                 precomputed_fingerprints, progress_callback=progress_callback
             )
@@ -988,9 +1013,7 @@ class Matcher:
         log(f"Matching {total_fps} fingerprints ({total_segments} segments)...")
 
         # Phase 2 — Global tempo-aware matching across all segments
-        matches = self._match_global(
-            segment_fps_list, progress_callback=progress_callback
-        )
+        matches = self._match_global(segment_fps_list, progress_callback=progress_callback)
 
         log(f"Found {len(matches)} unique tracks")
 
@@ -1000,7 +1023,7 @@ class Matcher:
         self,
         segment_fps_list: list[list[Fingerprint]],
         progress_callback: callable | None = None,
-        stretch_ratios: "np.ndarray | None" = None,
+        stretch_ratios: np.ndarray | None = None,
     ) -> list[Match]:
         """Match all segments globally with tempo-aware search.
 
@@ -1060,9 +1083,7 @@ class Matcher:
 
         # 4. Sort candidate tracks by triple count
         candidate_tracks = [
-            (tid, len(pairs))
-            for tid, pairs in track_data.items()
-            if len(pairs) >= self.min_matches
+            (tid, len(pairs)) for tid, pairs in track_data.items() if len(pairs) >= self.min_matches
         ]
         candidate_tracks.sort(key=lambda x: -x[1])
 
@@ -1078,7 +1099,7 @@ class Matcher:
         matches: list[Match] = []
         track_info_cache: dict[int, dict | None] = {}
 
-        for idx, (track_id, raw_count) in enumerate(candidate_tracks):
+        for idx, (track_id, _raw_count) in enumerate(candidate_tracks):
             pairs = track_data[track_id]
 
             arr = np.array(pairs, dtype=np.float64)
@@ -1111,9 +1132,7 @@ class Matcher:
                     best_center = center
 
             # Statistical significance test (3x noise threshold)
-            offset_range_ms = float(
-                t_qt.max() - t_qt.min() + t_dt.max() - t_dt.min()
-            )
+            offset_range_ms = float(t_qt.max() - t_qt.min() + t_dt.max() - t_dt.min())
             num_bins = max(offset_range_ms / bin_width, 1.0)
             lam = n_pairs / num_bins
             log_term = math.log(num_bins * num_ratios)
@@ -1175,7 +1194,8 @@ class Matcher:
 
         if progress_callback:
             progress_callback(
-                total_candidates, total_candidates,
+                total_candidates,
+                total_candidates,
                 f"Matching {total_candidates}/{total_candidates}",
             )
 
@@ -1260,7 +1280,7 @@ class Matcher:
         self,
         query_fps: list[Fingerprint],
         db_by_hash: dict[int, list[tuple[int, int]]],
-        stretch_ratios: "np.ndarray | None" = None,
+        stretch_ratios: np.ndarray | None = None,
         min_confidence: float | None = None,
     ) -> list[Match]:
         """Match segment fingerprints using pre-fetched DB results.
@@ -1287,7 +1307,7 @@ class Matcher:
 
         # Gather DB matches for this segment's hashes
         filtered_matches: list[tuple[int, int, int]] = []
-        for hash_val, query_time in query_time_by_hash.items():
+        for hash_val, _query_time in query_time_by_hash.items():
             if hash_val in db_by_hash:
                 for track_id, db_time in db_by_hash[hash_val]:
                     filtered_matches.append((track_id, db_time, hash_val))
@@ -1301,9 +1321,7 @@ class Matcher:
         db_hashes = np.array([m[2] for m in filtered_matches], dtype=np.int64)
 
         # Vectorized: get query times for each db match
-        query_times = np.array(
-            [query_time_by_hash[h] for h in db_hashes], dtype=np.float64
-        )
+        query_times = np.array([query_time_by_hash[h] for h in db_hashes], dtype=np.float64)
 
         # Get unique tracks and their best matches
         unique_tracks = np.unique(db_track_ids)
@@ -1433,7 +1451,6 @@ class Matcher:
 
         # Bin offsets into histogram
         min_offset = min(offsets)
-        max_offset = max(offsets)
 
         # Create bins
         bins: dict[int, list[int]] = defaultdict(list)
@@ -1475,7 +1492,7 @@ class Matcher:
 
         merged: list[Match] = []
 
-        for track_id, track_matches in by_track.items():
+        for _track_id, track_matches in by_track.items():
             # Sort by query start time
             track_matches.sort(key=lambda m: m.query_start_ms)
 

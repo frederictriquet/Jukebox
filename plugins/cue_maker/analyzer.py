@@ -231,6 +231,7 @@ class TargetedMatchWorker(QThread):
                 self.start_ms,
                 self.end_ms,
                 progress_callback=progress_callback,
+                cancelled=self.isInterruptionRequested,
             )
 
             if self.isInterruptionRequested():

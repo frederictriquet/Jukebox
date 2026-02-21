@@ -263,6 +263,21 @@ class CueTimingBar(QWidget):
             self.setCursor(Qt.CursorShape.OpenHandCursor)
         self._dragging = None
 
+    @property
+    def has_entry(self) -> bool:
+        """Whether a cue entry is currently loaded."""
+        return self._has_entry
+
+    @property
+    def start_ms(self) -> int:
+        """Start position of the entry region in milliseconds."""
+        return self._start_ms
+
+    @property
+    def end_ms(self) -> int:
+        """End position of the entry region in milliseconds."""
+        return self._end_ms
+
 
 class ActionsDelegate(QStyledItemDelegate):
     """Delegate that renders clickable action icons in the actions column."""
@@ -953,10 +968,10 @@ class CueMakerWidget(QWidget):
 
     def _on_targeted_match(self) -> None:
         """Emit targeted_match_requested with the current timing bar region."""
-        if not self.timing_bar._has_entry:
+        if not self.timing_bar.has_entry:
             return
-        start_ms = self.timing_bar._start_ms
-        end_ms = self.timing_bar._end_ms
+        start_ms = self.timing_bar.start_ms
+        end_ms = self.timing_bar.end_ms
         if end_ms > start_ms:
             self.targeted_match_requested.emit(start_ms, end_ms)
 

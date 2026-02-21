@@ -368,9 +368,7 @@ class TestMatchSegmentByMfcc:
 
         silence = np.zeros(sr * 5, dtype=np.float32)
 
-        def _load(
-            path: str, sr: int | None = None, mono: bool = True
-        ) -> tuple[np.ndarray, int]:
+        def _load(path: str, sr: int | None = None, mono: bool = True) -> tuple[np.ndarray, int]:
             # Return the matching audio for track 1's file, silence for track 2.
             if "1.mp3" in path:
                 return y, sr or 22050
