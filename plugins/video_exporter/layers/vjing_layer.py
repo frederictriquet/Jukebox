@@ -3463,6 +3463,115 @@ class VJingLayer(BaseVisualLayer):
         img.paste(result, (0, 0))
 
     # =========================================================================
+    # Scanlines effect - CRT scanlines + VHS distortion, intensity on drops
+    # =========================================================================
+
+    @vj_effect("Scanlines", "Post-process", "post_processing")
+    def _render_scanlines(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render CRT scanlines with VHS tracking distortion.
+
+        Post-processing effect that overlays horizontal scanlines, adds
+        chromatic aberration on edges, and applies VHS-style horizontal
+        jitter that intensifies on drops/beats.
+        """
+        bass = ctx["bass"]
+        energy = ctx["energy"]
+        is_beat = ctx["is_beat"]
+        intensity = self._current_intensity
+        w, h = self.width, self.height
+        s = min(w, h) / 512
+
+        data = np.array(img)
+
+        # --- 1. CRT scanlines: darken every other line group ---
+        # Line spacing adapts to resolution (2-4 px groups)
+        line_spacing = max(2, int(3 * s))
+        # Scrolling offset for moving scanlines
+        scroll = int(time_pos * 30 * s) % (line_spacing * 2)
+
+        scanline_mask = np.ones(h, dtype=np.float32)
+        for y in range(h):
+            pos_in_cycle = (y + scroll) % (line_spacing * 2)
+            if pos_in_cycle < line_spacing:
+                # Darken this line: stronger on high energy
+                darken = 0.55 + energy * 0.15
+                scanline_mask[y] = darken
+
+        # Apply scanline darkening to RGB channels
+        mask_col = scanline_mask[:, np.newaxis, np.newaxis]
+        data[:, :, :3] = np.clip(data[:, :, :3] * mask_col, 0, 255).astype(np.uint8)
+
+        # --- 2. VHS horizontal jitter on beats/drops ---
+        jitter_strength = bass * 0.3 + energy * 0.2
+        if is_beat:
+            jitter_strength += 0.5
+        jitter_strength *= intensity
+
+        if jitter_strength > 0.1:
+            # A few horizontal slices get shifted
+            n_jitter = self._rng.randint(2, max(3, int(5 + jitter_strength * 8)))
+            for _ in range(n_jitter):
+                if self._rng.random() > jitter_strength:
+                    continue
+                jh = self._rng.randint(1, max(2, int(4 * s)))
+                jy = self._rng.randint(0, h - jh)
+                shift = self._rng.randint(
+                    -max(1, int(15 * s * jitter_strength)),
+                    max(1, int(15 * s * jitter_strength)),
+                )
+                if shift != 0:
+                    data[jy : jy + jh] = np.roll(data[jy : jy + jh], shift, axis=1)
+
+        # --- 3. Chromatic aberration: offset R and B vertically ---
+        aberration = max(1, int(2 * s * (0.3 + energy * 0.7) * intensity))
+        if aberration >= 1:
+            data[:, :, 0] = np.roll(data[:, :, 0], -aberration, axis=0)  # R up
+            data[:, :, 2] = np.roll(data[:, :, 2], aberration, axis=0)  # B down
+
+        # --- 4. VHS tracking bar: a bright/noisy horizontal band ---
+        # Slowly drifts through the frame, more visible on high energy
+        bar_visibility = energy * 0.6 + bass * 0.4
+        if bar_visibility > 0.2:
+            bar_h = max(3, int(12 * s))
+            bar_y = int((time_pos * 20 * s) % (h + bar_h * 4)) - bar_h * 2
+            bar_y_start = max(0, bar_y)
+            bar_y_end = min(h, bar_y + bar_h)
+            if bar_y_start < bar_y_end:
+                # Brighten the bar region
+                boost = 1.3 + bar_visibility * 0.5
+                bar_region = data[bar_y_start:bar_y_end, :, :3].astype(np.float32)
+                bar_region = np.clip(bar_region * boost + 20, 0, 255)
+                data[bar_y_start:bar_y_end, :, :3] = bar_region.astype(np.uint8)
+                # Add noise to the bar
+                noise = np.array([self._rng.randint(0, 40) for _ in range(bar_y_end - bar_y_start)])
+                for c in range(3):
+                    data[bar_y_start:bar_y_end, :, c] = np.clip(
+                        data[bar_y_start:bar_y_end, :, c].astype(np.int16) + noise[:, np.newaxis],
+                        0,
+                        255,
+                    ).astype(np.uint8)
+
+        # --- 5. Subtle phosphor glow: tint bright scanlines toward palette color ---
+        colors = self.color_palette
+        tint = colors[int(time_pos * 0.5) % len(colors)]
+        tint_strength = 0.06 * intensity
+        # Build mask for bright lines (not darkened)
+        ys = (np.arange(h) + scroll) % (line_spacing * 2)
+        bright_mask = ys >= line_spacing
+        if np.any(bright_mask):
+            for c in range(3):
+                data[bright_mask, :, c] = np.clip(
+                    data[bright_mask, :, c].astype(np.float32) + tint[c] * tint_strength,
+                    0,
+                    255,
+                ).astype(np.uint8)
+
+        result = Image.fromarray(data, "RGBA")
+        img.paste(result, (0, 0))
+
+    # =========================================================================
     # Moiré effect - Interference patterns from overlapping rotating grids
     # =========================================================================
 
