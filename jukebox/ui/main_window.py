@@ -137,10 +137,12 @@ class MainWindow(QMainWindow):
         self.track_list.files_dropped.connect(self._on_files_dropped)
 
         # Player controls → playback controller
-        self.controls.play_clicked.connect(self._on_play)
-        self.controls.pause_clicked.connect(self.playback.pause)
+        self.controls.play_pause_clicked.connect(self._toggle_play_pause)
         self.controls.stop_clicked.connect(self.playback.stop)
         self.controls.volume_changed.connect(self.player.set_volume)
+
+        # Player state → button icon
+        self.player.state_changed.connect(self._on_player_state_changed)
 
         # Player feedback
         self.player.volume_changed.connect(self.controls.set_volume)
@@ -178,6 +180,14 @@ class MainWindow(QMainWindow):
             self.playback.pause()
         else:
             self._on_play()
+
+    def _on_player_state_changed(self, state: str) -> None:
+        """Update play button icon based on player state.
+
+        Args:
+            state: Player state ("playing", "paused", "stopped")
+        """
+        self.controls.set_playing_state(state == "playing")
 
     def _increase_volume(self) -> None:
         """Increase volume by 10."""

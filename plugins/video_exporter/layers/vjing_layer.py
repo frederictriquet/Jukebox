@@ -35,7 +35,25 @@ except ImportError:
     logging.warning("[VJingLayer] GPU shaders not available")
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from numpy.typing import NDArray
+
+
+def vj_effect(display_name: str, category: str, pass_type: str = "generator") -> Callable:
+    """Decorator to register VJing effect metadata on _render_* methods.
+
+    Args:
+        display_name: Human-readable name for UI display.
+        category: UI grouping category (e.g. "Rythmiques", "GPU").
+        pass_type: "generator", "post_processing", or "final_pass".
+    """
+
+    def decorator(func: Callable) -> Callable:
+        func._vj_meta = (display_name, category, pass_type)  # type: ignore[attr-defined]
+        return func
+
+    return decorator
 
 
 # =============================================================================
@@ -72,6 +90,7 @@ class LFO:
     offset: float = 0.0
     _random_value: float = 0.0
     _last_random_time: float = -1.0
+    _rng: random.Random = None  # type: ignore[assignment]
 
     def value(self, time_pos: float) -> float:
         """Get LFO value at given time.
@@ -98,7 +117,8 @@ class LFO:
             period = 1.0 / self.frequency if self.frequency > 0 else 1.0
             current_period = int(time_pos / period)
             if current_period != int(self._last_random_time / period):
-                self._random_value = random.uniform(-1, 1)
+                rng = self._rng or random.Random()
+                self._random_value = rng.uniform(-1, 1)
                 self._last_random_time = time_pos
             v = self._random_value
         else:
@@ -273,7 +293,7 @@ class VJingLayer(BaseVisualLayer):
         "D": ["aurora"],  # Deep - chill, ambient
         "C": ["kaleidoscope"],  # Classic - elegant
         "P": ["strobe"],  # Power - energetic
-        "T": ["fractal"],  # Trance - hypnotic, psychedelic
+        "T": ["fractal", "grid"],  # Trance - hypnotic, psychedelic
         "H": ["fire"],  # House - groovy, warm
         "G": ["flow_field"],  # Garden - natural
         "I": ["neon"],  # Ibiza - club, colorful
@@ -288,101 +308,102 @@ class VJingLayer(BaseVisualLayer):
         "N": ["wave"],  # Namaste - zen, calm
     }
 
-    # All available effects
-    AVAILABLE_EFFECTS = [
-        "pulse",
-        "strobe",
-        "fft_bars",
-        "fft_rings",
-        "bass_warp",
-        "particles",
-        "flow_field",
-        "explosion",
-        "kaleidoscope",
-        "lissajous",
-        "tunnel",
-        "spiral",
-        "chromatic",
-        "pixelate",
-        "feedback",
-        "fire",
-        "water",
-        "aurora",
-        "wave",
-        "neon",
-        "vinyl",
-        "fractal",
-        "radar",
-        "plasma",
-        "wormhole",
-        "starfield",
-        "lightning",
-        "voronoi",
-        "metaballs",
-        "smoke",
-    ]
+    # These class attributes are built automatically from @vj_effect decorators
+    # on _render_* methods. See _build_registries() called after class definition.
+    AVAILABLE_EFFECTS: list[str] = []
+    POST_PROCESSING_EFFECTS: set[str] = set()
+    FINAL_PASS_EFFECTS: set[str] = set()
+    EFFECT_CATALOG: dict[str, tuple[str, str]] = {}
 
-    # Post-processing effects (applied after generators, on the composite image)
-    POST_PROCESSING_EFFECTS = {"chromatic", "pixelate", "feedback"}
+    @classmethod
+    def _build_registries(cls) -> None:
+        """Build effect registries from @vj_effect decorated _render_* methods.
+
+        Scans cls.__dict__ (preserves definition order) for methods with _vj_meta.
+        """
+        effects: list[str] = []
+        catalog: dict[str, tuple[str, str]] = {}
+        post_processing: set[str] = set()
+        final_pass: set[str] = set()
+
+        for name, method in cls.__dict__.items():
+            if not name.startswith("_render_") or not callable(method):
+                continue
+            meta = getattr(method, "_vj_meta", None)
+            if meta is None:
+                continue
+            effect_id = name[len("_render_") :]
+            display_name, category, pass_type = meta
+            effects.append(effect_id)
+            catalog[effect_id] = (display_name, category)
+            if pass_type == "post_processing":
+                post_processing.add(effect_id)
+            elif pass_type == "final_pass":
+                final_pass.add(effect_id)
+
+        cls.AVAILABLE_EFFECTS = effects
+        cls.EFFECT_CATALOG = catalog
+        cls.POST_PROCESSING_EFFECTS = post_processing
+        cls.FINAL_PASS_EFFECTS = final_pass
 
     # Color palettes: each palette is a list of 4-6 RGB tuples
     # Effects will use these colors for their visuals
     COLOR_PALETTES: dict[str, list[tuple[int, int, int]]] = {
         "neon": [
-            (255, 0, 128),    # Hot pink
-            (0, 255, 255),    # Cyan
-            (255, 255, 0),    # Yellow
-            (128, 0, 255),    # Purple
-            (0, 255, 128),    # Spring green
+            (255, 0, 128),  # Hot pink
+            (0, 255, 255),  # Cyan
+            (255, 255, 0),  # Yellow
+            (128, 0, 255),  # Purple
+            (0, 255, 128),  # Spring green
         ],
         "fire": [
-            (255, 68, 0),     # Orange red
-            (255, 154, 0),    # Orange
-            (255, 206, 0),    # Golden
-            (255, 100, 0),    # Deep orange
-            (200, 50, 0),     # Dark red
+            (255, 68, 0),  # Orange red
+            (255, 154, 0),  # Orange
+            (255, 206, 0),  # Golden
+            (255, 100, 0),  # Deep orange
+            (200, 50, 0),  # Dark red
         ],
         "ice": [
             (200, 240, 255),  # Ice white
             (100, 200, 255),  # Light blue
-            (50, 150, 255),   # Sky blue
-            (0, 100, 200),    # Ocean blue
+            (50, 150, 255),  # Sky blue
+            (0, 100, 200),  # Ocean blue
             (180, 220, 255),  # Pale blue
         ],
         "nature": [
-            (34, 139, 34),    # Forest green
-            (107, 142, 35),   # Olive drab
+            (34, 139, 34),  # Forest green
+            (107, 142, 35),  # Olive drab
             (144, 238, 144),  # Light green
-            (85, 107, 47),    # Dark olive
-            (0, 128, 0),      # Green
+            (85, 107, 47),  # Dark olive
+            (0, 128, 0),  # Green
         ],
         "sunset": [
-            (255, 94, 77),    # Coral
-            (255, 154, 86),   # Peach
+            (255, 94, 77),  # Coral
+            (255, 154, 86),  # Peach
             (255, 206, 115),  # Light gold
-            (128, 0, 64),     # Deep magenta
+            (128, 0, 64),  # Deep magenta
             (255, 128, 128),  # Light coral
         ],
         "ocean": [
-            (0, 105, 148),    # Deep sea
-            (72, 202, 228),   # Turquoise
-            (0, 150, 199),    # Ocean
+            (0, 105, 148),  # Deep sea
+            (72, 202, 228),  # Turquoise
+            (0, 150, 199),  # Ocean
             (144, 224, 239),  # Light cyan
-            (0, 180, 216),    # Bright cyan
+            (0, 180, 216),  # Bright cyan
         ],
         "cosmic": [
             (147, 112, 219),  # Medium purple
-            (75, 0, 130),     # Indigo
+            (75, 0, 130),  # Indigo
             (238, 130, 238),  # Violet
-            (186, 85, 211),   # Medium orchid
-            (148, 0, 211),    # Dark violet
+            (186, 85, 211),  # Medium orchid
+            (148, 0, 211),  # Dark violet
         ],
         "retro": [
-            (255, 183, 77),   # Mustard
-            (255, 112, 67),   # Deep orange
+            (255, 183, 77),  # Mustard
+            (255, 112, 67),  # Deep orange
             (100, 181, 246),  # Retro blue
             (255, 241, 118),  # Light yellow
-            (77, 182, 172),   # Teal
+            (77, 182, 172),  # Teal
         ],
         "monochrome": [
             (255, 255, 255),  # White
@@ -392,12 +413,12 @@ class VJingLayer(BaseVisualLayer):
             (220, 220, 220),  # Very light gray
         ],
         "rainbow": [
-            (255, 0, 0),      # Red
-            (255, 165, 0),    # Orange
-            (255, 255, 0),    # Yellow
-            (0, 255, 0),      # Green
-            (0, 0, 255),      # Blue
-            (148, 0, 211),    # Violet
+            (255, 0, 0),  # Red
+            (255, 165, 0),  # Orange
+            (255, 255, 0),  # Yellow
+            (0, 255, 0),  # Green
+            (0, 0, 255),  # Blue
+            (148, 0, 211),  # Violet
         ],
     }
 
@@ -423,6 +444,7 @@ class VJingLayer(BaseVisualLayer):
         simultaneous_effects: int = 1,
         use_all_effects: bool = False,
         use_gpu: bool = True,
+        rng_seed: int = 42,
         **kwargs: Any,
     ) -> None:
         """Initialize VJing layer.
@@ -448,8 +470,10 @@ class VJingLayer(BaseVisualLayer):
             simultaneous_effects: Number of effects visible at the same time (1 to 10).
             use_all_effects: If True, use all available effects regardless of genre/preset.
             use_gpu: Enable GPU-accelerated shaders when available.
+            rng_seed: Seed for deterministic random number generation.
             **kwargs: Additional parameters.
         """
+        self._rng = random.Random(rng_seed)
         self.genre = genre
         self.effect_intensities = effect_intensities or {}
         # Use _global from effect_intensities if provided, otherwise use intensity param
@@ -490,10 +514,12 @@ class VJingLayer(BaseVisualLayer):
         # Determine which effects to use based on preset or genre
         self.active_effects = self._determine_effects()
 
-        # Randomize effect order for variety
-        random.shuffle(self.active_effects)
+        # Randomize effect order for variety (seeded for reproducibility)
+        self._rng.shuffle(self.active_effects)
 
-        logging.info(f"[VJingLayer] Active effects ({len(self.active_effects)}): {self.active_effects}")
+        logging.info(
+            f"[VJingLayer] Active effects ({len(self.active_effects)}): {self.active_effects}"
+        )
 
         # Initialize LFOs for parameter modulation
         self._init_lfos()
@@ -502,7 +528,6 @@ class VJingLayer(BaseVisualLayer):
         self._pending_gpu_init = use_gpu and GPU_SHADERS_AVAILABLE
 
         super().__init__(width, height, fps, audio, sr, duration, **kwargs)
-
 
     def _init_lfos(self) -> None:
         """Initialize LFO oscillators for parameter modulation.
@@ -522,7 +547,9 @@ class VJingLayer(BaseVisualLayer):
         self.lfo_saw = LFO(frequency=0.15, amplitude=1.0, waveform=LFOWaveform.SAWTOOTH)
 
         # Random - for variation
-        self.lfo_random = LFO(frequency=0.5, amplitude=0.5, waveform=LFOWaveform.RANDOM)
+        self.lfo_random = LFO(
+            frequency=0.5, amplitude=0.5, waveform=LFOWaveform.RANDOM, _rng=self._rng
+        )
 
         # Collect all LFOs for easy iteration
         self.lfos: dict[str, LFO] = {
@@ -564,7 +591,7 @@ class VJingLayer(BaseVisualLayer):
         Returns:
             RGB tuple.
         """
-        return random.choice(self.color_palette)
+        return self._rng.choice(self.color_palette)
 
     def _get_palette_colors(self, count: int) -> list[tuple[int, int, int]]:
         """Get multiple colors from the palette.
@@ -631,9 +658,15 @@ class VJingLayer(BaseVisualLayer):
             # Build audio context for this frame
             ctx = {
                 "energy": float(self.energy[frame_idx]) if frame_idx < len(self.energy) else 0.5,
-                "bass": float(self.bass_energy[frame_idx]) if frame_idx < len(self.bass_energy) else 0.5,
-                "mid": float(self.mid_energy[frame_idx]) if frame_idx < len(self.mid_energy) else 0.5,
-                "treble": float(self.treble_energy[frame_idx]) if frame_idx < len(self.treble_energy) else 0.5,
+                "bass": float(self.bass_energy[frame_idx])
+                if frame_idx < len(self.bass_energy)
+                else 0.5,
+                "mid": float(self.mid_energy[frame_idx])
+                if frame_idx < len(self.mid_energy)
+                else 0.5,
+                "treble": float(self.treble_energy[frame_idx])
+                if frame_idx < len(self.treble_energy)
+                else 0.5,
             }
 
             frame_cache: dict[str, Image.Image] = {}
@@ -793,12 +826,8 @@ class VJingLayer(BaseVisualLayer):
             treble_chunk = treble_audio[start:end]
 
             self.energy.append(np.sqrt(np.mean(chunk**2)) if len(chunk) > 0 else 0.0)
-            self.bass_energy.append(
-                np.sqrt(np.mean(bass_chunk**2)) if len(bass_chunk) > 0 else 0.0
-            )
-            self.mid_energy.append(
-                np.sqrt(np.mean(mid_chunk**2)) if len(mid_chunk) > 0 else 0.0
-            )
+            self.bass_energy.append(np.sqrt(np.mean(bass_chunk**2)) if len(bass_chunk) > 0 else 0.0)
+            self.mid_energy.append(np.sqrt(np.mean(mid_chunk**2)) if len(mid_chunk) > 0 else 0.0)
             self.treble_energy.append(
                 np.sqrt(np.mean(treble_chunk**2)) if len(treble_chunk) > 0 else 0.0
             )
@@ -847,6 +876,8 @@ class VJingLayer(BaseVisualLayer):
             self._init_smoke()
         if "timestretch" in self.active_effects:
             self._init_timestretch()
+        if "grid" in self.active_effects:
+            self._init_grid()
 
         # Initialize GPU renderer if enabled
         if self._pending_gpu_init:
@@ -912,13 +943,13 @@ class VJingLayer(BaseVisualLayer):
         s = min(self.width, self.height) / 512
         self.particles.append(
             {
-                "x": random.random() * self.width,
-                "y": random.random() * self.height,
-                "vx": (random.random() - 0.5) * 2 * s,
-                "vy": (random.random() - 0.5) * 2 * s,
-                "size": (random.random() * 10 + 5) * s,
+                "x": self._rng.random() * self.width,
+                "y": self._rng.random() * self.height,
+                "vx": (self._rng.random() - 0.5) * 2 * s,
+                "vy": (self._rng.random() - 0.5) * 2 * s,
+                "size": (self._rng.random() * 10 + 5) * s,
                 "color": self._get_random_palette_color(),
-                "life": random.random() * 100,
+                "life": self._rng.random() * 100,
             }
         )
 
@@ -932,9 +963,9 @@ class VJingLayer(BaseVisualLayer):
         for _ in range(self.max_flow_particles):
             self.flow_particles.append(
                 {
-                    "x": random.random() * self.width,
-                    "y": random.random() * self.height,
-                    "life": random.random() * 50 + 50,
+                    "x": self._rng.random() * self.width,
+                    "y": self._rng.random() * self.height,
+                    "life": self._rng.random() * 50 + 50,
                 }
             )
 
@@ -989,9 +1020,15 @@ class VJingLayer(BaseVisualLayer):
             "is_beat": is_beat,
         }
 
-        # Separate generator effects from post-processing effects
-        generators = [e for e in self.active_effects if e not in self.POST_PROCESSING_EFFECTS]
+        # Separate effects into three passes
+        all_special = self.POST_PROCESSING_EFFECTS | self.FINAL_PASS_EFFECTS
+        generators = [e for e in self.active_effects if e not in all_special]
         post_processors = [e for e in self.active_effects if e in self.POST_PROCESSING_EFFECTS]
+        final_pass = [e for e in self.active_effects if e in self.FINAL_PASS_EFFECTS]
+
+        # If only final-pass effects are active (e.g. bloom preview), add a default generator
+        if not generators and not post_processors and final_pass:
+            generators = ["wave"]
 
         # First: render all generator effects
         if self.transitions_enabled and len(generators) > 1:
@@ -1006,6 +1043,13 @@ class VJingLayer(BaseVisualLayer):
 
         # Second: apply post-processing effects on the composite image
         for effect_name in post_processors:
+            self._current_intensity = self._get_intensity(effect_name)
+            effect_method = getattr(self, f"_render_{effect_name}", None)
+            if effect_method:
+                effect_method(img, frame_idx, time_pos, ctx)
+
+        # Third: final-pass effects (bloom etc.) on the fully composited image
+        for effect_name in final_pass:
             self._current_intensity = self._get_intensity(effect_name)
             effect_method = getattr(self, f"_render_{effect_name}", None)
             if effect_method:
@@ -1084,8 +1128,12 @@ class VJingLayer(BaseVisualLayer):
         return 0.0
 
     def _render_with_transitions(
-        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict,
-        effects: list[str] | None = None
+        self,
+        img: Image.Image,
+        frame_idx: int,
+        time_pos: float,
+        ctx: dict,
+        effects: list[str] | None = None,
     ) -> None:
         """Render effects with smooth transitions between them.
 
@@ -1147,9 +1195,8 @@ class VJingLayer(BaseVisualLayer):
     # RHYTHM-SYNCHRONIZED EFFECTS
     # ========================================================================
 
-    def _render_pulse(
-        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
-    ) -> None:
+    @vj_effect("Pulse", "Rythmiques")
+    def _render_pulse(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render beat pulse effect - luminosity/size variation on beats."""
         if not ctx["is_beat"]:
             return
@@ -1190,9 +1237,8 @@ class VJingLayer(BaseVisualLayer):
                     width=ring_w,
                 )
 
-    def _render_strobe(
-        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
-    ) -> None:
+    @vj_effect("Strobe", "Rythmiques")
+    def _render_strobe(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render intelligent strobe effect."""
         energy = ctx["energy"]
         treble = ctx["treble"]
@@ -1216,6 +1262,7 @@ class VJingLayer(BaseVisualLayer):
     # SPECTRUM-BASED EFFECTS
     # ========================================================================
 
+    @vj_effect("FFT Bars", "Spectraux")
     def _render_fft_bars(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
@@ -1253,6 +1300,7 @@ class VJingLayer(BaseVisualLayer):
             y = self.height - height
             draw.rectangle([x, y, x + bar_width - 1 - gap, self.height], fill=(r, g, b, alpha))
 
+    @vj_effect("FFT Rings", "Spectraux")
     def _render_fft_rings(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
@@ -1307,6 +1355,7 @@ class VJingLayer(BaseVisualLayer):
             if len(points) >= 2:
                 draw.line(points, fill=(r, g, b, alpha), width=line_w)
 
+    @vj_effect("Bass Warp", "Spectraux")
     def _render_bass_warp(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
@@ -1351,7 +1400,7 @@ class VJingLayer(BaseVisualLayer):
                 int(c1[0] * (1 - blend) + c2[0] * blend),
                 int(c1[1] * (1 - blend) + c2[1] * blend),
                 int(c1[2] * (1 - blend) + c2[2] * blend),
-                alpha
+                alpha,
             )
             draw.line(points, fill=color, width=line_w)
 
@@ -1359,6 +1408,7 @@ class VJingLayer(BaseVisualLayer):
     # PARTICLE SYSTEMS
     # ========================================================================
 
+    @vj_effect("Particles", "Particules")
     def _render_particles(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
@@ -1392,9 +1442,9 @@ class VJingLayer(BaseVisualLayer):
 
             # Respawn if dead
             if particle["life"] <= 0:
-                particle["life"] = random.random() * 100
-                particle["x"] = random.random() * self.width
-                particle["y"] = random.random() * self.height
+                particle["life"] = self._rng.random() * 100
+                particle["x"] = self._rng.random() * self.width
+                particle["y"] = self._rng.random() * self.height
 
             # Draw particle
             size = max(1, int(particle["size"] * (1 + energy * 0.5) * self._current_intensity))
@@ -1404,6 +1454,7 @@ class VJingLayer(BaseVisualLayer):
             x, y = int(particle["x"]), int(particle["y"])
             draw.ellipse([x - size, y - size, x + size, y + size], fill=color)
 
+    @vj_effect("Flow Field", "Particules")
     def _render_flow_field(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
@@ -1441,9 +1492,9 @@ class VJingLayer(BaseVisualLayer):
                 or particle["y"] > self.height
                 or particle["life"] <= 0
             ):
-                particle["x"] = random.random() * self.width
-                particle["y"] = random.random() * self.height
-                particle["life"] = random.random() * 50 + 50
+                particle["x"] = self._rng.random() * self.width
+                particle["y"] = self._rng.random() * self.height
+                particle["life"] = self._rng.random() * 50 + 50
 
             # Draw particle as small line in flow direction
             x, y = int(particle["x"]), int(particle["y"])
@@ -1461,6 +1512,7 @@ class VJingLayer(BaseVisualLayer):
 
             draw.line([(x, y), (x2, y2)], fill=(*base_color, alpha), width=line_w)
 
+    @vj_effect("Explosion", "Particules")
     def _render_explosion(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
@@ -1479,17 +1531,17 @@ class VJingLayer(BaseVisualLayer):
             # Spawn explosion particles
             n_particles = 100
             for _ in range(n_particles):
-                angle = random.random() * 2 * math.pi
-                speed = (random.random() * 15 + 5) * s
+                angle = self._rng.random() * 2 * math.pi
+                speed = (self._rng.random() * 15 + 5) * s
                 self.explosion_particles.append(
                     {
                         "x": float(center[0]),
                         "y": float(center[1]),
                         "vx": math.cos(angle) * speed,
                         "vy": math.sin(angle) * speed,
-                        "size": (random.random() * 5 + 2) * s,
+                        "size": (self._rng.random() * 5 + 2) * s,
                         "color": self._get_random_palette_color(),
-                        "life": 40 + random.random() * 20,
+                        "life": 40 + self._rng.random() * 20,
                     }
                 )
 
@@ -1522,6 +1574,7 @@ class VJingLayer(BaseVisualLayer):
     # GEOMETRIC EFFECTS
     # ========================================================================
 
+    @vj_effect("Kaleidoscope", "Géométriques")
     def _render_kaleidoscope(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
@@ -1567,6 +1620,7 @@ class VJingLayer(BaseVisualLayer):
 
                 draw.polygon(points, outline=(r, g, b, alpha))
 
+    @vj_effect("Lissajous", "Géométriques")
     def _render_lissajous(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
@@ -1605,9 +1659,8 @@ class VJingLayer(BaseVisualLayer):
             if len(points) >= 2:
                 draw.line(points, fill=color, width=line_w)
 
-    def _render_tunnel(
-        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
-    ) -> None:
+    @vj_effect("Tunnel", "Géométriques")
+    def _render_tunnel(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render infinite tunnel effect with LFO modulation."""
         draw = ImageDraw.Draw(img)
         energy = ctx["energy"]
@@ -1674,9 +1727,8 @@ class VJingLayer(BaseVisualLayer):
 
             draw.line(points, fill=(r, g, b, alpha), width=line_w)
 
-    def _render_spiral(
-        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
-    ) -> None:
+    @vj_effect("Spiral", "Géométriques")
+    def _render_spiral(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render animated spiral effect with LFO modulation."""
         draw = ImageDraw.Draw(img)
         energy = ctx["energy"]
@@ -1735,6 +1787,7 @@ class VJingLayer(BaseVisualLayer):
     # POST-PROCESSING EFFECTS
     # ========================================================================
 
+    @vj_effect("Chromatic", "Post-process", "post_processing")
     def _render_chromatic(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
@@ -1763,6 +1816,7 @@ class VJingLayer(BaseVisualLayer):
         result = Image.fromarray(data, "RGBA")
         img.paste(result, (0, 0))
 
+    @vj_effect("Pixelate", "Post-process", "post_processing")
     def _render_pixelate(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
@@ -1788,6 +1842,7 @@ class VJingLayer(BaseVisualLayer):
         mask = Image.new("L", (self.width, self.height), alpha)
         img.paste(Image.composite(pixelated, img, mask), (0, 0))
 
+    @vj_effect("Feedback", "Post-process", "post_processing")
     def _render_feedback(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
@@ -1869,6 +1924,7 @@ class VJingLayer(BaseVisualLayer):
         self._timestretch_buffer: list[Image.Image] = []
         self._timestretch_accumulated_time = 0.0
 
+    @vj_effect("Timestretch", "Post-process", "post_processing")
     def _render_timestretch(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
@@ -1885,7 +1941,6 @@ class VJingLayer(BaseVisualLayer):
         draw = ImageDraw.Draw(img)
         safe_idx = min(frame_idx, len(self._time_scale) - 1)
         time_scale = self._time_scale[safe_idx]
-        energy = ctx["energy"]
         s = min(self.width, self.height) / 512  # scale factor
 
         # Get palette colors
@@ -1909,9 +1964,9 @@ class VJingLayer(BaseVisualLayer):
                 offset_y = int(math.cos(time_pos * 2 + i) * 3 * s * (1 - time_scale))
 
                 echo_data = np.array(echo)
-                echo_data[:, :, 3] = np.clip(
-                    echo_data[:, :, 3] * (alpha / 255), 0, 255
-                ).astype(np.uint8)
+                echo_data[:, :, 3] = np.clip(echo_data[:, :, 3] * (alpha / 255), 0, 255).astype(
+                    np.uint8
+                )
                 echo_img = Image.fromarray(echo_data, "RGBA")
                 img.paste(echo_img, (offset_x, offset_y), echo_img)
 
@@ -1938,8 +1993,8 @@ class VJingLayer(BaseVisualLayer):
             line_w = max(1, int(3 * s))
 
             for i in range(n_lines):
-                angle = random.random() * math.pi * 2
-                inner_r = (30 + random.random() * 80) * s
+                angle = self._rng.random() * math.pi * 2
+                inner_r = (30 + self._rng.random() * 80) * s
                 outer_r = inner_r + (150 + (time_scale - 1) * 300) * s
 
                 x1 = cx + int(math.cos(angle) * inner_r)
@@ -1970,9 +2025,8 @@ class VJingLayer(BaseVisualLayer):
     # NATURE-INSPIRED EFFECTS
     # ========================================================================
 
-    def _render_fire(
-        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
-    ) -> None:
+    @vj_effect("Fire", "Naturels")
+    def _render_fire(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render fire/flame effect with Perlin noise turbulence."""
         draw = ImageDraw.Draw(img)
         bass = ctx["bass"]
@@ -2009,19 +2063,17 @@ class VJingLayer(BaseVisualLayer):
             # Animated flame shape using turbulence noise
             for x in range(0, self.width, step):
                 # Use turbulence for more natural flame motion
-                noise = turbulence2d(
-                    x * 0.02 + time_pos * 2,
-                    y * 0.03 + time_pos * 3,
-                    octaves=3
-                ) * noise_scale
+                noise = (
+                    turbulence2d(x * 0.02 + time_pos * 2, y * 0.03 + time_pos * 3, octaves=3)
+                    * noise_scale
+                )
                 flame_y = self.height - y + int(noise * (1 - progress))
 
                 if 0 <= flame_y < self.height:
                     draw.point((x, flame_y), fill=(r, g, b, alpha))
 
-    def _render_water(
-        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
-    ) -> None:
+    @vj_effect("Water", "Naturels")
+    def _render_water(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render water ripple effect."""
         draw = ImageDraw.Draw(img)
         is_beat = ctx["is_beat"]
@@ -2035,11 +2087,11 @@ class VJingLayer(BaseVisualLayer):
         if is_beat:
             self.ripples.append(
                 {
-                    "x": random.randint(self.width // 4, 3 * self.width // 4),
-                    "y": random.randint(self.height // 4, 3 * self.height // 4),
+                    "x": self._rng.randint(self.width // 4, 3 * self.width // 4),
+                    "y": self._rng.randint(self.height // 4, 3 * self.height // 4),
                     "radius": 0.0,
                     "life": 60.0,
-                    "color_idx": random.randint(0, len(colors) - 1),
+                    "color_idx": self._rng.randint(0, len(colors) - 1),
                 }
             )
 
@@ -2075,9 +2127,8 @@ class VJingLayer(BaseVisualLayer):
 
         self.ripples = new_ripples
 
-    def _render_aurora(
-        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
-    ) -> None:
+    @vj_effect("Aurora", "Naturels")
+    def _render_aurora(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render aurora borealis effect with Perlin noise."""
         draw = ImageDraw.Draw(img)
         energy = ctx["energy"]
@@ -2099,16 +2150,14 @@ class VJingLayer(BaseVisualLayer):
                 noise_scale = 0.003
                 y = base_y + band_offset
                 # Primary wave using Perlin
-                y += fbm2d(
-                    x * noise_scale + time_pos * 0.2,
-                    band * 0.5 + time_pos * 0.1,
-                    octaves=3
-                ) * 80 * s * self.intensity
+                y += (
+                    fbm2d(x * noise_scale + time_pos * 0.2, band * 0.5 + time_pos * 0.1, octaves=3)
+                    * 80
+                    * s
+                    * self.intensity
+                )
                 # Secondary modulation
-                y += perlin2d(
-                    x * noise_scale * 2 + time_pos * 0.3,
-                    band * 0.3
-                ) * 30 * s * energy
+                y += perlin2d(x * noise_scale * 2 + time_pos * 0.3, band * 0.3) * 30 * s * energy
                 points.append((x, y))
 
             # Use palette colors
@@ -2135,9 +2184,8 @@ class VJingLayer(BaseVisualLayer):
     # CLASSIC EFFECTS
     # ========================================================================
 
-    def _render_wave(
-        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
-    ) -> None:
+    @vj_effect("Wave", "Classiques")
+    def _render_wave(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render wave effect (default)."""
         draw = ImageDraw.Draw(img)
         energy = ctx["energy"]
@@ -2164,9 +2212,8 @@ class VJingLayer(BaseVisualLayer):
                 color = (*base_color, alpha)
                 draw.line(points, fill=color, width=line_w)
 
-    def _render_neon(
-        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
-    ) -> None:
+    @vj_effect("Neon", "Classiques")
+    def _render_neon(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render neon glow effect."""
         draw = ImageDraw.Draw(img)
         energy = ctx["energy"]
@@ -2202,9 +2249,8 @@ class VJingLayer(BaseVisualLayer):
                     width=line_w,
                 )
 
-    def _render_vinyl(
-        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
-    ) -> None:
+    @vj_effect("Vinyl", "Classiques")
+    def _render_vinyl(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render vinyl/record effect."""
         draw = ImageDraw.Draw(img)
         energy = ctx["energy"]
@@ -2294,9 +2340,8 @@ class VJingLayer(BaseVisualLayer):
 
         return palette
 
-    def _render_fractal(
-        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
-    ) -> None:
+    @vj_effect("Fractal", "GPU")
+    def _render_fractal(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render animated Julia set fractal.
 
         The Julia set is computed with parameters modulated by audio.
@@ -2363,9 +2408,7 @@ class VJingLayer(BaseVisualLayer):
 
         alpha_value = int(200 * self._current_intensity)
         fractal_small = Image.fromarray(colored, mode="RGB")
-        fractal_full = fractal_small.resize(
-            (self.width, self.height), Image.Resampling.BILINEAR
-        )
+        fractal_full = fractal_small.resize((self.width, self.height), Image.Resampling.BILINEAR)
 
         fractal_rgba = fractal_full.convert("RGBA")
         r, g, b, _ = fractal_rgba.split()
@@ -2378,9 +2421,8 @@ class VJingLayer(BaseVisualLayer):
     # RADAR EFFECT
     # ========================================================================
 
-    def _render_radar(
-        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
-    ) -> None:
+    @vj_effect("Radar", "Géométriques")
+    def _render_radar(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render radar sweep effect.
 
         Rotating beam with blips appearing on beats.
@@ -2425,8 +2467,12 @@ class VJingLayer(BaseVisualLayer):
             )
 
         # Draw cross lines
-        draw.line([(cx - max_radius, cy), (cx + max_radius, cy)], fill=(dim_r, dim_g, dim_b, grid_alpha))
-        draw.line([(cx, cy - max_radius), (cx, cy + max_radius)], fill=(dim_r, dim_g, dim_b, grid_alpha))
+        draw.line(
+            [(cx - max_radius, cy), (cx + max_radius, cy)], fill=(dim_r, dim_g, dim_b, grid_alpha)
+        )
+        draw.line(
+            [(cx, cy - max_radius), (cx, cy + max_radius)], fill=(dim_r, dim_g, dim_b, grid_alpha)
+        )
 
         # Draw sweep beam with trail
         beam_w = max(1, int(2 * s))
@@ -2448,20 +2494,26 @@ class VJingLayer(BaseVisualLayer):
                 cg = int(primary_color[1] * fade)
                 cb = int(primary_color[2] * fade)
 
-            draw.line([(cx, cy), (x_end, y_end)], fill=(cr, cg, cb, trail_alpha), width=beam_w if i < 5 else 1)
+            draw.line(
+                [(cx, cy), (x_end, y_end)],
+                fill=(cr, cg, cb, trail_alpha),
+                width=beam_w if i < 5 else 1,
+            )
 
         # Draw blips on beats
         if is_beat:
             # Add new blip at random position on current sweep line
             if not hasattr(self, "radar_blips"):
                 self.radar_blips = []
-            blip_dist = random.random() * max_radius * 0.8 + max_radius * 0.1
-            self.radar_blips.append({
-                "angle": angle,
-                "distance": blip_dist,
-                "life": 30,
-                "size": (3 + bass * 5) * s,
-            })
+            blip_dist = self._rng.random() * max_radius * 0.8 + max_radius * 0.1
+            self.radar_blips.append(
+                {
+                    "angle": angle,
+                    "distance": blip_dist,
+                    "life": 30,
+                    "size": (3 + bass * 5) * s,
+                }
+            )
 
         # Draw and update blips
         if hasattr(self, "radar_blips"):
@@ -2496,9 +2548,8 @@ class VJingLayer(BaseVisualLayer):
         x_coords = np.linspace(0, 4 * math.pi, self.plasma_width)
         self.plasma_x, self.plasma_y = np.meshgrid(x_coords, y_coords)
 
-    def _render_plasma(
-        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
-    ) -> None:
+    @vj_effect("Plasma", "GPU")
+    def _render_plasma(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render animated plasma effect.
 
         Classic plasma using combined sine waves with audio modulation.
@@ -2530,9 +2581,7 @@ class VJingLayer(BaseVisualLayer):
         v2 = np.sin(self.plasma_y + t * 0.7 + mid * math.pi)
         v3 = np.sin((self.plasma_x + self.plasma_y + t * 0.5) * 0.5)
         v4 = np.sin(
-            np.sqrt(
-                (self.plasma_x - 2 * math.pi) ** 2 + (self.plasma_y - 2 * math.pi) ** 2
-            )
+            np.sqrt((self.plasma_x - 2 * math.pi) ** 2 + (self.plasma_y - 2 * math.pi) ** 2)
             + t
             + energy * math.pi
         )
@@ -2574,9 +2623,7 @@ class VJingLayer(BaseVisualLayer):
 
         # Create image and upscale
         plasma_small = Image.fromarray(rgb, mode="RGB")
-        plasma_full = plasma_small.resize(
-            (self.width, self.height), Image.Resampling.BILINEAR
-        )
+        plasma_full = plasma_small.resize((self.width, self.height), Image.Resampling.BILINEAR)
 
         # Convert to RGBA with alpha
         plasma_rgba = plasma_full.convert("RGBA")
@@ -2605,6 +2652,7 @@ class VJingLayer(BaseVisualLayer):
         self.wormhole_r = np.sqrt(x_grid**2 + y_grid**2)
         self.wormhole_theta = np.arctan2(y_grid, x_grid)
 
+    @vj_effect("Wormhole", "GPU")
     def _render_wormhole(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
@@ -2676,9 +2724,7 @@ class VJingLayer(BaseVisualLayer):
 
         rgb = np.stack([r, g, b], axis=-1)
         wormhole_small = Image.fromarray(rgb, mode="RGB")
-        wormhole_full = wormhole_small.resize(
-            (self.width, self.height), Image.Resampling.BILINEAR
-        )
+        wormhole_full = wormhole_small.resize((self.width, self.height), Image.Resampling.BILINEAR)
 
         wormhole_rgba = wormhole_full.convert("RGBA")
         r_ch, g_ch, b_ch, _ = wormhole_rgba.split()
@@ -2705,14 +2751,17 @@ class VJingLayer(BaseVisualLayer):
         Args:
             z: Optional z depth (if None, random deep position).
         """
-        self.stars.append({
-            "x": (random.random() - 0.5) * 2,  # -1 to 1
-            "y": (random.random() - 0.5) * 2,  # -1 to 1
-            "z": z if z is not None else random.random() * 2 + 0.5,  # depth
-            "brightness": random.random() * 0.5 + 0.5,
-            "color_idx": random.randint(0, len(self.color_palette) - 1),
-        })
+        self.stars.append(
+            {
+                "x": (self._rng.random() - 0.5) * 2,  # -1 to 1
+                "y": (self._rng.random() - 0.5) * 2,  # -1 to 1
+                "z": z if z is not None else self._rng.random() * 2 + 0.5,  # depth
+                "brightness": self._rng.random() * 0.5 + 0.5,
+                "color_idx": self._rng.randint(0, len(self.color_palette) - 1),
+            }
+        )
 
+    @vj_effect("Starfield", "Particules")
     def _render_starfield(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
@@ -2749,7 +2798,7 @@ class VJingLayer(BaseVisualLayer):
 
             # Reset if passed camera
             if star["z"] <= 0.01:
-                self._spawn_star(z=2.0 + random.random())
+                self._spawn_star(z=2.0 + self._rng.random())
                 continue
 
             # Project to 2D (perspective)
@@ -2794,7 +2843,6 @@ class VJingLayer(BaseVisualLayer):
 
                 # Motion trail for fast stars (close ones)
                 if star["z"] < 0.5 and bass > 0.5:
-                    trail_length = int((1 - star["z"]) * 20 * s * bass)
                     trail_x = int(cx + (star["x"] / (star["z"] + speed * 3)) * cx)
                     trail_y = int(cy + (star["y"] / (star["z"] + speed * 3)) * cy)
                     draw.line(
@@ -2809,12 +2857,13 @@ class VJingLayer(BaseVisualLayer):
 
         # Spawn new stars to maintain count
         while len(self.stars) < self.num_stars:
-            self._spawn_star(z=2.0 + random.random())
+            self._spawn_star(z=2.0 + self._rng.random())
 
     # ========================================================================
     # LIGHTNING EFFECT
     # ========================================================================
 
+    @vj_effect("Lightning", "Naturels")
     def _render_lightning(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
@@ -2845,12 +2894,12 @@ class VJingLayer(BaseVisualLayer):
 
         for _ in range(num_bolts):
             # Start point (top area)
-            start_x = random.randint(self.width // 4, 3 * self.width // 4)
-            start_y = random.randint(0, self.height // 4)
+            start_x = self._rng.randint(self.width // 4, 3 * self.width // 4)
+            start_y = self._rng.randint(0, self.height // 4)
 
             # End point (bottom area)
-            end_x = start_x + random.randint(-self.width // 3, self.width // 3)
-            end_y = random.randint(3 * self.height // 4, self.height)
+            end_x = start_x + self._rng.randint(-self.width // 3, self.width // 3)
+            end_y = self._rng.randint(3 * self.height // 4, self.height)
 
             # Generate lightning path
             self._draw_lightning_bolt(draw, start_x, start_y, end_x, end_y, bass, depth=0)
@@ -2902,7 +2951,7 @@ class VJingLayer(BaseVisualLayer):
             px = x1 + dx * t
             py = y1 + dy * t
             # Add perpendicular offset
-            offset = (random.random() - 0.5) * dist * 0.3 / (depth + 1)
+            offset = (self._rng.random() - 0.5) * dist * 0.3 / (depth + 1)
             # Perpendicular direction
             perp_x = -dy / dist
             perp_y = dx / dist
@@ -2942,13 +2991,13 @@ class VJingLayer(BaseVisualLayer):
                 )
 
         # Branching
-        if depth < 3 and random.random() < 0.4 * intensity:
+        if depth < 3 and self._rng.random() < 0.4 * intensity:
             # Pick a random point to branch from
-            branch_idx = random.randint(1, len(points) - 2)
+            branch_idx = self._rng.randint(1, len(points) - 2)
             bx, by = points[branch_idx]
             # Branch direction (angled from main)
-            angle = math.atan2(dy, dx) + (random.random() - 0.5) * math.pi / 2
-            branch_len = dist * (0.3 + random.random() * 0.3) / (depth + 1)
+            angle = math.atan2(dy, dx) + (self._rng.random() - 0.5) * math.pi / 2
+            branch_len = dist * (0.3 + self._rng.random() * 0.3) / (depth + 1)
             bex = int(bx + math.cos(angle) * branch_len)
             bey = int(by + math.sin(angle) * branch_len)
             self._draw_lightning_bolt(draw, bx, by, bex, bey, intensity * 0.7, depth + 1)
@@ -2963,17 +3012,18 @@ class VJingLayer(BaseVisualLayer):
         self.voronoi_num_points = 20
         self.voronoi_points: list[dict[str, Any]] = []
         for i in range(self.voronoi_num_points):
-            self.voronoi_points.append({
-                "x": random.random() * self.width,
-                "y": random.random() * self.height,
-                "vx": (random.random() - 0.5) * 2 * s,
-                "vy": (random.random() - 0.5) * 2 * s,
-                "color": self._get_palette_color(i),
-            })
+            self.voronoi_points.append(
+                {
+                    "x": self._rng.random() * self.width,
+                    "y": self._rng.random() * self.height,
+                    "vx": (self._rng.random() - 0.5) * 2 * s,
+                    "vy": (self._rng.random() - 0.5) * 2 * s,
+                    "color": self._get_palette_color(i),
+                }
+            )
 
-    def _render_voronoi(
-        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
-    ) -> None:
+    @vj_effect("Voronoi", "GPU")
+    def _render_voronoi(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render animated Voronoi diagram.
 
         Cells colored by nearest point, points move with audio.
@@ -3011,8 +3061,8 @@ class VJingLayer(BaseVisualLayer):
                 point["y"] = max(0, min(self.height - 1, point["y"]))
 
             if is_beat:
-                point["vx"] += (random.random() - 0.5) * bass * 4 * s
-                point["vy"] += (random.random() - 0.5) * bass * 4 * s
+                point["vx"] += (self._rng.random() - 0.5) * bass * 4 * s
+                point["vy"] += (self._rng.random() - 0.5) * bass * 4 * s
 
         # Render at lower resolution for performance (adaptive for small viewports)
         scale = max(1, min(4, min(self.width, self.height) // 16))
@@ -3043,14 +3093,10 @@ class VJingLayer(BaseVisualLayer):
         edges = np.clip((edge_x + edge_y) * 50, 0, 100).astype(np.uint8)
 
         for c in range(3):
-            rgb[:, :, c] = np.clip(rgb[:, :, c].astype(np.int16) - edges, 0, 255).astype(
-                np.uint8
-            )
+            rgb[:, :, c] = np.clip(rgb[:, :, c].astype(np.int16) - edges, 0, 255).astype(np.uint8)
 
         voronoi_small = Image.fromarray(rgb, mode="RGB")
-        voronoi_full = voronoi_small.resize(
-            (self.width, self.height), Image.Resampling.NEAREST
-        )
+        voronoi_full = voronoi_small.resize((self.width, self.height), Image.Resampling.NEAREST)
 
         voronoi_rgba = voronoi_full.convert("RGBA")
         r_ch, g_ch, b_ch, _ = voronoi_rgba.split()
@@ -3070,13 +3116,15 @@ class VJingLayer(BaseVisualLayer):
         self.metaball_count = 6
         self.metaballs: list[dict[str, float]] = []
         for _ in range(self.metaball_count):
-            self.metaballs.append({
-                "x": random.random() * self.width,
-                "y": random.random() * self.height,
-                "vx": (random.random() - 0.5) * 4 * s,
-                "vy": (random.random() - 0.5) * 4 * s,
-                "radius": (random.random() * 80 + 60) * s,
-            })
+            self.metaballs.append(
+                {
+                    "x": self._rng.random() * self.width,
+                    "y": self._rng.random() * self.height,
+                    "vx": (self._rng.random() - 0.5) * 4 * s,
+                    "vy": (self._rng.random() - 0.5) * 4 * s,
+                    "radius": (self._rng.random() * 80 + 60) * s,
+                }
+            )
         # Compute grid: at least 128x128 for smooth gradients, higher for large viewports
         self.metaball_w = max(128, self.width // 4)
         self.metaball_h = max(128, self.height // 4)
@@ -3085,6 +3133,7 @@ class VJingLayer(BaseVisualLayer):
         x_coords = np.linspace(0, self.width, self.metaball_w, endpoint=False)
         self.metaball_x, self.metaball_y = np.meshgrid(x_coords, y_coords)
 
+    @vj_effect("Metaballs", "GPU")
     def _render_metaballs(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
@@ -3125,8 +3174,8 @@ class VJingLayer(BaseVisualLayer):
                 ball["y"] = max(0, min(self.height - 1, ball["y"]))
 
             if is_beat:
-                ball["vx"] += (random.random() - 0.5) * bass * 6 * s
-                ball["vy"] += (random.random() - 0.5) * bass * 6 * s
+                ball["vx"] += (self._rng.random() - 0.5) * bass * 6 * s
+                ball["vy"] += (self._rng.random() - 0.5) * bass * 6 * s
 
         # Compute metaball field on the (>=128 x >=128) grid
         field = np.zeros((self.metaball_h, self.metaball_w), dtype=np.float32)
@@ -3180,9 +3229,7 @@ class VJingLayer(BaseVisualLayer):
         metaball_img = Image.fromarray(rgba, mode="RGBA")
         # Resize from compute grid to target viewport
         if metaball_img.size != (self.width, self.height):
-            metaball_img = metaball_img.resize(
-                (self.width, self.height), Image.Resampling.BILINEAR
-            )
+            metaball_img = metaball_img.resize((self.width, self.height), Image.Resampling.BILINEAR)
 
         img.paste(metaball_img, (0, 0), metaball_img)
 
@@ -3208,23 +3255,24 @@ class VJingLayer(BaseVisualLayer):
             return
 
         s = min(self.width, self.height) / 512
-        self.smoke_particles.append({
-            "x": x if x is not None else random.random() * self.width,
-            "y": self.smoke_spawn_y,
-            "vx": (random.random() - 0.5) * 2 * s,
-            "vy": (-random.random() * 3 - 1) * s,
-            "size": (random.random() * 30 + 20) * s,
-            "life": 1.0,
-            "decay": random.random() * 0.01 + 0.005,
-            # Increased alpha from 0.2-0.5 to 0.5-0.8
-            "alpha": random.random() * 0.3 + 0.5,
-            "turbulence_offset": random.random() * 100,
-            "color_idx": random.randint(0, len(self.color_palette) - 1),
-        })
+        self.smoke_particles.append(
+            {
+                "x": x if x is not None else self._rng.random() * self.width,
+                "y": self.smoke_spawn_y,
+                "vx": (self._rng.random() - 0.5) * 2 * s,
+                "vy": (-self._rng.random() * 3 - 1) * s,
+                "size": (self._rng.random() * 30 + 20) * s,
+                "life": 1.0,
+                "decay": self._rng.random() * 0.01 + 0.005,
+                # Increased alpha from 0.2-0.5 to 0.5-0.8
+                "alpha": self._rng.random() * 0.3 + 0.5,
+                "turbulence_offset": self._rng.random() * 100,
+                "color_idx": self._rng.randint(0, len(self.color_palette) - 1),
+            }
+        )
 
-    def _render_smoke(
-        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
-    ) -> None:
+    @vj_effect("Smoke", "Naturels")
+    def _render_smoke(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render smoke/mist effect with Perlin turbulence.
 
         Particles rise and dissipate with turbulent motion.
@@ -3246,13 +3294,13 @@ class VJingLayer(BaseVisualLayer):
         spawn_rate = int(3 + energy * 8)
         for _ in range(spawn_rate):
             # Spawn across bottom, more in center
-            x = self.width / 2 + (random.random() - 0.5) * self.width * 0.6
+            x = self.width / 2 + (self._rng.random() - 0.5) * self.width * 0.6
             self._spawn_smoke_particle(x, energy)
 
         # Extra burst on beat
         if is_beat:
             for _ in range(5):
-                x = self.width / 2 + (random.random() - 0.5) * self.width * 0.4
+                x = self.width / 2 + (self._rng.random() - 0.5) * self.width * 0.4
                 self._spawn_smoke_particle(x, bass)
 
         # Get palette colors
@@ -3263,17 +3311,25 @@ class VJingLayer(BaseVisualLayer):
         for p in self.smoke_particles:
             # Turbulence using Perlin noise for more natural motion
             noise_scale = 0.005 / s if s > 0 else 0.005
-            turb_x = perlin2d(
-                p["x"] * noise_scale + time_pos * 0.5,
-                p["y"] * noise_scale + p["turbulence_offset"],
-            ) * 1.5 * s
-            turb_y = perlin2d(
-                p["x"] * noise_scale + p["turbulence_offset"],
-                p["y"] * noise_scale + time_pos * 0.3,
-            ) * 0.8 * s
+            turb_x = (
+                perlin2d(
+                    p["x"] * noise_scale + time_pos * 0.5,
+                    p["y"] * noise_scale + p["turbulence_offset"],
+                )
+                * 1.5
+                * s
+            )
+            turb_y = (
+                perlin2d(
+                    p["x"] * noise_scale + p["turbulence_offset"],
+                    p["y"] * noise_scale + time_pos * 0.3,
+                )
+                * 0.8
+                * s
+            )
 
             # Update position
-            p["x"] += p["vx"] + turb_x + (random.random() - 0.5) * energy * s
+            p["x"] += p["vx"] + turb_x + (self._rng.random() - 0.5) * energy * s
             p["y"] += p["vy"] + turb_y
             p["vy"] *= 0.99  # Slow down rising
 
@@ -3313,3 +3369,199 @@ class VJingLayer(BaseVisualLayer):
             new_particles.append(p)
 
         self.smoke_particles = new_particles
+
+    # =========================================================================
+    # Grid effect - Dynamic 2D grid deformed by sine waves triggered by kicks
+    # =========================================================================
+
+    def _init_grid(self) -> None:
+        """Initialize grid effect state."""
+        # Active wave ripples triggered by beats: (start_time, cx, cy)
+        self.grid_ripples: list[tuple[float, float, float]] = []
+
+    @vj_effect("Grid", "Géométriques")
+    def _render_grid(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
+        """Render dynamic grid deformed by beat-triggered sine waves."""
+        draw = ImageDraw.Draw(img)
+        bass = ctx["bass"]
+        energy = ctx["energy"]
+        is_beat = ctx["is_beat"]
+        s = min(self.width, self.height) / 512
+
+        # Spawn ripple on beats
+        if is_beat:
+            cx = self._rng.random() * self.width
+            cy = self._rng.random() * self.height
+            self.grid_ripples.append((time_pos, cx, cy))
+
+        # Expire old ripples (keep last 3 seconds)
+        self.grid_ripples = [(t, cx, cy) for t, cx, cy in self.grid_ripples if time_pos - t < 3.0]
+
+        # Grid parameters
+        cols = 20
+        rows = 15
+        cell_w = self.width / cols
+        cell_h = self.height / rows
+        intensity = self._current_intensity
+
+        # Build displaced grid points
+        points: list[list[tuple[float, float]]] = []
+        for row in range(rows + 1):
+            row_points: list[tuple[float, float]] = []
+            for col in range(cols + 1):
+                x = col * cell_w
+                y = row * cell_h
+                dx = 0.0
+                dy = 0.0
+
+                # Base slow undulation
+                dx += math.sin(y * 0.01 + time_pos * 1.5) * 8 * s * energy
+                dy += math.cos(x * 0.01 + time_pos * 1.2) * 8 * s * energy
+
+                # Beat-triggered ripples
+                for t0, cx, cy in self.grid_ripples:
+                    age = time_pos - t0
+                    dist = math.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+                    wave_front = age * 300 * s
+                    # Displacement strongest near the wave front
+                    spread = 60 * s
+                    amplitude = math.exp(-((dist - wave_front) ** 2) / (2 * spread**2))
+                    decay = math.exp(-age * 1.5)
+                    disp = amplitude * decay * 25 * s * bass * intensity
+                    if dist > 0:
+                        dx += (x - cx) / dist * disp
+                        dy += (y - cy) / dist * disp
+
+                row_points.append((x + dx, y + dy))
+            points.append(row_points)
+
+        # Draw grid lines
+        line_w = max(1, int(1.5 * s))
+        base_alpha = int(180 * intensity)
+
+        # Horizontal lines
+        for row in range(rows + 1):
+            color_idx = row % len(self.color_palette)
+            base_color = self.color_palette[color_idx]
+            alpha = max(0, min(255, base_alpha))
+            color = (*base_color, alpha)
+            line_pts = points[row]
+            if len(line_pts) >= 2:
+                draw.line(
+                    [(int(px), int(py)) for px, py in line_pts],
+                    fill=color,
+                    width=line_w,
+                )
+
+        # Vertical lines
+        for col in range(cols + 1):
+            color_idx = (col + 3) % len(self.color_palette)
+            base_color = self.color_palette[color_idx]
+            alpha = max(0, min(255, base_alpha))
+            color = (*base_color, alpha)
+            line_pts = [(points[row][col][0], points[row][col][1]) for row in range(rows + 1)]
+            if len(line_pts) >= 2:
+                draw.line(
+                    [(int(px), int(py)) for px, py in line_pts],
+                    fill=color,
+                    width=line_w,
+                )
+
+        # Draw bright dots at intersections on beats
+        if bass > 0.5:
+            dot_r = max(1, int(3 * s * bass))
+            dot_alpha = int(255 * bass * intensity)
+            dot_color = (*self.color_palette[0], dot_alpha)
+            for row in range(0, rows + 1, 2):
+                for col in range(0, cols + 1, 2):
+                    px, py = points[row][col]
+                    draw.ellipse(
+                        [int(px) - dot_r, int(py) - dot_r, int(px) + dot_r, int(py) + dot_r],
+                        fill=dot_color,
+                    )
+
+    # =========================================================================
+    # Bloom effect - Glow/bloom post-processing driven by treble
+    # =========================================================================
+
+    @vj_effect("Bloom", "Post-process", "final_pass")
+    def _render_bloom(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
+        """Render dramatic neon-glow bloom effect.
+
+        Creates a wide, bright colored halo around all visible content,
+        like real neon signs radiating light.  Uses three blur passes at
+        different scales and composites via screen blending for maximum impact.
+        """
+        from PIL import ImageFilter
+
+        treble = ctx["treble"]
+        energy = ctx["energy"]
+        intensity = self._current_intensity
+        w, h = img.size
+        s = min(w, h) / 512
+
+        # Bloom strength: always strong, boosted by treble + energy
+        strength = (0.5 + treble * 0.3 + energy * 0.2) * intensity
+
+        # Extract RGB and alpha separately
+        data = np.array(img).astype(np.float32)
+        alpha_ch = data[:, :, 3]
+
+        # Build bloom source from raw RGB, weighted by alpha presence.
+        # Saturate colors to maximum brightness to get vivid glow.
+        alpha_mask = (alpha_ch > 5).astype(np.float32)
+        source = data[:, :, :3].copy()
+        for c in range(3):
+            source[:, :, c] *= alpha_mask
+        # Boost to full brightness: normalize each pixel to its max channel
+        pixel_max = np.max(source, axis=2, keepdims=True)
+        pixel_max = np.maximum(pixel_max, 1.0)  # avoid division by zero
+        source = np.minimum(255.0, source * (255.0 / pixel_max))
+        source_img = Image.fromarray(source.astype(np.uint8), "RGB")
+
+        # --- Pass 1: Tight glow (sharp halo close to lines) ---
+        r1 = max(2, int(12 * s))
+        glow1 = np.array(source_img.filter(ImageFilter.GaussianBlur(radius=r1))).astype(np.float32)
+
+        # --- Pass 2: Medium glow via 1/2 downscale ---
+        half_w, half_h = max(4, w // 2), max(4, h // 2)
+        half_img = source_img.resize((half_w, half_h), Image.BILINEAR)
+        r2 = max(3, int(15 * half_w / 256))
+        glow2 = np.array(
+            half_img.filter(ImageFilter.GaussianBlur(radius=r2)).resize((w, h), Image.BILINEAR)
+        ).astype(np.float32)
+
+        # --- Pass 3: Wide atmospheric glow via 1/4 downscale ---
+        quarter_w, quarter_h = max(4, w // 4), max(4, h // 4)
+        quarter_img = source_img.resize((quarter_w, quarter_h), Image.BILINEAR)
+        r3 = max(3, int(12 * quarter_w / 128 + energy * 6))
+        glow3 = np.array(
+            quarter_img.filter(ImageFilter.GaussianBlur(radius=r3)).resize((w, h), Image.BILINEAR)
+        ).astype(np.float32)
+
+        # Combine all passes with resolution-adaptive weights
+        res_factor = min(1.0, min(w, h) / 256)
+        glow = (glow1 * 0.4 + glow2 * 0.35 + glow3 * 0.25) * strength
+
+        # Screen blend: result = 1 - (1-base)*(1-glow), brighter than additive
+        # Scale glow intensity for visible impact
+        blend_strength = (2.5 + strength * 2.0) * (0.3 + res_factor * 0.7)
+        scaled_glow = np.minimum(255.0, glow * blend_strength)
+
+        base_rgb = data[:, :, :3]
+        for c in range(3):
+            base_n = base_rgb[:, :, c] / 255.0
+            glow_n = scaled_glow[:, :, c] / 255.0
+            # Screen blend formula
+            data[:, :, c] = np.minimum(255.0, (1.0 - (1.0 - base_n) * (1.0 - glow_n)) * 255.0)
+
+        # Ensure alpha is opaque wherever glow is visible
+        glow_lum = np.max(scaled_glow, axis=2)
+        data[:, :, 3] = np.maximum(data[:, :, 3], np.minimum(255.0, glow_lum * 6.0))
+
+        result_img = Image.fromarray(data.astype(np.uint8), "RGBA")
+        img.paste(result_img, (0, 0))
+
+
+# Build effect registries from @vj_effect decorators
+VJingLayer._build_registries()

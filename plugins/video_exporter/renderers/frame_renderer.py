@@ -40,6 +40,7 @@ class FrameRenderer:
         simultaneous_effects: int = 1,
         use_all_effects: bool = False,
         intro_video_path: str = "",
+        rng_seed: int = 42,
     ) -> None:
         """Initialize frame renderer.
 
@@ -65,6 +66,7 @@ class FrameRenderer:
             simultaneous_effects: Number of VJing effects visible at the same time (1-10).
             use_all_effects: Use all available VJing effects regardless of genre/preset.
             intro_video_path: Path to intro video to overlay on top (plays once).
+            rng_seed: Seed for deterministic VJing effect randomization.
         """
         self.width = width
         self.height = height
@@ -86,6 +88,7 @@ class FrameRenderer:
         self.simultaneous_effects = simultaneous_effects
         self.use_all_effects = use_all_effects
         self.intro_video_path = intro_video_path
+        self.rng_seed = rng_seed
 
         # Initialize enabled layers
         self.layers: list[BaseVisualLayer] = []
@@ -189,6 +192,7 @@ class FrameRenderer:
                     transitions_enabled=self.transitions_enabled,
                     simultaneous_effects=self.simultaneous_effects,
                     use_all_effects=self.use_all_effects,
+                    rng_seed=self.rng_seed,
                 )
                 self.layers.append(layer)
                 logging.info("[Frame Renderer] VJing layer enabled")
@@ -225,7 +229,6 @@ class FrameRenderer:
 
         # Sort by z-index
         self.layers.sort(key=lambda layer: layer.z_index)
-
 
     def prerender_gpu(self) -> int:
         """Pre-render GPU effects for all layers that support it.

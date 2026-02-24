@@ -91,9 +91,9 @@ class PlaybackNavigationPlugin:
             self._update_button_styles()
 
             layout = main_window.controls.layout()
-            # Insert at index 3 (after stop button, before spacer)
-            ui_builder.insert_widget_in_layout(layout, 3, self.auto_play_button)
-            ui_builder.insert_widget_in_layout(layout, 4, self.random_button)
+            # Insert at index 2 (after stop button, before spacer)
+            ui_builder.insert_widget_in_layout(layout, 2, self.auto_play_button)
+            ui_builder.insert_widget_in_layout(layout, 3, self.random_button)
 
     def register_shortcuts(self, shortcut_manager: ShortcutManagerProtocol) -> None:
         """Register keyboard shortcuts."""

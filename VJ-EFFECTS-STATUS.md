@@ -4,7 +4,7 @@ Ce fichier documente tous les effets VJing du plugin video_exporter, leur statut
 
 ---
 
-## Effets Implémentés (30 effets)
+## Effets Implémentés (32 effets)
 
 ### Effets rythmiques (beat/tempo)
 
@@ -39,6 +39,7 @@ Ce fichier documente tous les effets VJing du plugin video_exporter, leur statut
 | `tunnel` | Tunnel infini avec profondeur | energy, bass | Non | Oui | Correspond à "Tunnels/vortex" |
 | `spiral` | Spirale animée colorée | energy, bass | Non | Oui | Bonus. Non décrit dans VJ-effects.md |
 | `radar` | Balayage radar circulaire avec blips | energy, is_beat | Non | Oui | Bonus. Non décrit dans VJ-effects.md |
+| `grid` | Grille 2D déformée par ondes sur kicks | bass, energy, is_beat | Non | Oui | Correspond à "Grilles dynamiques" |
 
 ### Effets procéduraux / GPU
 
@@ -76,18 +77,11 @@ Ce fichier documente tous les effets VJing du plugin video_exporter, leur statut
 | `pixelate` | Pixelisation dynamique | energy | Non | Oui | Bonus. Non décrit dans VJ-effects.md |
 | `feedback` | Traînées avec décroissance (motion trails) | energy | Non | Oui | Correspond à "Video Feedback" et "Motion trails" |
 | `timestretch` | Ralenti/accélération selon énergie | energy (derivative) | Non | Oui | Correspond à "Time-stretch visuel" |
+| `bloom` | Glow/bloom audio-réactif | treble, energy | Non | Oui | Correspond à "Glow/Bloom audio-réactif" |
 
 ---
 
 ## Effets Non Implémentés (à développer)
-
-### Priorité Haute
-
-| Effet | Description | Complexité | Notes |
-|-------|-------------|------------|-------|
-| `spectogram` | Spectrogramme temporel abstrait | Moyenne | Accumulation FFT avec défilement horizontal/radial. Idéal ambient/deep house |
-| `grid` | Grilles dynamiques 2D/3D | Moyenne | Déformation par ondes sinusoïdales déclenchées par kicks |
-| `bloom` | Glow/Bloom audio-réactif | Faible | Intensité liée aux hautes fréquences. Post-processing |
 
 ### Priorité Moyenne
 
@@ -151,7 +145,7 @@ Effets GPU : `plasma`, `fractal`, `metaballs`, `wormhole`, `voronoi`
 - Mouvement fluide
 
 ### Techno
-- `tunnel` + `strobe` + `grid` (à implémenter)
+- `tunnel` + `strobe` + `grid`
 - Contraste fort (`monochrome`, `neon`)
 - Répétition hypnotique
 
@@ -166,7 +160,7 @@ Effets GPU : `plasma`, `fractal`, `metaballs`, `wormhole`, `voronoi`
 - Mouvements hypnotiques
 
 ### Deep House / Ambient
-- `plasma` + `water` + `spectogram` (à implémenter)
+- `plasma` + `water` + `aurora`
 - Couleurs douces (`ice`, `ocean`)
 - Transitions lentes
 

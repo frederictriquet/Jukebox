@@ -370,9 +370,7 @@ class EffectPreviewDialog(QDialog):
 
             height, width, channels = frame.shape
             bytes_per_line = channels * width
-            qimage = QImage(
-                frame.data, width, height, bytes_per_line, QImage.Format_RGB888
-            )
+            qimage = QImage(frame.data, width, height, bytes_per_line, QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(qimage)
 
             self.preview_label.setPixmap(pixmap)
@@ -443,6 +441,10 @@ class ExportDialog(QDialog):
         self.loop_end = loop_end
         self.track_metadata = track_metadata
         self.worker = None
+
+        # Deterministic seed for reproducible VJing effects across preview and export
+        seed_str = f"{track_metadata.get('title', '')}:{track_metadata.get('genre', '')}"
+        self._rng_seed = hash(seed_str) & 0xFFFFFFFF
 
         # Preview state
         self._preview_renderer = None
@@ -789,58 +791,25 @@ class ExportDialog(QDialog):
         self.effect_intensity_sliders: dict[str, QSlider] = {}
         self.effect_intensity_labels: dict[str, QLabel] = {}
 
-        # All effects organized by theme (split into 2 columns)
-        effect_groups_left = [
-            ("Rythmiques", [
-                ("pulse", "Pulse"),
-                ("strobe", "Strobe"),
-            ]),
-            ("Spectraux", [
-                ("fft_bars", "FFT Bars"),
-                ("fft_rings", "FFT Rings"),
-                ("bass_warp", "Bass Warp"),
-            ]),
-            ("Particules", [
-                ("particles", "Particles"),
-                ("flow_field", "Flow Field"),
-                ("explosion", "Explosion"),
-                ("starfield", "Starfield"),
-            ]),
-            ("Géométriques", [
-                ("kaleidoscope", "Kaleidoscope"),
-                ("lissajous", "Lissajous"),
-                ("tunnel", "Tunnel"),
-                ("spiral", "Spiral"),
-                ("radar", "Radar"),
-            ]),
-        ]
+        # Build effect groups dynamically from VJingLayer.EFFECT_CATALOG
+        from plugins.video_exporter.layers.vjing_layer import VJingLayer as VjLayer
 
-        effect_groups_right = [
-            ("GPU", [
-                ("fractal", "Fractal"),
-                ("plasma", "Plasma"),
-                ("wormhole", "Wormhole"),
-                ("voronoi", "Voronoi"),
-                ("metaballs", "Metaballs"),
-            ]),
-            ("Naturels", [
-                ("fire", "Fire"),
-                ("water", "Water"),
-                ("aurora", "Aurora"),
-                ("smoke", "Smoke"),
-                ("lightning", "Lightning"),
-            ]),
-            ("Classiques", [
-                ("wave", "Wave"),
-                ("neon", "Neon"),
-                ("vinyl", "Vinyl"),
-            ]),
-            ("Post-process", [
-                ("chromatic", "Chromatic"),
-                ("pixelate", "Pixelate"),
-                ("feedback", "Feedback"),
-            ]),
-        ]
+        # Preserve category ordering using AVAILABLE_EFFECTS insertion order
+        _category_order: list[str] = []
+        _groups: dict[str, list[tuple[str, str]]] = {}
+        for effect_id in VjLayer.AVAILABLE_EFFECTS:
+            display_name, category = VjLayer.EFFECT_CATALOG.get(
+                effect_id, (effect_id.replace("_", " ").title(), "Other")
+            )
+            if category not in _groups:
+                _category_order.append(category)
+                _groups[category] = []
+            _groups[category].append((effect_id, display_name))
+
+        all_groups = [(cat, _groups[cat]) for cat in _category_order]
+        mid = (len(all_groups) + 1) // 2
+        effect_groups_left = all_groups[:mid]
+        effect_groups_right = all_groups[mid:]
 
         # Two-column layout for effects
         columns_layout = QHBoxLayout()
@@ -872,15 +841,15 @@ class ExportDialog(QDialog):
                     slider.setToolTip(f"Intensity for {effect_name} effect")
                     value_label = QLabel("100%")
                     value_label.setFixedWidth(35)
-                    slider.valueChanged.connect(
-                        lambda v, lbl=value_label: lbl.setText(f"{v}%")
-                    )
+                    slider.valueChanged.connect(lambda v, lbl=value_label: lbl.setText(f"{v}%"))
                     # Preview button
                     preview_btn = QPushButton("👁")
                     preview_btn.setFixedSize(24, 24)
                     preview_btn.setToolTip(f"Preview {effect_name}")
                     preview_btn.clicked.connect(
-                        lambda checked, eid=effect_id, ename=effect_name: self._preview_single_effect(eid, ename)
+                        lambda checked,
+                        eid=effect_id,
+                        ename=effect_name: self._preview_single_effect(eid, ename)
                     )
 
                     row_layout.addWidget(name_label)
@@ -931,9 +900,7 @@ class ExportDialog(QDialog):
             value_label = QLabel("100%")
             value_label.setMinimumWidth(40)
             value_label.setFixedHeight(28)
-            slider.valueChanged.connect(
-                lambda v, lbl=value_label: lbl.setText(f"{v}%")
-            )
+            slider.valueChanged.connect(lambda v, lbl=value_label: lbl.setText(f"{v}%"))
             sensitivity_layout.addWidget(name_label, row, 0)
             sensitivity_layout.addWidget(slider, row, 1)
             sensitivity_layout.addWidget(value_label, row, 2)
@@ -1062,9 +1029,7 @@ class ExportDialog(QDialog):
 
         Fits within a 640x480 bounding box while preserving the ratio.
         """
-        resolution = RESOLUTION_PRESETS.get(
-            self.resolution_combo.currentText(), (1920, 1080)
-        )
+        resolution = RESOLUTION_PRESETS.get(self.resolution_combo.currentText(), (1920, 1080))
         res_w, res_h = resolution
         max_w, max_h = 640, 480
         scale = min(max_w / res_w, max_h / res_h)
@@ -1140,8 +1105,7 @@ class ExportDialog(QDialog):
                 },
                 vjing_preset=self.vjing_preset_combo.currentData(),
                 vjing_presets={
-                    p.name: p.effects
-                    for p in self.context.config.video_exporter.vjing_presets
+                    p.name: p.effects for p in self.context.config.video_exporter.vjing_presets
                 },
                 waveform_config=waveform_config,
                 use_gpu=True,  # GPU shaders now support dynamic palettes
@@ -1151,6 +1115,7 @@ class ExportDialog(QDialog):
                 transitions_enabled=True,
                 simultaneous_effects=self.simultaneous_effects_spin.value(),
                 use_all_effects=self.use_all_effects_check.isChecked(),
+                rng_seed=self._rng_seed,
             )
 
             # Update UI
@@ -1274,9 +1239,7 @@ class ExportDialog(QDialog):
             # Convert numpy array to QPixmap
             height, width, channels = frame.shape
             bytes_per_line = channels * width
-            qimage = QImage(
-                frame.data, width, height, bytes_per_line, QImage.Format_RGB888
-            )
+            qimage = QImage(frame.data, width, height, bytes_per_line, QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(qimage)
 
             # Scale to fit label while preserving aspect ratio
@@ -1386,13 +1349,11 @@ class ExportDialog(QDialog):
             },
             "video_clips_folder": self.video_folder_edit.text(),
             "vjing_mappings": {
-                m.letter: m.get_effects()
-                for m in self.context.config.video_exporter.vjing_mappings
+                m.letter: m.get_effects() for m in self.context.config.video_exporter.vjing_mappings
             },
             "vjing_preset": self.vjing_preset_combo.currentData(),
             "vjing_presets": {
-                p.name: p.effects
-                for p in self.context.config.video_exporter.vjing_presets
+                p.name: p.effects for p in self.context.config.video_exporter.vjing_presets
             },
             "color_palette": self._get_selected_palette(),
             # Waveform layer settings
@@ -1415,6 +1376,8 @@ class ExportDialog(QDialog):
             "fade_duration": self.fade_spin.value(),
             # Intro video overlay
             "intro_video_path": self.intro_video_edit.text(),
+            # Deterministic seed for reproducible VJing effects
+            "rng_seed": self._rng_seed,
         }
 
     def reject(self) -> None:

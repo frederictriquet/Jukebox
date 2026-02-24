@@ -131,6 +131,7 @@ class VideoExportWorker(QThread):
                 simultaneous_effects=self.config.get("simultaneous_effects", 1),
                 use_all_effects=self.config.get("use_all_effects", False),
                 intro_video_path=self.config.get("intro_video_path", ""),
+                rng_seed=self.config.get("rng_seed", 42),
             )
         except Exception as e:
             self.error.emit(f"Failed to initialize renderer: {e}")
