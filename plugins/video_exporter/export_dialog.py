@@ -611,6 +611,7 @@ class ExportDialog(QDialog):
         # Resolution
         self.resolution_combo = QComboBox()
         self.resolution_combo.addItems(list(RESOLUTION_PRESETS.keys()))
+        self.resolution_combo.currentTextChanged.connect(self._on_resolution_changed)
         layout.addRow("Resolution:", self.resolution_combo)
 
         # FPS
@@ -949,13 +950,12 @@ class ExportDialog(QDialog):
         preview_tab = QWidget()
         preview_layout = QVBoxLayout(preview_tab)
 
-        # Preview display
+        # Preview display — size adapts to selected resolution's aspect ratio
         self.preview_label = QLabel()
-        self.preview_label.setMinimumSize(480, 270)
-        self.preview_label.setMaximumSize(640, 360)
         self.preview_label.setStyleSheet("background: #1a1a1a; border: 1px solid #555;")
         self.preview_label.setAlignment(Qt.AlignCenter)
         self.preview_label.setText("Click 'Load Preview' to start")
+        self._update_preview_label_size()
         preview_layout.addWidget(self.preview_label, alignment=Qt.AlignCenter)
 
         # Time slider
@@ -1053,6 +1053,25 @@ class ExportDialog(QDialog):
         if filepath:
             self.intro_video_edit.setText(filepath)
 
+    def _on_resolution_changed(self, _text: str) -> None:
+        """Update preview label size when resolution selection changes."""
+        self._update_preview_label_size()
+
+    def _update_preview_label_size(self) -> None:
+        """Resize preview label to match the selected resolution's aspect ratio.
+
+        Fits within a 640x480 bounding box while preserving the ratio.
+        """
+        resolution = RESOLUTION_PRESETS.get(
+            self.resolution_combo.currentText(), (1920, 1080)
+        )
+        res_w, res_h = resolution
+        max_w, max_h = 640, 480
+        scale = min(max_w / res_w, max_h / res_h)
+        w = max(200, int(res_w * scale))
+        h = max(112, int(res_h * scale))
+        self.preview_label.setFixedSize(w, h)
+
     def _load_preview(self) -> None:
         """Load audio and initialize preview renderer."""
         try:
@@ -1066,6 +1085,7 @@ class ExportDialog(QDialog):
         self.preview_load_btn.setEnabled(False)
         self.preview_info_label.setText("Loading audio...")
         self.preview_label.setText("Loading...")
+        self._update_preview_label_size()
 
         # Get preview settings
         duration = self.loop_end - self.loop_start
@@ -1259,7 +1279,9 @@ class ExportDialog(QDialog):
             )
             pixmap = QPixmap.fromImage(qimage)
 
-            # Display
+            # Scale to fit label while preserving aspect ratio
+            label_size = self.preview_label.size()
+            pixmap = pixmap.scaled(label_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.preview_label.setPixmap(pixmap)
 
         except Exception as e:

@@ -682,6 +682,13 @@ class VJingLayer(BaseVisualLayer):
         Returns:
             RGBA PIL Image if GPU rendering succeeded, None otherwise.
         """
+        # Metaballs GPU shader uses fixed UV-space radii (~0.08) that produce
+        # blobs of only 1-2 pixels at low resolutions (e.g. 32x32 LED panels).
+        # Force CPU fallback which uses viewport-space coordinates that scale correctly.
+        # Other shaders (voronoi, plasma, fractal, wormhole) are resolution-independent.
+        if shader_name == "metaballs" and min(self.width, self.height) < 128:
+            return None
+
         # Check cache first (used in parallel rendering mode)
         if frame_idx in self._gpu_frame_cache:
             cached = self._gpu_frame_cache[frame_idx].get(shader_name)
@@ -902,13 +909,14 @@ class VJingLayer(BaseVisualLayer):
 
     def _spawn_particle(self) -> None:
         """Spawn a new particle."""
+        s = min(self.width, self.height) / 512
         self.particles.append(
             {
                 "x": random.random() * self.width,
                 "y": random.random() * self.height,
-                "vx": (random.random() - 0.5) * 2,
-                "vy": (random.random() - 0.5) * 2,
-                "size": random.random() * 10 + 5,
+                "vx": (random.random() - 0.5) * 2 * s,
+                "vy": (random.random() - 0.5) * 2 * s,
+                "size": (random.random() * 10 + 5) * s,
                 "color": self._get_random_palette_color(),
                 "life": random.random() * 100,
             }
@@ -1148,6 +1156,7 @@ class VJingLayer(BaseVisualLayer):
 
         draw = ImageDraw.Draw(img)
         center = (self.width // 2, self.height // 2)
+        s = min(self.width, self.height) / 512  # scale factor
 
         # Get palette colors
         colors = self.color_palette
@@ -1165,10 +1174,11 @@ class VJingLayer(BaseVisualLayer):
         radius = int(max_radius * decay * self._current_intensity)
         alpha = int(150 * decay * self._current_intensity)
 
-        if radius > 5:
+        if radius > max(1, int(5 * s)):
             # Draw expanding ring using palette color
+            ring_w = max(1, int(3 * s))
             for thickness in range(3):
-                r = radius + thickness * 5
+                r = radius + int(thickness * 5 * s)
                 a = max(0, alpha - thickness * 40)
                 # Brighten the color for the pulse
                 pr = min(255, primary_color[0] + (255 - primary_color[0]) // 2)
@@ -1177,7 +1187,7 @@ class VJingLayer(BaseVisualLayer):
                 draw.ellipse(
                     [center[0] - r, center[1] - r, center[0] + r, center[1] + r],
                     outline=(pr, pg, pb, a),
-                    width=3,
+                    width=ring_w,
                 )
 
     def _render_strobe(
@@ -1214,7 +1224,8 @@ class VJingLayer(BaseVisualLayer):
         fft = ctx["fft"]
         n_bars = len(fft)
 
-        bar_width = self.width // n_bars
+        bar_width = max(1, self.width // n_bars)
+        gap = max(0, bar_width - 2) if bar_width >= 3 else 0
         max_height = self.height * 0.6
 
         # Get palette colors
@@ -1240,7 +1251,7 @@ class VJingLayer(BaseVisualLayer):
 
             # Draw bar from bottom
             y = self.height - height
-            draw.rectangle([x, y, x + bar_width - 2, self.height], fill=(r, g, b, alpha))
+            draw.rectangle([x, y, x + bar_width - 1 - gap, self.height], fill=(r, g, b, alpha))
 
     def _render_fft_rings(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
@@ -1250,10 +1261,12 @@ class VJingLayer(BaseVisualLayer):
         fft = ctx["fft"]
         center = (self.width // 2, self.height // 2)
         max_radius = min(self.width, self.height) // 2
+        s = min(self.width, self.height) / 512  # scale factor
 
         # Get palette colors
         colors = self.color_palette
         n_colors = len(colors)
+        line_w = max(1, int(3 * s))
 
         n_rings = min(16, len(fft))
         for i in range(n_rings):
@@ -1282,7 +1295,7 @@ class VJingLayer(BaseVisualLayer):
             alpha = int(200 * self._current_intensity * (0.5 + amplitude * 0.5))
 
             # Draw arc
-            n_points = 60
+            n_points = max(12, int(60 * s))
             points = []
             arc_length = math.pi * (0.5 + amplitude * 0.5)
             for j in range(n_points):
@@ -1292,7 +1305,7 @@ class VJingLayer(BaseVisualLayer):
                 points.append((x, y))
 
             if len(points) >= 2:
-                draw.line(points, fill=(r, g, b, alpha), width=3)
+                draw.line(points, fill=(r, g, b, alpha), width=line_w)
 
     def _render_bass_warp(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
@@ -1305,15 +1318,17 @@ class VJingLayer(BaseVisualLayer):
             return
 
         center = (self.width // 2, self.height // 2)
+        s = min(self.width, self.height) / 512  # scale factor
+        line_w = max(1, int(2 * s))
 
         # Draw warped concentric shapes
         n_shapes = int(10 * bass * self._current_intensity)
         for i in range(n_shapes):
             progress = i / max(n_shapes, 1)
-            base_radius = 50 + progress * min(self.width, self.height) * 0.4
+            base_radius = s * 50 + progress * min(self.width, self.height) * 0.4
 
             # Warp amount based on bass
-            warp = bass * 30 * self.intensity
+            warp = bass * 30 * s * self.intensity
 
             # Draw warped polygon
             n_points = 6 + i % 3
@@ -1338,7 +1353,7 @@ class VJingLayer(BaseVisualLayer):
                 int(c1[2] * (1 - blend) + c2[2] * blend),
                 alpha
             )
-            draw.line(points, fill=color, width=2)
+            draw.line(points, fill=color, width=line_w)
 
     # ========================================================================
     # PARTICLE SYSTEMS
@@ -1382,7 +1397,7 @@ class VJingLayer(BaseVisualLayer):
                 particle["y"] = random.random() * self.height
 
             # Draw particle
-            size = int(particle["size"] * (1 + energy * 0.5) * self._current_intensity)
+            size = max(1, int(particle["size"] * (1 + energy * 0.5) * self._current_intensity))
             alpha = int(150 * self.intensity * (particle["life"] / 100))
             color = (*particle["color"], alpha)
 
@@ -1396,11 +1411,12 @@ class VJingLayer(BaseVisualLayer):
         draw = ImageDraw.Draw(img)
         energy = ctx["energy"]
         bass = ctx["bass"]
+        s = min(self.width, self.height) / 512  # scale factor
 
         # Flow field parameters
         scale = 0.008  # Noise scale (smaller = smoother)
         time_scale = 0.3  # Time evolution speed
-        speed = 2 + energy * 5
+        speed = (2 + energy * 5) * s
 
         for particle in self.flow_particles:
             # Get flow direction from Perlin noise
@@ -1431,7 +1447,7 @@ class VJingLayer(BaseVisualLayer):
 
             # Draw particle as small line in flow direction
             x, y = int(particle["x"]), int(particle["y"])
-            length = 5 + bass * 10
+            length = (5 + bass * 10) * s
             x2 = x + int(math.cos(angle) * length)
             y2 = y + int(math.sin(angle) * length)
 
@@ -1441,8 +1457,9 @@ class VJingLayer(BaseVisualLayer):
             base_color = self._get_palette_color(color_idx)
             # Increased alpha from 100 to 180
             alpha = int(180 * self._current_intensity * (particle["life"] / 100))
+            line_w = max(1, int(2 * s))
 
-            draw.line([(x, y), (x2, y2)], fill=(*base_color, alpha), width=2)
+            draw.line([(x, y), (x2, y2)], fill=(*base_color, alpha), width=line_w)
 
     def _render_explosion(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
@@ -1452,6 +1469,7 @@ class VJingLayer(BaseVisualLayer):
         is_beat = ctx["is_beat"]
         energy = ctx["energy"]
         center = (self.width // 2, self.height // 2)
+        s = min(self.width, self.height) / 512  # scale factor
 
         # Trigger explosion on strong beats
         if is_beat and energy > 0.6 and not self.explosion_active:
@@ -1462,14 +1480,14 @@ class VJingLayer(BaseVisualLayer):
             n_particles = 100
             for _ in range(n_particles):
                 angle = random.random() * 2 * math.pi
-                speed = random.random() * 15 + 5
+                speed = (random.random() * 15 + 5) * s
                 self.explosion_particles.append(
                     {
                         "x": float(center[0]),
                         "y": float(center[1]),
                         "vx": math.cos(angle) * speed,
                         "vy": math.sin(angle) * speed,
-                        "size": random.random() * 5 + 2,
+                        "size": (random.random() * 5 + 2) * s,
                         "color": self._get_random_palette_color(),
                         "life": 40 + random.random() * 20,
                     }
@@ -1486,12 +1504,12 @@ class VJingLayer(BaseVisualLayer):
                 # Update position with gravity
                 p["x"] += p["vx"]
                 p["y"] += p["vy"]
-                p["vy"] += 0.3  # Gravity
-                p["life"] -= 1
+                p["vy"] += 0.3 * s  # Gravity
 
                 if p["life"] > 0:
+                    p["life"] -= 1
                     x, y = int(p["x"]), int(p["y"])
-                    size = int(p["size"] * (p["life"] / 60) * self._current_intensity)
+                    size = max(1, int(p["size"] * (p["life"] / 60) * self._current_intensity))
                     alpha = int(200 * (p["life"] / 60) * self._current_intensity)
 
                     if 0 <= x < self.width and 0 <= y < self.height:
@@ -1511,6 +1529,7 @@ class VJingLayer(BaseVisualLayer):
         draw = ImageDraw.Draw(img)
         energy = ctx["energy"]
         center = (self.width // 2, self.height // 2)
+        s = min(self.width, self.height) / 512  # scale factor
 
         n_segments = 8
         rotation = time_pos * 0.5
@@ -1522,8 +1541,8 @@ class VJingLayer(BaseVisualLayer):
             # Draw shapes in each segment
             n_shapes = 5
             for i in range(n_shapes):
-                distance = 50 + i * 60 * self.intensity
-                size = 20 + energy * 30
+                distance = (50 + i * 60 * self.intensity) * s
+                size = (20 + energy * 30) * s
 
                 # Position in segment
                 angle = base_angle + math.sin(time_pos + i) * 0.2
@@ -1556,6 +1575,7 @@ class VJingLayer(BaseVisualLayer):
         energy = ctx["energy"]
         bass = ctx["bass"]
         center = (self.width // 2, self.height // 2)
+        s = min(self.width, self.height) / 512  # scale factor
 
         # Lissajous parameters (modulated by audio)
         a = 3 + int(bass * 4)
@@ -1571,7 +1591,8 @@ class VJingLayer(BaseVisualLayer):
             amplitude_x = (self.width * 0.35) * self.intensity
             amplitude_y = (self.height * 0.35) * self.intensity
 
-            for t in np.linspace(0, 2 * math.pi, 200):
+            n_pts = max(40, int(200 * s))
+            for t in np.linspace(0, 2 * math.pi, n_pts):
                 x = center[0] + amplitude_x * math.sin(a * t + delta + phase_offset)
                 y = center[1] + amplitude_y * math.sin(b * t)
                 points.append((x, y))
@@ -1579,9 +1600,10 @@ class VJingLayer(BaseVisualLayer):
             # Color per curve from palette
             base_color = self._get_palette_color(curve)
             color = (*base_color, 150)
+            line_w = max(1, int(2 * s))
 
             if len(points) >= 2:
-                draw.line(points, fill=color, width=2)
+                draw.line(points, fill=color, width=line_w)
 
     def _render_tunnel(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
@@ -1590,6 +1612,7 @@ class VJingLayer(BaseVisualLayer):
         draw = ImageDraw.Draw(img)
         energy = ctx["energy"]
         center = (self.width // 2, self.height // 2)
+        s = min(self.width, self.height) / 512  # scale factor
 
         # LFO modulation
         rotation_mod = self.lfo_slow.value(time_pos) * 0.5  # Rotation wobble
@@ -1603,6 +1626,7 @@ class VJingLayer(BaseVisualLayer):
         # Tunnel parameters
         n_rings = 20
         speed = time_pos * 2
+        line_w = max(1, int(2 * s))
 
         for i in range(n_rings):
             # Ring distance (creates depth illusion)
@@ -1648,7 +1672,7 @@ class VJingLayer(BaseVisualLayer):
             g = min(255, int(g * (1 + energy * 0.3)))
             b = min(255, int(b * (1 + energy * 0.3)))
 
-            draw.line(points, fill=(r, g, b, alpha), width=2)
+            draw.line(points, fill=(r, g, b, alpha), width=line_w)
 
     def _render_spiral(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
@@ -1658,6 +1682,7 @@ class VJingLayer(BaseVisualLayer):
         energy = ctx["energy"]
         center = (self.width // 2, self.height // 2)
         max_radius = min(self.width, self.height) * 0.45
+        s = min(self.width, self.height) / 512  # scale factor
 
         # LFO modulation
         rotation_speed = 2 + self.lfo_medium.value(time_pos) * 0.5  # Speed variation
@@ -1670,7 +1695,7 @@ class VJingLayer(BaseVisualLayer):
 
         # Draw spiral
         points = []
-        n_points = 200
+        n_points = max(40, int(200 * s))
         rotations = 4 + energy * 2 + self.lfo_fast.value(time_pos) * 0.5
 
         for i in range(n_points):
@@ -1683,6 +1708,7 @@ class VJingLayer(BaseVisualLayer):
             points.append((x, y))
 
         # Draw with gradient color from palette, shifted by LFO
+        line_w = max(1, int(2 * s))
         if len(points) >= 2:
             for i in range(len(points) - 1):
                 # Map progress to palette position with color shift
@@ -1703,7 +1729,7 @@ class VJingLayer(BaseVisualLayer):
                 b = min(255, int(b * (1 + energy * 0.3)))
 
                 alpha = int(180 * self._current_intensity)
-                draw.line([points[i], points[i + 1]], fill=(r, g, b, alpha), width=2)
+                draw.line([points[i], points[i + 1]], fill=(r, g, b, alpha), width=line_w)
 
     # ========================================================================
     # POST-PROCESSING EFFECTS
@@ -1714,11 +1740,12 @@ class VJingLayer(BaseVisualLayer):
     ) -> None:
         """Render chromatic aberration effect."""
         bass = ctx["bass"]
+        s = min(self.width, self.height) / 512  # scale factor
 
-        # Offset amount based on bass
-        offset = int(5 + bass * 15 * self._current_intensity)
+        # Offset amount based on bass, scaled to viewport
+        offset = int((5 + bass * 15) * s * self._current_intensity)
 
-        if offset < 10:
+        if offset < 1:
             return
 
         # Get image data
@@ -1741,16 +1768,18 @@ class VJingLayer(BaseVisualLayer):
     ) -> None:
         """Render pixelation/mosaic effect."""
         bass = ctx["bass"]
+        s = min(self.width, self.height) / 512  # scale factor
 
-        # Pixel size based on bass
-        pixel_size = int(5 + bass * 20 * self._current_intensity)
+        # Pixel size based on bass, scaled to viewport
+        pixel_size = max(1, int((5 + bass * 20) * s * self._current_intensity))
 
-        if pixel_size < 3:
+        if pixel_size < 2:
             return
 
         # Create pixelated overlay
         small = img.resize(
-            (self.width // pixel_size, self.height // pixel_size), Image.Resampling.NEAREST
+            (max(1, self.width // pixel_size), max(1, self.height // pixel_size)),
+            Image.Resampling.NEAREST,
         )
         pixelated = small.resize((self.width, self.height), Image.Resampling.NEAREST)
 
@@ -1857,6 +1886,7 @@ class VJingLayer(BaseVisualLayer):
         safe_idx = min(frame_idx, len(self._time_scale) - 1)
         time_scale = self._time_scale[safe_idx]
         energy = ctx["energy"]
+        s = min(self.width, self.height) / 512  # scale factor
 
         # Get palette colors
         colors = self.color_palette
@@ -1875,8 +1905,8 @@ class VJingLayer(BaseVisualLayer):
                     continue  # Skip current frame
                 alpha = int(200 * (1 - i / n_echoes) * self._current_intensity)
                 # Slight offset for each echo
-                offset_x = int(math.sin(time_pos * 2 + i) * 5 * (1 - time_scale))
-                offset_y = int(math.cos(time_pos * 2 + i) * 3 * (1 - time_scale))
+                offset_x = int(math.sin(time_pos * 2 + i) * 5 * s * (1 - time_scale))
+                offset_y = int(math.cos(time_pos * 2 + i) * 3 * s * (1 - time_scale))
 
                 echo_data = np.array(echo)
                 echo_data[:, :, 3] = np.clip(
@@ -1887,14 +1917,15 @@ class VJingLayer(BaseVisualLayer):
 
             # Draw slow-mo indicator lines (horizontal streaks)
             indicator_alpha = int(180 * self._current_intensity * (0.7 - time_scale))
+            line_w = max(1, int(4 * s))
             for i in range(5):
                 y = self.height // 6 + i * self.height // 5
-                x_offset = int(math.sin(time_pos * 3 + i) * 80)
+                x_offset = int(math.sin(time_pos * 3 + i) * 80 * s)
                 color = (*colors[i % len(colors)], indicator_alpha)
                 draw.line(
                     [(0, y + x_offset), (self.width, y - x_offset)],
                     fill=color,
-                    width=4,
+                    width=line_w,
                 )
 
         elif time_scale > 1.3:
@@ -1904,11 +1935,12 @@ class VJingLayer(BaseVisualLayer):
             # Draw radial speed lines from center
             cx, cy = self.width // 2, self.height // 2
             n_lines = int(40 * (time_scale - 1) * self._current_intensity)
+            line_w = max(1, int(3 * s))
 
             for i in range(n_lines):
                 angle = random.random() * math.pi * 2
-                inner_r = 30 + random.random() * 80
-                outer_r = inner_r + 150 + (time_scale - 1) * 300
+                inner_r = (30 + random.random() * 80) * s
+                outer_r = inner_r + (150 + (time_scale - 1) * 300) * s
 
                 x1 = cx + int(math.cos(angle) * inner_r)
                 y1 = cy + int(math.sin(angle) * inner_r)
@@ -1919,7 +1951,7 @@ class VJingLayer(BaseVisualLayer):
                 color_idx = i % len(colors)
                 color = (*colors[color_idx], min(alpha, 255))
 
-                draw.line([(x1, y1), (x2, y2)], fill=color, width=3)
+                draw.line([(x1, y1), (x2, y2)], fill=color, width=line_w)
 
             # Flash effect on high acceleration
             if time_scale > 1.8:
@@ -1944,6 +1976,7 @@ class VJingLayer(BaseVisualLayer):
         """Render fire/flame effect with Perlin noise turbulence."""
         draw = ImageDraw.Draw(img)
         bass = ctx["bass"]
+        s = min(self.width, self.height) / 512  # scale factor
 
         # Fire height based on bass
         fire_height = int(self.height * 0.4 * (0.5 + bass * 0.5) * self._current_intensity)
@@ -1951,6 +1984,9 @@ class VJingLayer(BaseVisualLayer):
         # Get colors from palette for fire gradient
         colors = self.color_palette
         n_colors = len(colors)
+
+        step = max(1, int(3 * s))
+        noise_scale = 30 * s
 
         for y in range(fire_height):
             progress = y / max(fire_height, 1)
@@ -1971,13 +2007,13 @@ class VJingLayer(BaseVisualLayer):
             alpha = int(150 * (1 - progress) * self._current_intensity)
 
             # Animated flame shape using turbulence noise
-            for x in range(0, self.width, 3):
+            for x in range(0, self.width, step):
                 # Use turbulence for more natural flame motion
                 noise = turbulence2d(
                     x * 0.02 + time_pos * 2,
                     y * 0.03 + time_pos * 3,
                     octaves=3
-                ) * 30
+                ) * noise_scale
                 flame_y = self.height - y + int(noise * (1 - progress))
 
                 if 0 <= flame_y < self.height:
@@ -1990,6 +2026,7 @@ class VJingLayer(BaseVisualLayer):
         draw = ImageDraw.Draw(img)
         is_beat = ctx["is_beat"]
         energy = ctx["energy"]
+        s = min(self.width, self.height) / 512  # scale factor
 
         # Get palette colors
         colors = self.color_palette
@@ -2007,9 +2044,11 @@ class VJingLayer(BaseVisualLayer):
             )
 
         # Update and draw ripples
+        ring_gap = max(1, int(10 * s))
+        line_w = max(1, int(2 * s))
         new_ripples = []
         for ripple in self.ripples:
-            ripple["radius"] += 5 + energy * 5
+            ripple["radius"] += (5 + energy * 5) * s
             ripple["life"] -= 1
 
             if ripple["life"] > 0:
@@ -2021,7 +2060,7 @@ class VJingLayer(BaseVisualLayer):
                 # Draw concentric circles - increased alpha from 100 to 200
                 alpha = int(200 * (ripple["life"] / 60) * self._current_intensity)
                 for i in range(3):
-                    r = ripple["radius"] - i * 10
+                    r = ripple["radius"] - i * ring_gap
                     if r > 0:
                         draw.ellipse(
                             [
@@ -2031,7 +2070,7 @@ class VJingLayer(BaseVisualLayer):
                                 ripple["y"] + r,
                             ],
                             outline=(color[0], color[1], color[2], alpha // (i + 1)),
-                            width=2,
+                            width=line_w,
                         )
 
         self.ripples = new_ripples
@@ -2043,16 +2082,19 @@ class VJingLayer(BaseVisualLayer):
         draw = ImageDraw.Draw(img)
         energy = ctx["energy"]
         mid = ctx["mid"]
+        s = min(self.width, self.height) / 512  # scale factor
 
         # Aurora parameters
         n_bands = 5
         base_y = self.height * 0.3
 
+        step = max(1, int(5 * s))
+
         for band in range(n_bands):
             points = []
-            band_offset = band * 30
+            band_offset = band * 30 * s
 
-            for x in range(0, self.width, 5):
+            for x in range(0, self.width, step):
                 # Use FBM noise for organic aurora movement
                 noise_scale = 0.003
                 y = base_y + band_offset
@@ -2061,12 +2103,12 @@ class VJingLayer(BaseVisualLayer):
                     x * noise_scale + time_pos * 0.2,
                     band * 0.5 + time_pos * 0.1,
                     octaves=3
-                ) * 80 * self.intensity
+                ) * 80 * s * self.intensity
                 # Secondary modulation
                 y += perlin2d(
                     x * noise_scale * 2 + time_pos * 0.3,
                     band * 0.3
-                ) * 30 * energy
+                ) * 30 * s * energy
                 points.append((x, y))
 
             # Use palette colors
@@ -2076,15 +2118,18 @@ class VJingLayer(BaseVisualLayer):
             if len(points) >= 2:
                 alpha = int(200 * self._current_intensity * (0.6 + mid * 0.4))
                 color = (*base_color, alpha)
-                draw.line(points, fill=color, width=8 - band)
+                band_w = max(1, int((8 - band) * s))
+                draw.line(points, fill=color, width=band_w)
 
                 # Add glow
                 if band < 2:
                     glow_alpha = alpha // 2
                     glow_color = (*base_color, glow_alpha)
                     # Offset points for glow
-                    glow_points = [(x, y - 5) for x, y in points]
-                    draw.line(glow_points, fill=glow_color, width=15)
+                    glow_offset = max(1, int(5 * s))
+                    glow_points = [(x, y - glow_offset) for x, y in points]
+                    glow_w = max(1, int(15 * s))
+                    draw.line(glow_points, fill=glow_color, width=glow_w)
 
     # ========================================================================
     # CLASSIC EFFECTS
@@ -2096,15 +2141,18 @@ class VJingLayer(BaseVisualLayer):
         """Render wave effect (default)."""
         draw = ImageDraw.Draw(img)
         energy = ctx["energy"]
+        s = min(self.width, self.height) / 512  # scale factor
 
         # Draw flowing waves
         n_waves = 5
+        step = max(1, int(5 * s))
+        line_w = max(1, int(3 * s))
         for i in range(n_waves):
             points = []
             phase = time_pos * 2 + i * 0.5
-            amplitude = 30 * (1 + energy) * self.intensity
+            amplitude = 30 * s * (1 + energy) * self.intensity
 
-            for x in range(0, self.width, 5):
+            for x in range(0, self.width, step):
                 y = self.height // 2 + math.sin(x * 0.02 + phase) * amplitude
                 y += math.sin(x * 0.01 - time_pos) * amplitude * 0.5
                 points.append((x, int(y)))
@@ -2114,7 +2162,7 @@ class VJingLayer(BaseVisualLayer):
                 alpha = int(200 * self._current_intensity / (i * 0.5 + 1))
                 base_color = self._get_palette_color(i)
                 color = (*base_color, alpha)
-                draw.line(points, fill=color, width=3)
+                draw.line(points, fill=color, width=line_w)
 
     def _render_neon(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
@@ -2122,33 +2170,36 @@ class VJingLayer(BaseVisualLayer):
         """Render neon glow effect."""
         draw = ImageDraw.Draw(img)
         energy = ctx["energy"]
+        s = min(self.width, self.height) / 512  # scale factor
 
         # Draw neon shapes using palette colors
         n_shapes = 3
         for i in range(n_shapes):
             # Pulsating size
-            base_size = 100 + i * 50
-            pulse = math.sin(time_pos * 2 + i) * 20 * energy
+            base_size = (100 + i * 50) * s
+            pulse = math.sin(time_pos * 2 + i) * 20 * s * energy
             size = int((base_size + pulse) * self._current_intensity)
 
-            x = self.width // 2 + math.cos(time_pos + i * 2) * 100
-            y = self.height // 2 + math.sin(time_pos * 0.5 + i) * 50
+            x = self.width // 2 + math.cos(time_pos + i * 2) * 100 * s
+            y = self.height // 2 + math.sin(time_pos * 0.5 + i) * 50 * s
 
             base_color = self._get_palette_color(i)
             color = (*base_color, 150)
+            line_w = max(1, int(2 * s))
+            glow_step = max(1, int(5 * s))
 
             # Draw glowing shape with multiple layers
             for offset in range(3, 0, -1):
                 alpha = color[3] // offset
                 draw.ellipse(
                     [
-                        x - size - offset * 5,
-                        y - size - offset * 5,
-                        x + size + offset * 5,
-                        y + size + offset * 5,
+                        x - size - offset * glow_step,
+                        y - size - offset * glow_step,
+                        x + size + offset * glow_step,
+                        y + size + offset * glow_step,
                     ],
                     outline=(*color[:3], alpha),
-                    width=2,
+                    width=line_w,
                 )
 
     def _render_vinyl(
@@ -2160,8 +2211,10 @@ class VJingLayer(BaseVisualLayer):
         center = (self.width // 2, self.height // 2)
         max_radius = min(self.width, self.height) // 3
         rotation = time_pos * 2 * math.pi * (0.5 + energy * 0.5)
+        s = min(self.width, self.height) / 512  # scale factor
 
         n_grooves = 15
+        dot_r = max(1, int(1 * s))
         for i in range(n_grooves):
             radius = max_radius * (i + 1) / n_grooves
             # Increased alpha from 60 to 150
@@ -2172,7 +2225,7 @@ class VJingLayer(BaseVisualLayer):
             arc_length = math.pi * (0.8 + energy * 0.4)
 
             # Draw arc as points
-            n_points = 30
+            n_points = max(8, int(30 * s))
             for j in range(n_points):
                 angle = start_angle + (j / n_points) * arc_length
                 x = center[0] + radius * math.cos(angle)
@@ -2180,7 +2233,10 @@ class VJingLayer(BaseVisualLayer):
 
                 # Slight color variation
                 gray = 180 + int(20 * math.sin(angle * 5))
-                draw.ellipse([x - 1, y - 1, x + 1, y + 1], fill=(gray, gray, gray, alpha))
+                draw.ellipse(
+                    [x - dot_r, y - dot_r, x + dot_r, y + dot_r],
+                    fill=(gray, gray, gray, alpha),
+                )
 
     # ========================================================================
     # FRACTAL EFFECTS
@@ -2192,8 +2248,8 @@ class VJingLayer(BaseVisualLayer):
         Pre-computes the coordinate grid for Julia set rendering.
         Uses lower resolution for performance, then upscales.
         """
-        # Use lower resolution for performance (will be upscaled)
-        self.fractal_scale = 4  # Render at 1/4 resolution
+        # Adaptive downsampling: no downsampling below 64px
+        self.fractal_scale = max(1, min(4, min(self.width, self.height) // 64))
         self.fractal_width = self.width // self.fractal_scale
         self.fractal_height = self.height // self.fractal_scale
 
@@ -2339,9 +2395,11 @@ class VJingLayer(BaseVisualLayer):
         energy = ctx["energy"]
         bass = ctx["bass"]
         is_beat = ctx["is_beat"]
+        s = min(self.width, self.height) / 512  # scale factor
 
         cx, cy = self.width // 2, self.height // 2
-        max_radius = min(self.width, self.height) // 2 - 20
+        margin = int(20 * s)
+        max_radius = min(self.width, self.height) // 2 - margin
 
         # Get palette colors
         colors = self.color_palette
@@ -2371,6 +2429,7 @@ class VJingLayer(BaseVisualLayer):
         draw.line([(cx, cy - max_radius), (cx, cy + max_radius)], fill=(dim_r, dim_g, dim_b, grid_alpha))
 
         # Draw sweep beam with trail
+        beam_w = max(1, int(2 * s))
         num_trail = 30
         for i in range(num_trail):
             trail_angle = angle - i * 0.03
@@ -2381,15 +2440,15 @@ class VJingLayer(BaseVisualLayer):
             # Bright color for main beam, fading for trail
             fade = 1.0 - i / num_trail
             if i < 3:
-                r = min(255, int(primary_color[0] * 0.5 + 128))
-                g = min(255, int(primary_color[1] * 0.5 + 128))
-                b = min(255, int(primary_color[2] * 0.5 + 128))
+                cr = min(255, int(primary_color[0] * 0.5 + 128))
+                cg = min(255, int(primary_color[1] * 0.5 + 128))
+                cb = min(255, int(primary_color[2] * 0.5 + 128))
             else:
-                r = int(primary_color[0] * fade)
-                g = int(primary_color[1] * fade)
-                b = int(primary_color[2] * fade)
+                cr = int(primary_color[0] * fade)
+                cg = int(primary_color[1] * fade)
+                cb = int(primary_color[2] * fade)
 
-            draw.line([(cx, cy), (x_end, y_end)], fill=(r, g, b, trail_alpha), width=2 if i < 5 else 1)
+            draw.line([(cx, cy), (x_end, y_end)], fill=(cr, cg, cb, trail_alpha), width=beam_w if i < 5 else 1)
 
         # Draw blips on beats
         if is_beat:
@@ -2401,7 +2460,7 @@ class VJingLayer(BaseVisualLayer):
                 "angle": angle,
                 "distance": blip_dist,
                 "life": 30,
-                "size": 3 + bass * 5,
+                "size": (3 + bass * 5) * s,
             })
 
         # Draw and update blips
@@ -2413,7 +2472,7 @@ class VJingLayer(BaseVisualLayer):
                     bx = cx + int(math.cos(blip["angle"]) * blip["distance"])
                     by = cy + int(math.sin(blip["angle"]) * blip["distance"])
                     alpha = int((blip["life"] / 30) * 255 * self._current_intensity)
-                    size = int(blip["size"])
+                    size = max(1, int(blip["size"]))
                     # Use blip color from palette
                     draw.ellipse(
                         [bx - size, by - size, bx + size, by + size],
@@ -2428,7 +2487,8 @@ class VJingLayer(BaseVisualLayer):
 
     def _init_plasma(self) -> None:
         """Initialize plasma effect coordinate grid."""
-        self.plasma_scale = 4
+        # Adaptive downsampling: no downsampling below 64px
+        self.plasma_scale = max(1, min(4, min(self.width, self.height) // 64))
         self.plasma_width = self.width // self.plasma_scale
         self.plasma_height = self.height // self.plasma_scale
         # Create coordinate grids
@@ -2659,7 +2719,7 @@ class VJingLayer(BaseVisualLayer):
         """Render 3D starfield flying through space.
 
         Stars move towards camera, speed affected by energy.
-        Brightness pulses on beats.
+        Far stars are dim and small, close stars are bright and large.
 
         Args:
             img: Image to draw on.
@@ -2671,6 +2731,7 @@ class VJingLayer(BaseVisualLayer):
         energy = ctx["energy"]
         is_beat = ctx["is_beat"]
         bass = ctx["bass"]
+        s = min(self.width, self.height) / 512  # scale factor
 
         cx, cy = self.width // 2, self.height // 2
 
@@ -2697,19 +2758,22 @@ class VJingLayer(BaseVisualLayer):
 
             # Check bounds
             if 0 <= px < self.width and 0 <= py < self.height:
-                # Size based on depth (closer = bigger)
-                size = max(1, int(3 / star["z"]))
+                # Size based on depth (closer = bigger), scaled to viewport
+                size = max(1, int(3 * s / star["z"]))
 
-                # Brightness based on depth and beat
-                base_brightness = (1 - star["z"] / 2.5) * star["brightness"]
+                # Depth-based brightness: quadratic falloff (far=dim, close=bright)
+                max_depth = 3.0
+                depth_ratio = min(star["z"], max_depth) / max_depth
+                depth_brightness = (1.0 - depth_ratio) ** 2
+                base_brightness = depth_brightness * star["brightness"]
                 if is_beat:
-                    base_brightness = min(1.0, base_brightness + 0.4)
+                    base_brightness = min(1.0, base_brightness + 0.4 * depth_brightness)
 
                 # Get color from palette based on star index
                 color_idx = star.get("color_idx", 0) % n_colors
                 base_color = colors[color_idx]
 
-                # Blend toward white when closer (brighter)
+                # Blend toward white when closer (brighter stars wash out to white)
                 white_blend = base_brightness * 0.5
                 r = int(base_color[0] * (1 - white_blend) + 255 * white_blend * base_brightness)
                 g = int(base_color[1] * (1 - white_blend) + 255 * white_blend * base_brightness)
@@ -2730,7 +2794,7 @@ class VJingLayer(BaseVisualLayer):
 
                 # Motion trail for fast stars (close ones)
                 if star["z"] < 0.5 and bass > 0.5:
-                    trail_length = int((1 - star["z"]) * 20 * bass)
+                    trail_length = int((1 - star["z"]) * 20 * s * bass)
                     trail_x = int(cx + (star["x"] / (star["z"] + speed * 3)) * cx)
                     trail_y = int(cy + (star["y"] / (star["z"] + speed * 3)) * cy)
                     draw.line(
@@ -2817,8 +2881,9 @@ class VJingLayer(BaseVisualLayer):
         dx = x2 - x1
         dy = y2 - y1
         dist = math.sqrt(dx * dx + dy * dy)
+        s = min(self.width, self.height) / 512  # scale factor
 
-        if dist < 10:
+        if dist < max(2, int(10 * s)):
             return
 
         # Get palette colors
@@ -2827,7 +2892,7 @@ class VJingLayer(BaseVisualLayer):
         secondary_color = colors[1 % len(colors)]
 
         # Number of segments
-        num_segments = max(3, int(dist / 30))
+        num_segments = max(3, int(dist / max(5, int(30 * s))))
 
         # Build path with random offsets
         points = [(x1, y1)]
@@ -2849,7 +2914,7 @@ class VJingLayer(BaseVisualLayer):
         # Draw main bolt
         brightness = intensity * (1 - depth * 0.15)
         alpha = int(min(255, 200 + 55 * brightness) * self._current_intensity)
-        width = max(1, 4 - depth)
+        width = max(1, int((4 - depth) * s))
 
         # Core (bright version of primary color)
         core_r = min(255, int(primary_color[0] * 0.5 + 128 * brightness))
@@ -2868,11 +2933,12 @@ class VJingLayer(BaseVisualLayer):
             glow_r = int(secondary_color[0] * 0.7)
             glow_g = int(secondary_color[1] * 0.7)
             glow_b = int(secondary_color[2] * 0.7)
+            glow_w = width + max(1, int(4 * s))
             for i in range(len(points) - 1):
                 draw.line(
                     [points[i], points[i + 1]],
                     fill=(glow_r, glow_g, glow_b, glow_alpha),
-                    width=width + 4,
+                    width=glow_w,
                 )
 
         # Branching
@@ -2893,14 +2959,15 @@ class VJingLayer(BaseVisualLayer):
 
     def _init_voronoi(self) -> None:
         """Initialize Voronoi diagram points."""
+        s = min(self.width, self.height) / 512
         self.voronoi_num_points = 20
         self.voronoi_points: list[dict[str, Any]] = []
         for i in range(self.voronoi_num_points):
             self.voronoi_points.append({
                 "x": random.random() * self.width,
                 "y": random.random() * self.height,
-                "vx": (random.random() - 0.5) * 2,
-                "vy": (random.random() - 0.5) * 2,
+                "vx": (random.random() - 0.5) * 2 * s,
+                "vy": (random.random() - 0.5) * 2 * s,
                 "color": self._get_palette_color(i),
             })
 
@@ -2928,6 +2995,7 @@ class VJingLayer(BaseVisualLayer):
         energy = ctx["energy"]
         bass = ctx["bass"]
         is_beat = ctx["is_beat"]
+        s = min(self.width, self.height) / 512
 
         # Update point positions
         speed_mult = 1 + energy * 3
@@ -2943,13 +3011,13 @@ class VJingLayer(BaseVisualLayer):
                 point["y"] = max(0, min(self.height - 1, point["y"]))
 
             if is_beat:
-                point["vx"] += (random.random() - 0.5) * bass * 4
-                point["vy"] += (random.random() - 0.5) * bass * 4
+                point["vx"] += (random.random() - 0.5) * bass * 4 * s
+                point["vy"] += (random.random() - 0.5) * bass * 4 * s
 
-        # Render at lower resolution for performance
-        scale = 4
-        small_w = self.width // scale
-        small_h = self.height // scale
+        # Render at lower resolution for performance (adaptive for small viewports)
+        scale = max(1, min(4, min(self.width, self.height) // 16))
+        small_w = max(1, self.width // scale)
+        small_h = max(1, self.height // scale)
 
         y_coords, x_coords = np.ogrid[:small_h, :small_w]
         x_coords = x_coords * scale
@@ -2998,22 +3066,23 @@ class VJingLayer(BaseVisualLayer):
 
     def _init_metaballs(self) -> None:
         """Initialize metaballs with positions and velocities."""
+        s = min(self.width, self.height) / 512
         self.metaball_count = 6
         self.metaballs: list[dict[str, float]] = []
         for _ in range(self.metaball_count):
             self.metaballs.append({
                 "x": random.random() * self.width,
                 "y": random.random() * self.height,
-                "vx": (random.random() - 0.5) * 4,
-                "vy": (random.random() - 0.5) * 4,
-                "radius": random.random() * 80 + 60,
+                "vx": (random.random() - 0.5) * 4 * s,
+                "vy": (random.random() - 0.5) * 4 * s,
+                "radius": (random.random() * 80 + 60) * s,
             })
-        # Pre-compute coordinate grid at lower resolution
-        self.metaball_scale = 4
-        self.metaball_w = self.width // self.metaball_scale
-        self.metaball_h = self.height // self.metaball_scale
-        y_coords = np.arange(self.metaball_h) * self.metaball_scale
-        x_coords = np.arange(self.metaball_w) * self.metaball_scale
+        # Compute grid: at least 128x128 for smooth gradients, higher for large viewports
+        self.metaball_w = max(128, self.width // 4)
+        self.metaball_h = max(128, self.height // 4)
+        # Coordinates mapped to viewport space (not grid space)
+        y_coords = np.linspace(0, self.height, self.metaball_h, endpoint=False)
+        x_coords = np.linspace(0, self.width, self.metaball_w, endpoint=False)
         self.metaball_x, self.metaball_y = np.meshgrid(x_coords, y_coords)
 
     def _render_metaballs(
@@ -3040,8 +3109,9 @@ class VJingLayer(BaseVisualLayer):
         energy = ctx["energy"]
         bass = ctx["bass"]
         is_beat = ctx["is_beat"]
+        s = min(self.width, self.height) / 512
 
-        # Update metaball positions
+        # Update metaball positions (viewport space)
         speed_mult = 1 + energy * 2
         for ball in self.metaballs:
             ball["x"] += ball["vx"] * speed_mult
@@ -3055,10 +3125,10 @@ class VJingLayer(BaseVisualLayer):
                 ball["y"] = max(0, min(self.height - 1, ball["y"]))
 
             if is_beat:
-                ball["vx"] += (random.random() - 0.5) * bass * 6
-                ball["vy"] += (random.random() - 0.5) * bass * 6
+                ball["vx"] += (random.random() - 0.5) * bass * 6 * s
+                ball["vy"] += (random.random() - 0.5) * bass * 6 * s
 
-        # Compute metaball field
+        # Compute metaball field on the (>=128 x >=128) grid
         field = np.zeros((self.metaball_h, self.metaball_w), dtype=np.float32)
 
         for ball in self.metaballs:
@@ -3107,12 +3177,14 @@ class VJingLayer(BaseVisualLayer):
         alpha_arr = (glow * 200 * self._current_intensity).astype(np.uint8)
         rgba = np.dstack([rgb, alpha_arr])
 
-        metaball_small = Image.fromarray(rgba, mode="RGBA")
-        metaball_full = metaball_small.resize(
-            (self.width, self.height), Image.Resampling.BILINEAR
-        )
+        metaball_img = Image.fromarray(rgba, mode="RGBA")
+        # Resize from compute grid to target viewport
+        if metaball_img.size != (self.width, self.height):
+            metaball_img = metaball_img.resize(
+                (self.width, self.height), Image.Resampling.BILINEAR
+            )
 
-        img.paste(metaball_full, (0, 0), metaball_full)
+        img.paste(metaball_img, (0, 0), metaball_img)
 
     # ========================================================================
     # SMOKE EFFECT
@@ -3135,12 +3207,13 @@ class VJingLayer(BaseVisualLayer):
         if len(self.smoke_particles) >= self.max_smoke_particles:
             return
 
+        s = min(self.width, self.height) / 512
         self.smoke_particles.append({
             "x": x if x is not None else random.random() * self.width,
             "y": self.smoke_spawn_y,
-            "vx": (random.random() - 0.5) * 2,
-            "vy": -random.random() * 3 - 1,  # Rises up
-            "size": random.random() * 30 + 20,
+            "vx": (random.random() - 0.5) * 2 * s,
+            "vy": (-random.random() * 3 - 1) * s,
+            "size": (random.random() * 30 + 20) * s,
             "life": 1.0,
             "decay": random.random() * 0.01 + 0.005,
             # Increased alpha from 0.2-0.5 to 0.5-0.8
@@ -3167,6 +3240,7 @@ class VJingLayer(BaseVisualLayer):
         energy = ctx["energy"]
         bass = ctx["bass"]
         is_beat = ctx["is_beat"]
+        s = min(self.width, self.height) / 512
 
         # Spawn new particles based on energy
         spawn_rate = int(3 + energy * 8)
@@ -3188,23 +3262,23 @@ class VJingLayer(BaseVisualLayer):
         new_particles = []
         for p in self.smoke_particles:
             # Turbulence using Perlin noise for more natural motion
-            noise_scale = 0.005
+            noise_scale = 0.005 / s if s > 0 else 0.005
             turb_x = perlin2d(
                 p["x"] * noise_scale + time_pos * 0.5,
                 p["y"] * noise_scale + p["turbulence_offset"],
-            ) * 1.5
+            ) * 1.5 * s
             turb_y = perlin2d(
                 p["x"] * noise_scale + p["turbulence_offset"],
                 p["y"] * noise_scale + time_pos * 0.3,
-            ) * 0.8
+            ) * 0.8 * s
 
             # Update position
-            p["x"] += p["vx"] + turb_x + (random.random() - 0.5) * energy
+            p["x"] += p["vx"] + turb_x + (random.random() - 0.5) * energy * s
             p["y"] += p["vy"] + turb_y
             p["vy"] *= 0.99  # Slow down rising
 
             # Grow as it rises
-            p["size"] += 0.3
+            p["size"] += 0.3 * s
 
             # Decay
             p["life"] -= p["decay"]
