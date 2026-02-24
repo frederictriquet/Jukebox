@@ -70,39 +70,49 @@ genre_editor:
     - key: "D"
       code: "D"
       name: "Deep"
+      hashtags: ["#DeepHouse", "#Deep"]
     - key: "C"
       code: "C"
       name: "Classic"
     - key: "P"
       code: "P"
       name: "Power"
+      hashtags: ["#Techno", "#HardTechno"]
     - key: "T"
       code: "T"
       name: "Trance"
+      hashtags: ["#Trance"]
     - key: "H"
       code: "H"
       name: "House"
+      hashtags: ["#House", "#HouseMusic"]
     - key: "G"
       code: "G"
       name: "Garden"
+      hashtags: ["#GardenParty", "#ProgressiveHouse"]
     - key: "I"
       code: "I"
       name: "Ibiza"
+      hashtags: ["#Ibiza", "#BeachVibes"]
     - key: "A"
       code: "A"
       name: "A Cappella"
+      hashtags: ["#ACappella", "#Vocal"]
     - key: "W"
       code: "W"
       name: "Weed"
+      hashtags: ["#Trippy", "#Psychedelic"]
     - key: "B"
       code: "B"
       name: "Banger"
+      hashtags: ["#WhatABanger"]
     - key: "F"
       code: "F"
       name: "Fun"
     - key: "R"
       code: "R"
       name: "Retro"
+      hashtags: ["#Retro", "#OldSchool"]
     - key: "L"
       code: "L"
       name: "Loop"
@@ -112,9 +122,11 @@ genre_editor:
     - key: "O"
       code: "O"
       name: "Organic"
+      hashtags: ["#OrganicHouse", "#Organic"]
     - key: "N"
       code: "N"
       name: "Namaste"
+      hashtags: ["#Chill", "#Downtempo"]
   rating_key: "*"
 
 file_manager:

@@ -113,6 +113,7 @@ class GenreCodeConfig(BaseModel):
     key: str
     code: str
     name: str
+    hashtags: list[str] = []
 
 
 class GenreEditorConfig(BaseModel):

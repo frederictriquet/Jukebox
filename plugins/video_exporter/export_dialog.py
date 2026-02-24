@@ -1471,6 +1471,9 @@ class ExportDialog(QDialog):
                 )
                 return
 
+        # Write genre hashtags file before starting the video render
+        self._write_genre_hashtags(str(config["output_path"]))
+
         # Show progress
         self.progress_widget.setVisible(True)
         self.export_button.setEnabled(False)
@@ -1515,6 +1518,40 @@ class ExportDialog(QDialog):
         )
         logging.info(f"[Video Exporter] Export complete: {output_path}")
         self.accept()
+
+    def _write_genre_hashtags(self, video_path: str) -> None:
+        """Write a .txt file alongside the video with genre hashtags.
+
+        Args:
+            video_path: Path to the exported video file.
+        """
+        genre_str = self.track_metadata.get("genre") or ""
+        if not genre_str:
+            return
+
+        # Build code -> hashtags mapping from config (only genres with explicit hashtags)
+        code_to_hashtags: dict[str, list[str]] = {}
+        for gc in self.context.config.genre_editor.codes:
+            if gc.hashtags:
+                code_to_hashtags[gc.code] = [
+                    t if t.startswith("#") else f"#{t}" for t in gc.hashtags
+                ]
+
+        # Parse genre codes (format: "D-H-*3"), skip rating (*N)
+        codes = [p for p in genre_str.split("-") if not p.startswith("*")]
+        hashtags: list[str] = []
+        for c in codes:
+            if c in code_to_hashtags:
+                hashtags.extend(code_to_hashtags[c])
+        if not hashtags:
+            return
+
+        txt_path = Path(video_path).with_suffix(".txt")
+        try:
+            txt_path.write_text(" ".join(hashtags), encoding="utf-8")
+            logging.info(f"[Video Exporter] Genre hashtags written to {txt_path}")
+        except OSError as e:
+            logging.warning(f"[Video Exporter] Failed to write hashtags file: {e}")
 
     def _on_export_error(self, error: str) -> None:
         """Handle export error.
