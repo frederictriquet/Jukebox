@@ -3497,6 +3497,85 @@ class VJingLayer(BaseVisualLayer):
         img.paste(Image.alpha_composite(img, overlay), (0, 0))
 
     # =========================================================================
+    # Hexgrid effect - Hexagonal grid with FFT-driven cell illumination
+    # =========================================================================
+
+    @vj_effect("Hexgrid", "Spectraux")
+    def _render_hexgrid(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
+        """Render hexagonal grid with cells lit by FFT frequency bins.
+
+        Each hex cell maps to an FFT bin. Brightness and color shift
+        according to that bin's energy. Bass pulses the grid outline.
+        """
+        draw = ImageDraw.Draw(img)
+        bass = ctx["bass"]
+        is_beat = ctx["is_beat"]
+        fft = ctx["fft"]
+        intensity = self._current_intensity
+        w, h = self.width, self.height
+        s = min(w, h) / 512
+        colors = self.color_palette
+        n_colors = len(colors)
+        n_bins = len(fft)
+
+        # Hex cell size: responsive to resolution
+        hex_r = max(8, int(28 * s))
+        hex_w = hex_r * 2
+        hex_h = math.sqrt(3) * hex_r
+
+        # Grid outline alpha pulses with bass
+        outline_alpha = int((30 + bass * 60) * intensity)
+        outline_color = colors[int(time_pos * 0.3) % n_colors]
+
+        # Build hex centers
+        col = 0
+        bin_idx = 0
+        cx = hex_r
+        while cx < w + hex_r:
+            row = 0
+            # Offset odd columns
+            y_offset = hex_h / 2 if col % 2 else 0
+            cy = y_offset + hex_h / 2
+            while cy < h + hex_h:
+                # Map cell to FFT bin (wrap around)
+                fft_val = float(fft[bin_idx % n_bins])
+                bin_idx += 1
+
+                # Hex vertices
+                vertices = []
+                for k in range(6):
+                    angle = math.pi / 3 * k + math.pi / 6
+                    vx = cx + hex_r * math.cos(angle)
+                    vy = cy + hex_r * math.sin(angle)
+                    vertices.append((vx, vy))
+
+                # Fill brightness from FFT value
+                brightness = min(1.0, fft_val * 1.5)
+                if is_beat:
+                    brightness = min(1.0, brightness + 0.2)
+
+                if brightness > 0.02:
+                    # Color from palette, cycling with time and bin
+                    ci = (bin_idx + int(time_pos * 0.5)) % n_colors
+                    color = colors[ci]
+                    r = min(255, int(color[0] * brightness))
+                    g = min(255, int(color[1] * brightness))
+                    b = min(255, int(color[2] * brightness))
+                    fill_alpha = int(brightness * 180 * intensity)
+                    draw.polygon(vertices, fill=(r, g, b, fill_alpha))
+
+                # Draw hex outline (always visible, dim)
+                draw.polygon(
+                    vertices,
+                    outline=(*outline_color, outline_alpha),
+                )
+
+                cy += hex_h
+                row += 1
+            cx += hex_w * 0.75
+            col += 1
+
+    # =========================================================================
     # Grid effect - Dynamic 2D grid deformed by sine waves triggered by kicks
     # =========================================================================
 
