@@ -886,6 +886,8 @@ class VJingLayer(BaseVisualLayer):
             self._init_circuit()
         if "constellation" in self.active_effects:
             self._init_constellation()
+        if "shockwave" in self.active_effects:
+            self._init_shockwave()
 
         # Initialize GPU renderer if enabled
         if self._pending_gpu_init:
@@ -3577,6 +3579,118 @@ class VJingLayer(BaseVisualLayer):
 
         result = Image.fromarray(data, "RGBA")
         img.paste(result, (0, 0))
+
+    # =========================================================================
+    # Shockwave effect - Circular distortion wave triggered by strong kicks
+    # =========================================================================
+
+    def _init_shockwave(self) -> None:
+        """Initialize shockwave state."""
+        self.shockwaves: list[dict[str, float]] = []
+
+    @vj_effect("Shockwave", "Post-process", "post_processing")
+    def _render_shockwave(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render circular shockwave distortion triggered by strong kicks.
+
+        Expanding rings that displace pixels radially outward, creating
+        a ripple/lens distortion effect. Multiple waves can overlap.
+        """
+        bass = ctx["bass"]
+        energy = ctx["energy"]
+        is_beat = ctx["is_beat"]
+        intensity = self._current_intensity
+        w, h = self.width, self.height
+        s = min(w, h) / 512
+
+        # Spawn shockwave on strong beats
+        if is_beat and bass > 0.4:
+            cx = w // 2 + int((self._rng.random() - 0.5) * w * 0.3)
+            cy = h // 2 + int((self._rng.random() - 0.5) * h * 0.3)
+            self.shockwaves.append(
+                {
+                    "cx": float(cx),
+                    "cy": float(cy),
+                    "radius": 0.0,
+                    "speed": (8.0 + energy * 6.0) * s,
+                    "strength": 0.6 + bass * 0.4,
+                    "life": 1.0,
+                    "decay": 0.02 + energy * 0.01,
+                }
+            )
+
+        # Remove dead waves early
+        if not self.shockwaves:
+            return
+
+        data = np.array(img)
+        h_arr, w_arr = data.shape[:2]
+
+        # Precompute pixel coordinate grids
+        ys, xs = np.mgrid[0:h_arr, 0:w_arr].astype(np.float32)
+
+        result = data.copy()
+
+        new_waves = []
+        for wave in self.shockwaves:
+            wave["radius"] += wave["speed"]
+            wave["life"] -= wave["decay"]
+            if wave["life"] <= 0:
+                continue
+
+            cx, cy = wave["cx"], wave["cy"]
+            radius = wave["radius"]
+            strength = wave["strength"] * wave["life"] * intensity
+
+            # Distance from each pixel to wave center
+            dx = xs - cx
+            dy = ys - cy
+            dist = np.sqrt(dx * dx + dy * dy)
+
+            # Ring mask: pixels near the wave radius get displaced
+            ring_width = 30.0 * s
+            ring_dist = np.abs(dist - radius)
+            mask = np.clip(1.0 - ring_dist / ring_width, 0.0, 1.0)
+
+            # Displacement: push pixels radially outward
+            displacement = mask * strength * 15.0 * s
+
+            # Normalized direction from center
+            safe_dist = np.maximum(dist, 0.1)
+            dir_x = dx / safe_dist
+            dir_y = dy / safe_dist
+
+            # Source coordinates (where to sample from)
+            src_x = np.clip((xs - dir_x * displacement).astype(np.int32), 0, w_arr - 1)
+            src_y = np.clip((ys - dir_y * displacement).astype(np.int32), 0, h_arr - 1)
+
+            # Apply displacement
+            displaced = data[src_y.ravel(), src_x.ravel()].reshape(data.shape)
+
+            # Blend displaced with current result using ring mask
+            mask_4ch = mask[:, :, np.newaxis]
+            result = (result * (1.0 - mask_4ch) + displaced * mask_4ch).astype(np.uint8)
+
+            # Subtle colored edge at the wave front
+            edge_width = 4.0 * s
+            edge_dist = np.abs(dist - radius)
+            edge_mask = np.clip(1.0 - edge_dist / edge_width, 0.0, 1.0)
+            edge_tint = edge_mask * strength * 60
+            color = self._get_palette_color(int(wave["cx"] + wave["cy"]))
+            for c in range(3):
+                result[:, :, c] = np.clip(
+                    result[:, :, c].astype(np.float32) + edge_tint * (color[c] / 255.0),
+                    0,
+                    255,
+                ).astype(np.uint8)
+
+            new_waves.append(wave)
+
+        self.shockwaves = new_waves
+
+        out = Image.fromarray(result, "RGBA")
+        img.paste(out, (0, 0))
 
     # =========================================================================
     # Moiré effect - Interference patterns from overlapping rotating grids
