@@ -8,7 +8,7 @@
 | `pulse` | Amélioration : envelope ADSR |
 | `fft_bars` / `fft_rings` | Amélioration : courbes de Bézier organiques |
 
-## Nouveaux effets
+## Effets pas terribles
 
 | Effet | Description |
 |-------|-------------|
@@ -17,6 +17,11 @@
 | `terrain` | Survol de terrain 3D wireframe généré par le spectre FFT |
 | `dna` | Double hélice 3D en rotation, pulsation sur les beats |
 | `prism` | Dispersion de lumière arc-en-ciel à travers un prisme rotatif |
+
+## Nouveaux effets
+
+| Effet | Description |
+|-------|-------------|
 | `fireflies` | Lucioles flottantes avec clignotements asynchrones, synchronisation sur les beats |
 | `rain` | Pluie diagonale avec éclaboussures au sol, densité modulée par l'énergie |
 | `swarm` | Essaim boids (cohésion/séparation/alignement), contraction sur les kicks |
@@ -27,5 +32,4 @@
 | `eq_terrain` | Barres d'égaliseur en perspective 3D isométrique avec profondeur temporelle |
 | `mirror` | Symétrie kaléidoscopique configurable (2/4 axes), bords qui bougent au rythme |
 | `vignette` | Assombrissement des bords pulsant avec les basses, spotlight central |
-| `nebula` | Nuage cosmique multicouche avec Perlin noise, couleurs dérivantes |
 | `crystals` | Cristaux géométriques qui poussent/cassent sur les transients |

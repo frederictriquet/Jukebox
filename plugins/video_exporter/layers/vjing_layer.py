@@ -3384,6 +3384,119 @@ class VJingLayer(BaseVisualLayer):
         self.smoke_particles = new_particles
 
     # =========================================================================
+    # Nebula effect - Cosmic multi-layer cloud with drifting Perlin noise
+    # =========================================================================
+
+    @vj_effect("Nebula", "Naturels")
+    def _render_nebula(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
+        """Render cosmic nebula clouds with layered Perlin noise.
+
+        Multiple noise layers at different scales and speeds create
+        depth. Colors drift slowly through the palette. Bass swells
+        brightness, beats trigger brief flares.
+        """
+        w, h = self.width, self.height
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        mid = ctx["mid"]
+        is_beat = ctx["is_beat"]
+        intensity = self._current_intensity
+        colors = self.color_palette
+        n_colors = len(colors)
+
+        # Three noise layers at different scales/speeds for depth
+        layers_cfg = [
+            (0.003, 0.08, 0, 0.5),  # (scale, speed, color_idx, weight)
+            (0.006, 0.12, 2, 0.35),
+            (0.012, 0.20, 4, 0.15),
+        ]
+
+        # Downsample for performance, never below 16px on any side
+        ds = max(1, min(w, h) // 128)
+        sw, sh = max(16, w // max(1, ds)), max(16, h // max(1, ds))
+
+        # Precompute coordinate grids once
+        ys, xs = np.mgrid[0:sh, 0 : w // ds].astype(np.float32)
+
+        result_r = np.zeros((sh, sw), dtype=np.float32)
+        result_g = np.zeros((sh, sw), dtype=np.float32)
+        result_b = np.zeros((sh, sw), dtype=np.float32)
+
+        for scale, speed, color_idx_base, weight in layers_cfg:
+            sc = scale * ds
+            t = time_pos * speed
+            ci = (color_idx_base + int(time_pos * 0.15)) % n_colors
+            ci2 = (ci + 1) % n_colors
+            c1 = np.array(colors[ci], dtype=np.float32)
+            c2 = np.array(colors[ci2], dtype=np.float32)
+
+            # Vectorized pseudo-FBM: sum of rotated sinusoids (4 octaves)
+            noise = np.zeros((sh, sw), dtype=np.float32)
+            amp = 1.0
+            freq = 1.0
+            for octave in range(4):
+                # Rotate coordinates per octave for less axis-aligned patterns
+                angle = 0.5 * octave + t * 0.3
+                cos_a, sin_a = math.cos(angle), math.sin(angle)
+                rx = xs * cos_a - ys * sin_a
+                ry = xs * sin_a + ys * cos_a
+                noise += (
+                    np.sin(rx * sc * freq + t * 1.3) * np.cos(ry * sc * freq * 0.8 + t * 0.9) * amp
+                )
+                amp *= 0.55
+                freq *= 2.0
+
+            # Normalize to [0, 1]
+            n_min, n_max = noise.min(), noise.max()
+            rng = n_max - n_min
+            if rng > 0.001:
+                noise = (noise - n_min) / rng
+            else:
+                noise[:] = 0.5
+
+            # Contrast curve for cloud-like appearance
+            noise = np.clip((noise - 0.3) * 2.0, 0.0, 1.0) ** 1.5
+            noise *= 1.0 + mid * 0.3
+
+            # Blend two palette colors
+            layer_r = c1[0] * (1 - noise) + c2[0] * noise
+            layer_g = c1[1] * (1 - noise) + c2[1] * noise
+            layer_b = c1[2] * (1 - noise) + c2[2] * noise
+
+            result_r += layer_r * noise * weight
+            result_g += layer_g * noise * weight
+            result_b += layer_b * noise * weight
+
+        # Bass swells overall brightness
+        brightness = 0.7 + bass * 0.5
+        # Beat flare
+        if is_beat:
+            brightness += 0.3 * energy
+
+        result_r = np.clip(result_r * brightness, 0, 255)
+        result_g = np.clip(result_g * brightness, 0, 255)
+        result_b = np.clip(result_b * brightness, 0, 255)
+        alpha = np.clip((result_r + result_g + result_b) / 3.0 * intensity * 1.5, 0, 255)
+
+        # Assemble RGBA
+        out = np.stack(
+            [
+                result_r.astype(np.uint8),
+                result_g.astype(np.uint8),
+                result_b.astype(np.uint8),
+                alpha.astype(np.uint8),
+            ],
+            axis=2,
+        )
+
+        # Upscale if downsampled
+        overlay = Image.fromarray(out, "RGBA")
+        if ds > 1:
+            overlay = overlay.resize((w, h), Image.Resampling.BILINEAR)
+
+        img.paste(Image.alpha_composite(img, overlay), (0, 0))
+
+    # =========================================================================
     # Grid effect - Dynamic 2D grid deformed by sine waves triggered by kicks
     # =========================================================================
 
