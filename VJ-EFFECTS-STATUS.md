@@ -12,7 +12,6 @@
 
 | Effet | Description |
 |-------|-------------|
-| `glitch` | Corruption digitale : décalage de blocs, color shift, tearing sur les transients |
 | `matrix` | Pluie de caractères style Matrix, vitesse modulée par l'énergie |
 | `oscilloscope` | Forme d'onde audio en temps réel, style oscilloscope XY |
 | `terrain` | Survol de terrain 3D wireframe généré par le spectre FFT |

@@ -658,15 +658,17 @@ class VJingLayer(BaseVisualLayer):
             # Build audio context for this frame
             ctx = {
                 "energy": float(self.energy[frame_idx]) if frame_idx < len(self.energy) else 0.5,
-                "bass": float(self.bass_energy[frame_idx])
-                if frame_idx < len(self.bass_energy)
-                else 0.5,
-                "mid": float(self.mid_energy[frame_idx])
-                if frame_idx < len(self.mid_energy)
-                else 0.5,
-                "treble": float(self.treble_energy[frame_idx])
-                if frame_idx < len(self.treble_energy)
-                else 0.5,
+                "bass": (
+                    float(self.bass_energy[frame_idx]) if frame_idx < len(self.bass_energy) else 0.5
+                ),
+                "mid": (
+                    float(self.mid_energy[frame_idx]) if frame_idx < len(self.mid_energy) else 0.5
+                ),
+                "treble": (
+                    float(self.treble_energy[frame_idx])
+                    if frame_idx < len(self.treble_energy)
+                    else 0.5
+                ),
             }
 
             frame_cache: dict[str, Image.Image] = {}
@@ -3373,6 +3375,90 @@ class VJingLayer(BaseVisualLayer):
     # =========================================================================
     # Grid effect - Dynamic 2D grid deformed by sine waves triggered by kicks
     # =========================================================================
+
+    # =========================================================================
+    # Glitch effect - Digital corruption triggered by transients
+    # =========================================================================
+
+    @vj_effect("Glitch", "Post-process", "post_processing")
+    def _render_glitch(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
+        """Render digital glitch: block displacement, RGB shift, and scanline tearing.
+
+        Operates as post-processing on the existing image. Stronger on beats
+        and high energy; produces random block shifts, color channel offsets,
+        and horizontal tear lines.
+        """
+        bass = ctx["bass"]
+        energy = ctx["energy"]
+        is_beat = ctx["is_beat"]
+        treble = ctx["treble"]
+        intensity = self._current_intensity
+        w, h = self.width, self.height
+        s = min(w, h) / 512
+
+        # Glitch probability: always some micro-glitches, heavy on beats
+        glitch_strength = energy * 0.3 + bass * 0.3
+        if is_beat:
+            glitch_strength += 0.4
+        glitch_strength *= intensity
+        if glitch_strength < 0.05:
+            return
+
+        data = np.array(img)
+
+        # --- 1. Block displacement: shift random horizontal slices ---
+        n_blocks = self._rng.randint(2, max(3, int(6 + glitch_strength * 10)))
+        for _ in range(n_blocks):
+            if self._rng.random() > glitch_strength:
+                continue
+            bh = self._rng.randint(max(1, int(2 * s)), max(3, int(20 * s + bass * 30 * s)))
+            by = self._rng.randint(0, h - bh)
+            shift = self._rng.randint(-int(40 * s * glitch_strength), int(40 * s * glitch_strength))
+            if shift == 0:
+                continue
+            block = data[by : by + bh].copy()
+            data[by : by + bh] = np.roll(block, shift, axis=1)
+
+        # --- 2. RGB channel offset: shift R and B horizontally ---
+        if self._rng.random() < glitch_strength * 0.8:
+            shift_r = self._rng.randint(
+                -max(1, int(8 * s * glitch_strength)), max(1, int(8 * s * glitch_strength))
+            )
+            shift_b = self._rng.randint(
+                -max(1, int(8 * s * glitch_strength)), max(1, int(8 * s * glitch_strength))
+            )
+            data[:, :, 0] = np.roll(data[:, :, 0], shift_r, axis=1)
+            data[:, :, 2] = np.roll(data[:, :, 2], shift_b, axis=1)
+
+        # --- 3. Scanline tears: bright or dark horizontal lines ---
+        n_tears = self._rng.randint(0, max(1, int(4 * glitch_strength)))
+        colors = self.color_palette
+        for _ in range(n_tears):
+            ty = self._rng.randint(0, h - 1)
+            tear_h = self._rng.randint(1, max(2, int(3 * s)))
+            te = min(h, ty + tear_h)
+            if self._rng.random() < 0.5:
+                # Bright colored tear
+                c = colors[self._rng.randint(0, len(colors) - 1)]
+                alpha = int(180 * intensity * treble + 40)
+                data[ty:te, :, 0] = c[0]
+                data[ty:te, :, 1] = c[1]
+                data[ty:te, :, 2] = c[2]
+                data[ty:te, :, 3] = min(255, alpha)
+            else:
+                # Dark tear (blackout)
+                data[ty:te, :, :3] = 0
+
+        # --- 4. Invert random block on strong beats ---
+        if is_beat and bass > 0.6 and self._rng.random() < 0.5:
+            bh = self._rng.randint(int(20 * s), int(80 * s))
+            bw = self._rng.randint(int(40 * s), int(w * 0.6))
+            by = self._rng.randint(0, max(1, h - bh))
+            bx = self._rng.randint(0, max(1, w - bw))
+            data[by : by + bh, bx : bx + bw, :3] = 255 - data[by : by + bh, bx : bx + bw, :3]
+
+        result = Image.fromarray(data, "RGBA")
+        img.paste(result, (0, 0))
 
     # =========================================================================
     # Moiré effect - Interference patterns from overlapping rotating grids
