@@ -3693,6 +3693,84 @@ class VJingLayer(BaseVisualLayer):
         img.paste(out, (0, 0))
 
     # =========================================================================
+    # Halftone effect - Pop art dot screen with audio-reactive dot sizes
+    # =========================================================================
+
+    @vj_effect("Halftone", "Post-process", "post_processing")
+    def _render_halftone(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render halftone dot screen effect.
+
+        Converts the image into a grid of circles whose size encodes
+        local brightness. Dot grid size pulses with bass, palette
+        colors tint the dots.
+        """
+        bass = ctx["bass"]
+        energy = ctx["energy"]
+        intensity = self._current_intensity
+        w, h = self.width, self.height
+        s = min(w, h) / 512
+
+        data = np.array(img)
+
+        # Compute luminance from RGB
+        lum = (
+            data[:, :, 0].astype(np.float32) * 0.299 + data[:, :, 1] * 0.587 + data[:, :, 2] * 0.114
+        ) / 255.0
+
+        # Cell size: larger cells = coarser dots, bass makes them bigger
+        cell = max(4, int((8 + bass * 4) * s))
+
+        # Output: start with black RGBA
+        out = np.zeros_like(data)
+        out[:, :, 3] = data[:, :, 3]  # Preserve original alpha
+
+        colors = self.color_palette
+        n_colors = len(colors)
+        # Slow color rotation
+        color_shift = int(time_pos * 0.4)
+
+        # Draw dots grid
+        out_img = Image.fromarray(out, "RGBA")
+        draw = ImageDraw.Draw(out_img)
+
+        rows = range(cell // 2, h, cell)
+        cols = range(cell // 2, w, cell)
+
+        for yi, cy in enumerate(rows):
+            for xi, cx in enumerate(cols):
+                # Average luminance in this cell
+                y0 = max(0, cy - cell // 2)
+                y1 = min(h, cy + cell // 2)
+                x0 = max(0, cx - cell // 2)
+                x1 = min(w, cx + cell // 2)
+                cell_lum = float(np.mean(lum[y0:y1, x0:x1]))
+
+                # Dot radius proportional to brightness
+                max_r = cell * 0.48
+                r = int(cell_lum * max_r * (1.0 + energy * 0.3))
+                if r < 1:
+                    continue
+
+                # Pick color from palette based on grid position
+                color = colors[(xi + yi + color_shift) % n_colors]
+
+                # Blend dot color with original luminance
+                bright = 0.4 + cell_lum * 0.6
+                cr = min(255, int(color[0] * bright))
+                cg = min(255, int(color[1] * bright))
+                cb = min(255, int(color[2] * bright))
+                alpha = int(200 * intensity)
+
+                draw.ellipse(
+                    [cx - r, cy - r, cx + r, cy + r],
+                    fill=(cr, cg, cb, alpha),
+                )
+
+        img.paste(Image.alpha_composite(img, out_img), (0, 0))
+
+    # =========================================================================
     # Moiré effect - Interference patterns from overlapping rotating grids
     # =========================================================================
 

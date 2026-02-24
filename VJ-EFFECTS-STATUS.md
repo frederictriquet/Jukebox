@@ -25,7 +25,6 @@
 | `pendulum` | Pendules harmoniques à phases décalées créant des motifs de vague |
 | `spectrogram` | Waterfall spectrogramme défilant, coloré par la palette |
 | `eq_terrain` | Barres d'égaliseur en perspective 3D isométrique avec profondeur temporelle |
-| `halftone` | Tramage demi-teinte (points de taille variable), style pop art |
 | `mirror` | Symétrie kaléidoscopique configurable (2/4 axes), bords qui bougent au rythme |
 | `vignette` | Assombrissement des bords pulsant avec les basses, spotlight central |
 | `nebula` | Nuage cosmique multicouche avec Perlin noise, couleurs dérivantes |
