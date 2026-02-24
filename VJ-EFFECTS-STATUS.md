@@ -17,3 +17,16 @@
 | `terrain` | Survol de terrain 3D wireframe généré par le spectre FFT |
 | `dna` | Double hélice 3D en rotation, pulsation sur les beats |
 | `prism` | Dispersion de lumière arc-en-ciel à travers un prisme rotatif |
+| `fireflies` | Lucioles flottantes avec clignotements asynchrones, synchronisation sur les beats |
+| `rain` | Pluie diagonale avec éclaboussures au sol, densité modulée par l'énergie |
+| `swarm` | Essaim boids (cohésion/séparation/alignement), contraction sur les kicks |
+| `hexgrid` | Grille hexagonale, cellules illuminées selon les bins FFT |
+| `mandala` | Motif symétrique radial (6-8 axes) qui se construit progressivement, reset sur les drops |
+| `pendulum` | Pendules harmoniques à phases décalées créant des motifs de vague |
+| `spectrogram` | Waterfall spectrogramme défilant, coloré par la palette |
+| `eq_terrain` | Barres d'égaliseur en perspective 3D isométrique avec profondeur temporelle |
+| `halftone` | Tramage demi-teinte (points de taille variable), style pop art |
+| `mirror` | Symétrie kaléidoscopique configurable (2/4 axes), bords qui bougent au rythme |
+| `vignette` | Assombrissement des bords pulsant avec les basses, spotlight central |
+| `nebula` | Nuage cosmique multicouche avec Perlin noise, couleurs dérivantes |
+| `crystals` | Cristaux géométriques qui poussent/cassent sur les transients |
