@@ -15,7 +15,6 @@
 | `matrix` | Pluie de caractères style Matrix, vitesse modulée par l'énergie |
 | `oscilloscope` | Forme d'onde audio en temps réel, style oscilloscope XY |
 | `terrain` | Survol de terrain 3D wireframe généré par le spectre FFT |
-| `bokeh` | Cercles lumineux flottants hors-focus, taille modulée par les basses |
 | `dna` | Double hélice 3D en rotation, pulsation sur les beats |
 | `circuit` | Traces de circuit imprimé animées, signaux lumineux parcourant les pistes |
 | `scanlines` | Lignes de balayage CRT + distorsion VHS, intensité sur les drops |

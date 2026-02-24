@@ -880,6 +880,8 @@ class VJingLayer(BaseVisualLayer):
             self._init_timestretch()
         if "grid" in self.active_effects:
             self._init_grid()
+        if "bokeh" in self.active_effects:
+            self._init_bokeh()
 
         # Initialize GPU renderer if enabled
         if self._pending_gpu_init:
@@ -3523,6 +3525,124 @@ class VJingLayer(BaseVisualLayer):
         result = np.stack([r, g, b, alpha], axis=2)
         overlay = Image.fromarray(result, "RGBA")
         img.paste(Image.alpha_composite(img, overlay), (0, 0))
+
+    # =========================================================================
+    # Bokeh effect - Luminous out-of-focus circles modulated by bass
+    # =========================================================================
+
+    def _init_bokeh(self) -> None:
+        """Initialize bokeh particle system."""
+        s = min(self.width, self.height) / 512
+        self.bokeh_orbs: list[dict[str, Any]] = []
+        self.max_bokeh_orbs = 40
+
+        for _ in range(self.max_bokeh_orbs):
+            self._spawn_bokeh_orb(s)
+
+    def _spawn_bokeh_orb(self, s: float) -> None:
+        """Spawn a single bokeh orb with random properties."""
+        self.bokeh_orbs.append(
+            {
+                "x": self._rng.random() * self.width,
+                "y": self._rng.random() * self.height,
+                "vx": (self._rng.random() - 0.5) * 0.6 * s,
+                "vy": (self._rng.random() - 0.5) * 0.4 * s - 0.3 * s,
+                "base_radius": (self._rng.random() * 25 + 15) * s,
+                "color_idx": self._rng.randint(0, 99),
+                "phase": self._rng.random() * math.pi * 2,
+                "depth": self._rng.random(),
+            }
+        )
+
+    @vj_effect("Bokeh", "Particules")
+    def _render_bokeh(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
+        """Render luminous out-of-focus bokeh circles.
+
+        Floating translucent discs with bright edges and soft interiors,
+        size pulsing with bass, gentle drifting motion.
+        """
+        draw = ImageDraw.Draw(img)
+        bass = ctx["bass"]
+        energy = ctx["energy"]
+        is_beat = ctx["is_beat"]
+        s = min(self.width, self.height) / 512
+        intensity = self._current_intensity
+
+        # Spawn extra orb on strong beats
+        if is_beat and energy > 0.5 and len(self.bokeh_orbs) < self.max_bokeh_orbs + 10:
+            self._spawn_bokeh_orb(s)
+
+        new_orbs = []
+        for orb in self.bokeh_orbs:
+            # Gentle floating drift
+            drift_x = math.sin(time_pos * 0.3 + orb["phase"]) * 0.4 * s
+            drift_y = math.cos(time_pos * 0.2 + orb["phase"] * 1.3) * 0.3 * s
+            orb["x"] += orb["vx"] + drift_x
+            orb["y"] += orb["vy"] + drift_y
+
+            # Wrap around with margin
+            margin = orb["base_radius"] * 2
+            if orb["x"] < -margin:
+                orb["x"] = self.width + margin * 0.5
+            elif orb["x"] > self.width + margin:
+                orb["x"] = -margin * 0.5
+            if orb["y"] < -margin:
+                orb["y"] = self.height + margin * 0.5
+            elif orb["y"] > self.height + margin:
+                orb["y"] = -margin * 0.5
+
+            # Bass modulates radius — deep orbs swell more
+            depth_factor = 0.5 + orb["depth"] * 0.5
+            bass_swell = 1.0 + bass * 1.2 * depth_factor
+            breath = 1.0 + math.sin(time_pos * 0.8 + orb["phase"]) * 0.15
+            radius = orb["base_radius"] * bass_swell * breath
+            radius = max(4 * s, radius)
+            ri = int(radius)
+
+            # Depth-based alpha (farther = more transparent, dreamier)
+            base_alpha = 0.15 + (1.0 - orb["depth"]) * 0.25
+            alpha = int(base_alpha * 255 * intensity)
+
+            r, g, b = self._get_palette_color(orb["color_idx"])
+            x, y = int(orb["x"]), int(orb["y"])
+
+            # Draw concentric rings: bright edge, soft fill (bokeh look)
+            # Outer ring (bright edge highlight)
+            edge_alpha = min(255, int(alpha * 1.8))
+            draw.ellipse(
+                [x - ri, y - ri, x + ri, y + ri],
+                outline=(r, g, b, edge_alpha),
+                width=max(1, int(2.5 * s)),
+            )
+
+            # Inner glow fill (soft, translucent)
+            inner_ri = max(1, int(ri * 0.85))
+            fill_alpha = int(alpha * 0.4)
+            draw.ellipse(
+                [x - inner_ri, y - inner_ri, x + inner_ri, y + inner_ri],
+                fill=(r, g, b, fill_alpha),
+            )
+
+            # Hot center spot
+            center_ri = max(1, int(ri * 0.25))
+            center_alpha = min(255, int(alpha * 1.5))
+            draw.ellipse(
+                [x - center_ri, y - center_ri, x + center_ri, y + center_ri],
+                fill=(
+                    min(255, r + 80),
+                    min(255, g + 80),
+                    min(255, b + 80),
+                    center_alpha,
+                ),
+            )
+
+            new_orbs.append(orb)
+
+        self.bokeh_orbs = new_orbs
+
+        # Remove excess orbs gradually
+        while len(self.bokeh_orbs) > self.max_bokeh_orbs:
+            self.bokeh_orbs.pop(0)
 
     # =========================================================================
     # Grid effect - 2D grid deformed by beat-triggered sine waves
