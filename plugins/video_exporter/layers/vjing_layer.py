@@ -884,6 +884,8 @@ class VJingLayer(BaseVisualLayer):
             self._init_bokeh()
         if "circuit" in self.active_effects:
             self._init_circuit()
+        if "constellation" in self.active_effects:
+            self._init_constellation()
 
         # Initialize GPU renderer if enabled
         if self._pending_gpu_init:
@@ -3818,6 +3820,137 @@ class VJingLayer(BaseVisualLayer):
             new_signals.append(sig)
 
         self.circuit_signals = new_signals
+
+    # =========================================================================
+    # Constellation effect - Stars connected by lines, reconfiguring on beats
+    # =========================================================================
+
+    def _init_constellation(self) -> None:
+        """Initialize constellation star field."""
+        s = min(self.width, self.height) / 512
+        self.constellation_stars: list[dict[str, Any]] = []
+        self.constellation_num = 50
+        self.constellation_link_dist = 120 * s
+        # Target positions for reconfiguration
+        self.constellation_targets: list[tuple[float, float]] | None = None
+        self.constellation_lerp = 1.0  # 1.0 = at target, <1.0 = transitioning
+
+        for i in range(self.constellation_num):
+            self.constellation_stars.append(
+                {
+                    "x": self._rng.random() * self.width,
+                    "y": self._rng.random() * self.height,
+                    "tx": 0.0,
+                    "ty": 0.0,
+                    "brightness": self._rng.uniform(0.4, 1.0),
+                    "phase": self._rng.random() * math.pi * 2,
+                    "color_idx": i,
+                    "size": self._rng.uniform(1.5, 4.0) * s,
+                }
+            )
+
+    @vj_effect("Constellation", "Particules")
+    def _render_constellation(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render connected star constellation that reconfigures on beats.
+
+        Stars drift slowly and twinkle. On beats, new target positions
+        are set and stars smoothly migrate, rewiring connections.
+        Lines connect nearby stars with distance-based alpha fade.
+        """
+        draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        mid = ctx["mid"]
+        is_beat = ctx["is_beat"]
+        s = min(self.width, self.height) / 512
+        intensity = self._current_intensity
+        w, h = self.width, self.height
+
+        # --- Reconfigure on strong beats ---
+        if is_beat and energy > 0.4 and self.constellation_lerp >= 0.95:
+            self.constellation_lerp = 0.0
+            for star in self.constellation_stars:
+                star["tx"] = self._rng.random() * w
+                star["ty"] = self._rng.random() * h
+
+        # --- Advance lerp ---
+        if self.constellation_lerp < 1.0:
+            self.constellation_lerp = min(1.0, self.constellation_lerp + 0.02 + energy * 0.03)
+            t = self.constellation_lerp
+            # Ease-out cubic
+            t_ease = 1.0 - (1.0 - t) ** 3
+            for star in self.constellation_stars:
+                star["x"] += (star["tx"] - star["x"]) * t_ease * 0.08
+                star["y"] += (star["ty"] - star["y"]) * t_ease * 0.08
+
+        # --- Gentle drift ---
+        for star in self.constellation_stars:
+            drift_x = math.sin(time_pos * 0.15 + star["phase"]) * 0.3 * s
+            drift_y = math.cos(time_pos * 0.12 + star["phase"] * 1.7) * 0.2 * s
+            star["x"] = (star["x"] + drift_x) % w
+            star["y"] = (star["y"] + drift_y) % h
+
+        # --- Draw connection lines between nearby stars ---
+        link_dist = self.constellation_link_dist * (1.0 + mid * 0.3)
+        link_dist_sq = link_dist * link_dist
+        n = len(self.constellation_stars)
+        line_w = max(1, int(1.2 * s))
+
+        for i in range(n):
+            si = self.constellation_stars[i]
+            xi, yi = si["x"], si["y"]
+            for j in range(i + 1, n):
+                sj = self.constellation_stars[j]
+                dx = xi - sj["x"]
+                dy = yi - sj["y"]
+                dist_sq = dx * dx + dy * dy
+                if dist_sq < link_dist_sq and dist_sq > 0:
+                    dist = math.sqrt(dist_sq)
+                    fade = 1.0 - dist / link_dist
+                    line_alpha = int(fade * 100 * intensity)
+                    if line_alpha < 5:
+                        continue
+                    color = self._get_palette_color(si["color_idx"])
+                    draw.line(
+                        [(int(xi), int(yi)), (int(sj["x"]), int(sj["y"]))],
+                        fill=(*color, line_alpha),
+                        width=line_w,
+                    )
+
+        # --- Draw stars ---
+        for star in self.constellation_stars:
+            # Twinkle: sinusoidal brightness modulation
+            twinkle = 0.6 + 0.4 * math.sin(time_pos * 2.5 + star["phase"])
+            bright = star["brightness"] * twinkle
+            if is_beat:
+                bright = min(1.0, bright + 0.3)
+
+            color = self._get_palette_color(star["color_idx"])
+            alpha = int(bright * 220 * intensity)
+            r_star = max(1, int(star["size"] * (1.0 + bass * 0.5)))
+
+            x, y = int(star["x"]), int(star["y"])
+
+            # Glow halo
+            halo_r = int(r_star * 2.5)
+            halo_alpha = int(alpha * 0.2)
+            if halo_alpha > 3:
+                draw.ellipse(
+                    [x - halo_r, y - halo_r, x + halo_r, y + halo_r],
+                    fill=(*color, halo_alpha),
+                )
+
+            # Star core (brighter, toward white)
+            wb = bright * 0.4
+            cr = min(255, int(color[0] * (1 - wb) + 255 * wb))
+            cg = min(255, int(color[1] * (1 - wb) + 255 * wb))
+            cb = min(255, int(color[2] * (1 - wb) + 255 * wb))
+            draw.ellipse(
+                [x - r_star, y - r_star, x + r_star, y + r_star],
+                fill=(cr, cg, cb, alpha),
+            )
 
     # =========================================================================
     # Bokeh effect - Luminous out-of-focus circles modulated by bass
