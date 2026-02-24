@@ -3374,6 +3374,74 @@ class VJingLayer(BaseVisualLayer):
     # Grid effect - Dynamic 2D grid deformed by sine waves triggered by kicks
     # =========================================================================
 
+    # =========================================================================
+    # Moiré effect - Interference patterns from overlapping rotating grids
+    # =========================================================================
+
+    @vj_effect("Moiré", "Géométriques")
+    def _render_moire(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
+        """Render moiré interference from concentric circles with offset centers.
+
+        Two sets of concentric rings emanate from slightly offset origins;
+        their overlap produces dramatic sweeping interference fringes.
+        """
+        w, h = self.width, self.height
+        s = min(w, h) / 512
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        mid = ctx["mid"]
+        intensity = self._current_intensity
+
+        # Ring spacing: controls fringe density
+        spacing = (22 + self.lfo_slow.value(time_pos) * 4 - bass * 3) * s
+
+        # Two ring centers, offset from image center and orbiting slowly
+        orbit_r = (60 + energy * 40) * s
+        cx1 = w / 2 + orbit_r * math.cos(time_pos * 0.4)
+        cy1 = h / 2 + orbit_r * math.sin(time_pos * 0.4)
+        cx2 = w / 2 + orbit_r * math.cos(time_pos * 0.4 + math.pi)
+        cy2 = h / 2 + orbit_r * math.sin(time_pos * 0.4 + math.pi)
+
+        # Precompute distance fields
+        ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+        d1 = np.sqrt((xs - cx1) ** 2 + (ys - cy1) ** 2)
+        d2 = np.sqrt((xs - cx2) ** 2 + (ys - cy2) ** 2)
+
+        # Concentric rings as cosine waves
+        freq = 2 * math.pi / max(4.0, spacing)
+        rings1 = np.cos(d1 * freq) * 0.5 + 0.5
+        rings2 = np.cos(d2 * freq) * 0.5 + 0.5
+
+        # Interference = product; fringes appear where rings align/misalign
+        moire = rings1 * rings2
+
+        # Strong contrast boost for dramatic fringes
+        moire = np.clip((moire - 0.25) * (2.0 + energy * 2.5), 0.0, 1.0)
+
+        # Two-tone coloring from palette
+        colors = self.color_palette
+        t_color = self.lfo_triangle.value_normalized(time_pos)
+        idx1 = int(time_pos * 0.3) % len(colors)
+        idx2 = (idx1 + 2) % len(colors)
+        c1 = np.array(colors[idx1], dtype=np.float32)
+        c2 = np.array(colors[idx2], dtype=np.float32)
+        # Bright areas get color1, dark fringes get color2
+        r = (moire * c1[0] + (1 - moire) * c2[0] * 0.3 * t_color).astype(np.uint8)
+        g = (moire * c1[1] + (1 - moire) * c2[1] * 0.3 * t_color).astype(np.uint8)
+        b = (moire * c1[2] + (1 - moire) * c2[2] * 0.3 * t_color).astype(np.uint8)
+
+        alpha = (np.maximum(moire * 0.9, (1 - moire) * 0.15 * mid) * 255 * intensity).astype(
+            np.uint8
+        )
+
+        result = np.stack([r, g, b, alpha], axis=2)
+        overlay = Image.fromarray(result, "RGBA")
+        img.paste(Image.alpha_composite(img, overlay), (0, 0))
+
+    # =========================================================================
+    # Grid effect - 2D grid deformed by beat-triggered sine waves
+    # =========================================================================
+
     def _init_grid(self) -> None:
         """Initialize grid effect state."""
         # Active wave ripples triggered by beats: (start_time, cx, cy)
