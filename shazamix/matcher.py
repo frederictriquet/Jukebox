@@ -571,6 +571,9 @@ class Matcher:
         preloaded_audio: np.ndarray | None = None,
         top_n: int = 200,
         cancelled: Callable[[], bool] | None = None,
+        drift_min: float = 0.92,
+        drift_max: float = 1.08,
+        drift_step: float = 0.02,
     ) -> Match | None:
         """Identify a track by audio feature similarity (two-stage).
 
@@ -590,6 +593,10 @@ class Matcher:
         eliminates false positives that score well in only one metric
         (e.g. similar timbre but wrong harmony, or vice versa).
 
+        Query features are pre-computed for several time-stretch ratios
+        (controlled by *drift_min*, *drift_max*, *drift_step*) so that
+        Stage 2b can compensate for DJ tempo adjustments.
+
         Requires that ``precompute_audio_features()`` has been run beforehand.
 
         Args:
@@ -601,6 +608,9 @@ class Matcher:
                 ``self.fingerprinter.sample_rate``). Avoids double loading.
             top_n: Number of candidates from compact screening (default 200)
             cancelled: Optional callable returning True to abort early
+            drift_min: Minimum time-stretch ratio for drift compensation
+            drift_max: Maximum time-stretch ratio for drift compensation
+            drift_step: Step between consecutive drift ratios
 
         Returns:
             Best Match found, or None
@@ -619,7 +629,7 @@ class Matcher:
         chroma_summaries = self.db.get_all_audio_features("chroma_summary")
         both_ids = set(mfcc_summaries.keys()) & set(chroma_summaries.keys())
         if not both_ids:
-            log("No audio feature summaries in database. " "Run feature pre-computation first.")
+            log("No audio feature summaries in database. Run feature pre-computation first.")
             return None
 
         log(f"Loaded features for {len(both_ids)} tracks")
@@ -684,23 +694,31 @@ class Matcher:
         min_overlap = 30
 
         # ------------------------------------------------------------------
-        # Stage 2b: Dual-feature sustained re-ranking
+        # Stage 2b: Dual-feature sustained re-ranking with drift compensation
         # ------------------------------------------------------------------
-        # For each candidate, load audio once and compute BOTH:
-        #   combined chroma+MFCC (threshold 0.80) → timbral match
-        #   chroma-only          (threshold 0.92) → harmonic match
-        # Score = min(combined_run, chroma_run) — eliminates false
-        # positives that score well in only one metric.
+        # Pre-compute query features for multiple time-stretch ratios so
+        # that DJ tempo adjustments (+/- a few %) don't break alignment.
         # ------------------------------------------------------------------
-        log(f"Stage 2b: Sustained chroma+MFCC re-ranking " f"({len(candidates)} tracks)…")
+        drift_ratios = np.arange(drift_min, drift_max + drift_step / 2, drift_step)
+        query_variants: list[tuple[float, np.ndarray, np.ndarray]] = []
 
-        query_combined = self._compute_combined_frame_features(y, sr, hop)
-        query_chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=hop)
-        qn = np.linalg.norm(query_chroma, axis=0, keepdims=True)
-        qn[qn == 0] = 1.0
-        query_chroma_normed = query_chroma / qn
+        for ratio in drift_ratios:
+            y_q = y if abs(ratio - 1.0) < 0.005 else librosa.effects.time_stretch(y, rate=ratio)
 
-        results: list[tuple[int, int, float]] = []
+            q_comb = self._compute_combined_frame_features(y_q, sr, hop)
+            q_chro = librosa.feature.chroma_cqt(y=y_q, sr=sr, hop_length=hop)
+            qn = np.linalg.norm(q_chro, axis=0, keepdims=True)
+            qn[qn == 0] = 1.0
+            q_chro_normed = q_chro / qn
+            query_variants.append((float(round(ratio, 4)), q_comb, q_chro_normed))
+
+        log(
+            f"Stage 2b: Sustained chroma+MFCC re-ranking "
+            f"({len(candidates)} tracks, {len(query_variants)} drift ratios)…"
+        )
+
+        results: list[tuple[int, int, float, float]] = []
+        #   (track_id, score, avg_sim, best_ratio)
 
         for idx, (track_id, _compact_score) in enumerate(candidates):
             if cancelled and cancelled():
@@ -737,26 +755,38 @@ class Matcher:
                 if ref_combined.shape[1] < min_overlap:
                     continue
 
-                comb_run, comb_sim = self._best_sustained_run(
-                    query_combined,
-                    ref_combined,
-                    slide_step,
-                    min_overlap,
-                    0.80,
-                )
-                chro_run, chro_sim = self._best_sustained_run(
-                    query_chroma_normed,
-                    ref_chroma_normed,
-                    slide_step,
-                    min_overlap,
-                    0.92,
-                )
+                best_score_this = 0
+                best_sim_this = 0.0
+                best_ratio_this = 1.0
 
-                score = min(comb_run, chro_run)
-                avg_sim = min(comb_sim, chro_sim) if score > 0 else 0.0
+                for ratio, q_comb, q_chro in query_variants:
+                    comb_run, comb_sim = self._best_sustained_run(
+                        q_comb,
+                        ref_combined,
+                        slide_step,
+                        min_overlap,
+                        0.80,
+                    )
+                    chro_run, chro_sim = self._best_sustained_run(
+                        q_chro,
+                        ref_chroma_normed,
+                        slide_step,
+                        min_overlap,
+                        0.92,
+                    )
 
-                if score > 0:
-                    results.append((track_id, score, avg_sim))
+                    score = min(comb_run, chro_run)
+                    avg_sim = min(comb_sim, chro_sim) if score > 0 else 0.0
+
+                    if score > best_score_this or (
+                        score == best_score_this and avg_sim > best_sim_this
+                    ):
+                        best_score_this = score
+                        best_sim_this = avg_sim
+                        best_ratio_this = ratio
+
+                if best_score_this > 0:
+                    results.append((track_id, best_score_this, best_sim_this, best_ratio_this))
 
             except Exception:
                 logger.debug(
@@ -777,6 +807,7 @@ class Matcher:
             return None
 
         best = results[0]
+        best_ratio = best[3]
         track_info = self.db.get_track_info(best[0])
         if not track_info:
             return None
@@ -786,7 +817,7 @@ class Matcher:
             f"Match: {track_info.get('artist', '?')} – "
             f"{track_info.get('title', '?')} "
             f"(run={best[1]} frames/{run_seconds:.0f}s, "
-            f"avg_sim={best[2]:.3f})"
+            f"avg_sim={best[2]:.3f}, drift={best_ratio:.4f})"
         )
 
         return Match(
@@ -800,7 +831,7 @@ class Matcher:
             track_start_ms=0,
             duration_ms=end_ms - start_ms,
             match_count=0,
-            time_stretch_ratio=1.0,
+            time_stretch_ratio=best_ratio,
         )
 
     def precompute_audio_features(
@@ -964,7 +995,7 @@ class Matcher:
         sr = target_sr
         duration_sec = len(y) / sr
 
-        log(f"Mix duration: {duration_sec/60:.1f} minutes")
+        log(f"Mix duration: {duration_sec / 60:.1f} minutes")
 
         if is_cancelled():
             return [], []
