@@ -888,6 +888,8 @@ class VJingLayer(BaseVisualLayer):
             self._init_constellation()
         if "shockwave" in self.active_effects:
             self._init_shockwave()
+        if "swarm" in self.active_effects:
+            self._init_swarm()
 
         # Initialize GPU renderer if enabled
         if self._pending_gpu_init:
@@ -3508,6 +3510,7 @@ class VJingLayer(BaseVisualLayer):
         according to that bin's energy. Bass pulses the grid outline.
         """
         draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
         bass = ctx["bass"]
         is_beat = ctx["is_beat"]
         fft = ctx["fft"]
@@ -3523,11 +3526,17 @@ class VJingLayer(BaseVisualLayer):
         hex_w = hex_r * 2
         hex_h = math.sqrt(3) * hex_r
 
+        # Accumulate scroll offset driven by energy
+        if not hasattr(self, "_hexgrid_scroll"):
+            self._hexgrid_scroll = 0.0
+        self._hexgrid_scroll += (0.5 + energy * 3.0) * s
+        scroll_y = self._hexgrid_scroll % (hex_h * 2)
+
         # Grid outline alpha pulses with bass
         outline_alpha = int((30 + bass * 60) * intensity)
         outline_color = colors[int(time_pos * 0.3) % n_colors]
 
-        # Build hex centers
+        # Build hex centers with scroll offset
         col = 0
         bin_idx = 0
         cx = hex_r
@@ -3535,10 +3544,11 @@ class VJingLayer(BaseVisualLayer):
             row = 0
             # Offset odd columns
             y_offset = hex_h / 2 if col % 2 else 0
-            cy = y_offset + hex_h / 2
+            cy = y_offset + hex_h / 2 - hex_h + (scroll_y % hex_h)
             while cy < h + hex_h:
-                # Map cell to FFT bin (wrap around)
-                fft_val = float(fft[bin_idx % n_bins])
+                # Map cell to FFT bin: offset by scroll so bins travel with cells
+                scroll_row_offset = int(self._hexgrid_scroll / hex_h)
+                fft_val = float(fft[(row + scroll_row_offset + col * 7) % n_bins])
                 bin_idx += 1
 
                 # Hex vertices
@@ -4337,6 +4347,139 @@ class VJingLayer(BaseVisualLayer):
             draw.ellipse(
                 [x - r_star, y - r_star, x + r_star, y + r_star],
                 fill=(cr, cg, cb, alpha),
+            )
+
+    # =========================================================================
+    # Swarm effect - Boids flocking with audio-reactive cohesion
+    # =========================================================================
+
+    def _init_swarm(self) -> None:
+        """Initialize boid swarm."""
+        s = min(self.width, self.height) / 512
+        self.swarm_boids: list[dict[str, float]] = []
+        self.swarm_count = 120
+
+        for i in range(self.swarm_count):
+            angle = self._rng.random() * math.pi * 2
+            speed = self._rng.uniform(1.0, 3.0) * s
+            self.swarm_boids.append(
+                {
+                    "x": self._rng.random() * self.width,
+                    "y": self._rng.random() * self.height,
+                    "vx": math.cos(angle) * speed,
+                    "vy": math.sin(angle) * speed,
+                    "color_idx": i,
+                }
+            )
+
+    @vj_effect("Swarm", "Particules")
+    def _render_swarm(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
+        """Render boid flocking swarm.
+
+        Agents follow cohesion/separation/alignment rules. The swarm
+        contracts toward center on kicks, spreads on low energy.
+        Trails connect nearby boids.
+        """
+        draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        is_beat = ctx["is_beat"]
+        intensity = self._current_intensity
+        w, h = self.width, self.height
+        s = min(w, h) / 512
+
+        # Boid parameters modulated by audio
+        cohesion_strength = 0.002 + energy * 0.004
+        separation_dist = (20 + bass * 15) * s
+        alignment_strength = 0.05
+        max_speed = (2.5 + energy * 3.0) * s
+
+        # Contract toward center on beats
+        center_pull = 0.0
+        if is_beat:
+            center_pull = 0.03 + bass * 0.04
+
+        cx, cy = w / 2.0, h / 2.0
+        n = len(self.swarm_boids)
+
+        # Compute average position and velocity for alignment/cohesion
+        avg_x = sum(b["x"] for b in self.swarm_boids) / n
+        avg_y = sum(b["y"] for b in self.swarm_boids) / n
+        avg_vx = sum(b["vx"] for b in self.swarm_boids) / n
+        avg_vy = sum(b["vy"] for b in self.swarm_boids) / n
+
+        for boid in self.swarm_boids:
+            bx, by = boid["x"], boid["y"]
+
+            # Cohesion: steer toward flock center
+            boid["vx"] += (avg_x - bx) * cohesion_strength
+            boid["vy"] += (avg_y - by) * cohesion_strength
+
+            # Alignment: match average velocity
+            boid["vx"] += (avg_vx - boid["vx"]) * alignment_strength
+            boid["vy"] += (avg_vy - boid["vy"]) * alignment_strength
+
+            # Separation: avoid nearby boids
+            sep_x, sep_y = 0.0, 0.0
+            for other in self.swarm_boids:
+                if other is boid:
+                    continue
+                dx = bx - other["x"]
+                dy = by - other["y"]
+                dist_sq = dx * dx + dy * dy
+                if 0 < dist_sq < separation_dist * separation_dist:
+                    dist = math.sqrt(dist_sq)
+                    sep_x += dx / dist
+                    sep_y += dy / dist
+            boid["vx"] += sep_x * 0.15
+            boid["vy"] += sep_y * 0.15
+
+            # Beat contraction toward center
+            if center_pull > 0:
+                boid["vx"] += (cx - bx) * center_pull
+                boid["vy"] += (cy - by) * center_pull
+
+            # Clamp speed
+            speed = math.sqrt(boid["vx"] ** 2 + boid["vy"] ** 2)
+            if speed > max_speed:
+                boid["vx"] = boid["vx"] / speed * max_speed
+                boid["vy"] = boid["vy"] / speed * max_speed
+
+            # Update position with wrap
+            boid["x"] = (boid["x"] + boid["vx"]) % w
+            boid["y"] = (boid["y"] + boid["vy"]) % h
+
+        # Draw connections between close boids
+        link_dist = (40 + energy * 20) * s
+        link_dist_sq = link_dist * link_dist
+        line_w = max(1, int(1.0 * s))
+        for i in range(n):
+            bi = self.swarm_boids[i]
+            for j in range(i + 1, n):
+                bj = self.swarm_boids[j]
+                dx = bi["x"] - bj["x"]
+                dy = bi["y"] - bj["y"]
+                dist_sq = dx * dx + dy * dy
+                if dist_sq < link_dist_sq and dist_sq > 0:
+                    fade = 1.0 - math.sqrt(dist_sq) / link_dist
+                    line_alpha = int(fade * 60 * intensity)
+                    if line_alpha > 3:
+                        color = self._get_palette_color(bi["color_idx"])
+                        draw.line(
+                            [(int(bi["x"]), int(bi["y"])), (int(bj["x"]), int(bj["y"]))],
+                            fill=(*color, line_alpha),
+                            width=line_w,
+                        )
+
+        # Draw boids
+        boid_r = max(1, int(2.5 * s))
+        for boid in self.swarm_boids:
+            color = self._get_palette_color(boid["color_idx"])
+            alpha = int(200 * intensity)
+            x, y = int(boid["x"]), int(boid["y"])
+            draw.ellipse(
+                [x - boid_r, y - boid_r, x + boid_r, y + boid_r],
+                fill=(*color, alpha),
             )
 
     # =========================================================================

@@ -24,7 +24,6 @@
 |-------|-------------|
 | `fireflies` | Lucioles flottantes avec clignotements asynchrones, synchronisation sur les beats |
 | `rain` | Pluie diagonale avec éclaboussures au sol, densité modulée par l'énergie |
-| `swarm` | Essaim boids (cohésion/séparation/alignement), contraction sur les kicks |
 | `mandala` | Motif symétrique radial (6-8 axes) qui se construit progressivement, reset sur les drops |
 | `pendulum` | Pendules harmoniques à phases décalées créant des motifs de vague |
 | `spectrogram` | Waterfall spectrogramme défilant, coloré par la palette |
