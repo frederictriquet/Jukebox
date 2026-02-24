@@ -1634,38 +1634,41 @@ class VJingLayer(BaseVisualLayer):
     ) -> None:
         """Render Lissajous curves."""
         draw = ImageDraw.Draw(img)
-        energy = ctx["energy"]
-        bass = ctx["bass"]
         center = (self.width // 2, self.height // 2)
         s = min(self.width, self.height) / 512  # scale factor
 
-        # Lissajous parameters (modulated by audio)
-        a = 3 + int(bass * 4)
-        b = 4 + int(energy * 3)
-        delta = time_pos
+        # Lissajous parameters (fixed ratios, slow phase rotation)
+        a = 3.0
+        b = 4.0
+        delta = time_pos * 0.5
 
-        # Draw multiple curves with different phases
-        n_curves = 3
-        for curve in range(n_curves):
-            points = []
-            phase_offset = curve * math.pi / n_curves
+        # Single curve with color gradient along the path
+        amplitude_x = (self.width * 0.35) * self.intensity
+        amplitude_y = (self.height * 0.35) * self.intensity
+        n_pts = max(30, int(150 * s))
+        line_w = max(1, int(2 * s))
+        colors = self.color_palette
+        n_colors = len(colors)
 
-            amplitude_x = (self.width * 0.35) * self.intensity
-            amplitude_y = (self.height * 0.35) * self.intensity
+        points = []
+        for t in np.linspace(0, 1.2 * math.pi, n_pts):
+            x = center[0] + amplitude_x * math.cos(a * t + delta)
+            y = center[1] + amplitude_y * math.sin(b * t + delta)
+            points.append((x, y))
 
-            n_pts = max(40, int(200 * s))
-            for t in np.linspace(0, 2 * math.pi, n_pts):
-                x = center[0] + amplitude_x * math.sin(a * t + delta + phase_offset)
-                y = center[1] + amplitude_y * math.sin(b * t)
-                points.append((x, y))
-
-            # Color per curve from palette
-            base_color = self._get_palette_color(curve)
-            color = (*base_color, 150)
-            line_w = max(1, int(2 * s))
-
-            if len(points) >= 2:
-                draw.line(points, fill=color, width=line_w)
+        # Draw segment by segment with interpolated color
+        for i in range(len(points) - 1):
+            frac = i / max(1, len(points) - 2)
+            # Blend between two palette colors
+            ci = (frac * (n_colors - 1)) + time_pos * 0.5
+            idx0 = int(ci) % n_colors
+            idx1 = (idx0 + 1) % n_colors
+            blend = ci % 1.0
+            c0, c1 = colors[idx0], colors[idx1]
+            r = int(c0[0] * (1 - blend) + c1[0] * blend)
+            g = int(c0[1] * (1 - blend) + c1[1] * blend)
+            b_ = int(c0[2] * (1 - blend) + c1[2] * blend)
+            draw.line([points[i], points[i + 1]], fill=(r, g, b_, 150), width=line_w)
 
     @vj_effect("Tunnel", "Géométriques")
     def _render_tunnel(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
