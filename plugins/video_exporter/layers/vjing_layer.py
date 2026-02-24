@@ -882,6 +882,8 @@ class VJingLayer(BaseVisualLayer):
             self._init_grid()
         if "bokeh" in self.active_effects:
             self._init_bokeh()
+        if "circuit" in self.active_effects:
+            self._init_circuit()
 
         # Initialize GPU renderer if enabled
         if self._pending_gpu_init:
@@ -1527,8 +1529,8 @@ class VJingLayer(BaseVisualLayer):
         center = (self.width // 2, self.height // 2)
         s = min(self.width, self.height) / 512  # scale factor
 
-        # Trigger explosion on strong beats
-        if is_beat and energy > 0.6 and not self.explosion_active:
+        # Trigger explosion on beats
+        if is_beat and energy > 0.35 and not self.explosion_active:
             self.explosion_active = True
             self.explosion_frame = frame_idx
             self.explosion_particles = []
@@ -1552,7 +1554,7 @@ class VJingLayer(BaseVisualLayer):
         # Update and draw explosion particles
         if self.explosion_active:
             frames_since = frame_idx - self.explosion_frame
-            if frames_since > 60:
+            if frames_since > 40:
                 self.explosion_active = False
                 return
 
@@ -3634,6 +3636,188 @@ class VJingLayer(BaseVisualLayer):
         result = np.stack([r, g, b, alpha], axis=2)
         overlay = Image.fromarray(result, "RGBA")
         img.paste(Image.alpha_composite(img, overlay), (0, 0))
+
+    # =========================================================================
+    # Circuit effect - Animated PCB traces with light signals traveling along
+    # =========================================================================
+
+    def _init_circuit(self) -> None:
+        """Initialize circuit board trace network.
+
+        Generates a grid of orthogonal traces with nodes at intersections.
+        """
+        s = min(self.width, self.height) / 512
+        w, h = self.width, self.height
+
+        # Grid of nodes
+        cols = self._rng.randint(5, 8)
+        rows = self._rng.randint(4, 7)
+        margin_x = int(w * 0.08)
+        margin_y = int(h * 0.08)
+        step_x = (w - 2 * margin_x) / max(1, cols - 1)
+        step_y = (h - 2 * margin_y) / max(1, rows - 1)
+
+        # Nodes: grid positions with slight random jitter
+        self.circuit_nodes: list[tuple[int, int]] = []
+        for r in range(rows):
+            for c in range(cols):
+                jx = int((self._rng.random() - 0.5) * step_x * 0.3)
+                jy = int((self._rng.random() - 0.5) * step_y * 0.3)
+                nx = int(margin_x + c * step_x + jx)
+                ny = int(margin_y + r * step_y + jy)
+                self.circuit_nodes.append((nx, ny))
+
+        # Traces: edges between nearby nodes (orthogonal segments)
+        # Each trace is a list of (x, y) waypoints forming an L-shaped path
+        self.circuit_traces: list[list[tuple[int, int]]] = []
+        node_count = len(self.circuit_nodes)
+        for i in range(node_count):
+            # Connect to 1-3 random other nodes
+            n_connections = self._rng.randint(1, 3)
+            candidates = list(range(node_count))
+            candidates.remove(i)
+            self._rng.shuffle(candidates)
+            for j in candidates[:n_connections]:
+                x1, y1 = self.circuit_nodes[i]
+                x2, y2 = self.circuit_nodes[j]
+                # L-shaped path: horizontal then vertical, or vice versa
+                if self._rng.random() < 0.5:
+                    waypoints = [(x1, y1), (x2, y1), (x2, y2)]
+                else:
+                    waypoints = [(x1, y1), (x1, y2), (x2, y2)]
+                self.circuit_traces.append(waypoints)
+
+        # Signals: light pulses traveling along traces
+        self.circuit_signals: list[dict[str, Any]] = []
+        self.circuit_max_signals = int(30 + 10 * s)
+        self.circuit_trace_width = max(1, int(1.5 * s))
+        self.circuit_node_radius = max(2, int(4 * s))
+
+    def _spawn_circuit_signal(self) -> None:
+        """Spawn a new light signal on a random trace."""
+        if not self.circuit_traces:
+            return
+        trace_idx = self._rng.randint(0, len(self.circuit_traces) - 1)
+        self.circuit_signals.append(
+            {
+                "trace_idx": trace_idx,
+                "progress": 0.0,
+                "speed": self._rng.uniform(0.01, 0.03),
+                "color_idx": self._rng.randint(0, 99),
+                "tail_length": self._rng.uniform(0.08, 0.2),
+            }
+        )
+
+    @vj_effect("Circuit", "Géométriques")
+    def _render_circuit(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
+        """Render animated circuit board with light signals traveling along traces.
+
+        Static PCB-like trace network with pulsing nodes and moving light
+        pulses that are spawned on beats and travel at energy-modulated speed.
+        """
+        draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        is_beat = ctx["is_beat"]
+        s = min(self.width, self.height) / 512
+        intensity = self._current_intensity
+        colors = self.color_palette
+
+        # Spawn signals on beats
+        if is_beat and len(self.circuit_signals) < self.circuit_max_signals:
+            n_spawn = self._rng.randint(2, 5)
+            for _ in range(n_spawn):
+                self._spawn_circuit_signal()
+
+        # Steady trickle of signals
+        if (
+            self._rng.random() < 0.15 + energy * 0.3
+            and len(self.circuit_signals) < self.circuit_max_signals
+        ):
+            self._spawn_circuit_signal()
+
+        # --- Draw static traces (dim) ---
+        trace_color_base = colors[int(time_pos * 0.2) % len(colors)]
+        dim_alpha = int(40 * intensity)
+        tw = self.circuit_trace_width
+
+        for trace in self.circuit_traces:
+            for k in range(len(trace) - 1):
+                draw.line(
+                    [trace[k], trace[k + 1]],
+                    fill=(*trace_color_base, dim_alpha),
+                    width=tw,
+                )
+
+        # --- Draw nodes (pads) ---
+        node_alpha = int((60 + bass * 80) * intensity)
+        nr = self.circuit_node_radius
+        for nx, ny in self.circuit_nodes:
+            draw.ellipse(
+                [nx - nr, ny - nr, nx + nr, ny + nr],
+                fill=(*trace_color_base, node_alpha),
+            )
+
+        # --- Update and draw signals ---
+        def _trace_point(trace: list[tuple[int, int]], progress: float) -> tuple[int, int]:
+            """Get (x, y) position along a trace at given progress [0..1]."""
+            # Compute total length
+            segments: list[float] = []
+            total = 0.0
+            for k in range(len(trace) - 1):
+                dx = trace[k + 1][0] - trace[k][0]
+                dy = trace[k + 1][1] - trace[k][1]
+                seg_len = math.sqrt(dx * dx + dy * dy)
+                segments.append(seg_len)
+                total += seg_len
+            if total == 0:
+                return trace[0]
+            target = progress * total
+            accumulated = 0.0
+            for k, seg_len in enumerate(segments):
+                if accumulated + seg_len >= target:
+                    t = (target - accumulated) / seg_len if seg_len > 0 else 0
+                    x = int(trace[k][0] + (trace[k + 1][0] - trace[k][0]) * t)
+                    y = int(trace[k][1] + (trace[k + 1][1] - trace[k][1]) * t)
+                    return (x, y)
+                accumulated += seg_len
+            return trace[-1]
+
+        speed_mult = 1.0 + energy * 3.0
+        new_signals = []
+        for sig in self.circuit_signals:
+            sig["progress"] += sig["speed"] * speed_mult
+
+            if sig["progress"] > 1.0 + sig["tail_length"]:
+                continue  # Signal finished
+
+            trace = self.circuit_traces[sig["trace_idx"]]
+            color = self._get_palette_color(sig["color_idx"])
+
+            # Draw signal tail
+            n_tail = max(3, int(8 * s))
+            for t in range(n_tail):
+                frac = t / n_tail
+                p = sig["progress"] - frac * sig["tail_length"]
+                if p < 0 or p > 1:
+                    continue
+                px, py = _trace_point(trace, p)
+                fade = (1.0 - frac) ** 2
+                a = int(220 * fade * intensity)
+                r = max(1, int((3 - frac * 2) * s))
+                # Brighten head toward white
+                white_blend = fade * 0.5
+                cr = min(255, int(color[0] * (1 - white_blend) + 255 * white_blend))
+                cg = min(255, int(color[1] * (1 - white_blend) + 255 * white_blend))
+                cb = min(255, int(color[2] * (1 - white_blend) + 255 * white_blend))
+                draw.ellipse(
+                    [px - r, py - r, px + r, py + r],
+                    fill=(cr, cg, cb, a),
+                )
+
+            new_signals.append(sig)
+
+        self.circuit_signals = new_signals
 
     # =========================================================================
     # Bokeh effect - Luminous out-of-focus circles modulated by bass
