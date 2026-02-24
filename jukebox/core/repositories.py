@@ -80,7 +80,7 @@ class TrackRepository(BaseRepository):
         self._commit()
         return int(cursor.lastrowid) if cursor.lastrowid is not None else 0
 
-    def search(self, query: str, limit: int = 100, mode: str | None = None) -> list[sqlite3.Row]:
+    def search(self, query: str, limit: int = 100, mode: str | None = None) -> list[dict[str, Any]]:
         """Search tracks using FTS5.
 
         Args:
@@ -121,7 +121,7 @@ class TrackRepository(BaseRepository):
             )
         return cursor.fetchall()
 
-    def get_all(self, limit: int | None = None, mode: str | None = None) -> list[sqlite3.Row]:
+    def get_all(self, limit: int | None = None, mode: str | None = None) -> list[dict[str, Any]]:
         """Get all tracks, optionally filtered by mode.
 
         Args:
@@ -143,7 +143,7 @@ class TrackRepository(BaseRepository):
                 query += f" LIMIT {limit}"
             return self._conn.execute(query).fetchall()
 
-    def get_by_id(self, track_id: int) -> sqlite3.Row | None:
+    def get_by_id(self, track_id: int) -> dict[str, Any] | None:
         """Get track by ID.
 
         Args:
@@ -156,7 +156,7 @@ class TrackRepository(BaseRepository):
         result = cursor.fetchone()
         return result if result is not None else None
 
-    def get_by_filepath(self, filepath: str | Path) -> sqlite3.Row | None:
+    def get_by_filepath(self, filepath: str | Path) -> dict[str, Any] | None:
         """Get track by filepath.
 
         Args:
@@ -351,7 +351,7 @@ class WaveformRepository(BaseRepository):
 
     def get_tracks_without_waveform(
         self, mode: str | None = None, limit: int | None = None
-    ) -> list[sqlite3.Row]:
+    ) -> list[dict[str, Any]]:
         """Get tracks that don't have cached waveform data.
 
         Args:
@@ -383,7 +383,7 @@ class WaveformRepository(BaseRepository):
 class AnalysisRepository(BaseRepository):
     """Repository for audio analysis operations."""
 
-    def get(self, track_id: int) -> sqlite3.Row | None:
+    def get(self, track_id: int) -> dict[str, Any] | None:
         """Get audio analysis for a track.
 
         Args:
@@ -455,7 +455,7 @@ class AnalysisRepository(BaseRepository):
 
     def get_tracks_without_analysis(
         self, mode: str | None = None, limit: int | None = None
-    ) -> list[sqlite3.Row]:
+    ) -> list[dict[str, Any]]:
         """Get tracks that don't have audio analysis.
 
         Args:

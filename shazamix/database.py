@@ -8,9 +8,14 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 from .fingerprint import Fingerprint
+
+
+def _dict_factory(cursor: sqlite3.Cursor, row: tuple) -> dict[str, Any]:
+    """Row factory that returns dicts instead of sqlite3.Row."""
+    return {col[0]: row[i] for i, col in enumerate(cursor.description)}
 
 
 # Default Jukebox database path
@@ -35,7 +40,7 @@ class FingerprintDB:
     def _get_connection(self) -> sqlite3.Connection:
         """Get a database connection."""
         conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
+        conn.row_factory = _dict_factory
         return conn
 
     def _ensure_tables(self) -> None:
@@ -383,4 +388,4 @@ class FingerprintDB:
             (feature_type,),
         ).fetchone()
         conn.close()
-        return row[0] if row else 0
+        return row["COUNT(*)"] if row else 0

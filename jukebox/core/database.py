@@ -17,6 +17,11 @@ if TYPE_CHECKING:
     )
 
 
+def _dict_factory(cursor: sqlite3.Cursor, row: tuple) -> dict[str, Any]:
+    """Row factory that returns dicts instead of sqlite3.Row."""
+    return {col[0]: row[i] for i, col in enumerate(cursor.description)}
+
+
 class Database:
     """SQLite database manager with FTS5 support.
 
@@ -49,7 +54,7 @@ class Database:
         """Connect to database and enable foreign keys."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(str(self.db_path))
-        self.conn.row_factory = sqlite3.Row
+        self.conn.row_factory = _dict_factory
         self.conn.execute("PRAGMA foreign_keys = ON")
 
     # ========== Repository Properties ==========
@@ -289,7 +294,7 @@ class Database:
 
         # Get existing columns
         cursor = self.conn.execute("PRAGMA table_info(audio_analysis)")
-        existing_columns = {row[1] for row in cursor.fetchall()}
+        existing_columns = {row["name"] for row in cursor.fetchall()}
 
         # Define all ML feature columns to add
         ml_columns = {
@@ -377,7 +382,7 @@ class Database:
 
         # Get existing columns
         cursor = self.conn.execute("PRAGMA table_info(tracks)")
-        existing_columns = {row[1] for row in cursor.fetchall()}
+        existing_columns = {row["name"] for row in cursor.fetchall()}
 
         if "mode" not in existing_columns:
             # Add mode column with default "curating" for existing tracks
@@ -405,7 +410,7 @@ class Database:
 
     def search_tracks(
         self, query: str, limit: int = 100, mode: str | None = None
-    ) -> list[sqlite3.Row]:
+    ) -> list[dict[str, Any]]:
         """Search tracks using FTS5.
 
         Note:
@@ -415,7 +420,7 @@ class Database:
 
     def get_all_tracks(
         self, limit: int | None = None, mode: str | None = None
-    ) -> list[sqlite3.Row]:
+    ) -> list[dict[str, Any]]:
         """Get all tracks, optionally filtered by mode.
 
         Note:
@@ -431,7 +436,7 @@ class Database:
         """
         return self.tracks.update_mode(track_id, mode)
 
-    def get_track_by_id(self, track_id: int) -> sqlite3.Row | None:
+    def get_track_by_id(self, track_id: int) -> dict[str, Any] | None:
         """Get track by ID.
 
         Note:
@@ -454,7 +459,7 @@ class Database:
 
     # ========== Legacy Track Methods ==========
 
-    def get_track_by_filepath(self, filepath: str | Path) -> sqlite3.Row | None:
+    def get_track_by_filepath(self, filepath: str | Path) -> dict[str, Any] | None:
         """Get track by filepath.
 
         Note:
@@ -508,7 +513,7 @@ class Database:
 
     def get_tracks_without_waveform(
         self, mode: str | None = None, limit: int | None = None
-    ) -> list[sqlite3.Row]:
+    ) -> list[dict[str, Any]]:
         """Get tracks that don't have cached waveform data.
 
         Note:
@@ -518,7 +523,7 @@ class Database:
 
     # ========== Legacy Analysis Methods ==========
 
-    def get_audio_analysis(self, track_id: int) -> sqlite3.Row | None:
+    def get_audio_analysis(self, track_id: int) -> dict[str, Any] | None:
         """Get audio analysis for a track.
 
         Note:
@@ -536,7 +541,7 @@ class Database:
 
     def get_tracks_without_analysis(
         self, mode: str | None = None, limit: int | None = None
-    ) -> list[sqlite3.Row]:
+    ) -> list[dict[str, Any]]:
         """Get tracks that don't have audio analysis.
 
         Note:

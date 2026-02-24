@@ -217,7 +217,7 @@ class FileManagerPlugin(ShortcutMixin):
 
             # Copy audio_analysis data to the new track if it exists
             if audio_analysis:
-                # Get all column names except track_id (use .keys() for sqlite3.Row)
+                # Get all column names except track_id
                 analysis_data = {
                     key: audio_analysis[key]
                     for key in audio_analysis.keys()

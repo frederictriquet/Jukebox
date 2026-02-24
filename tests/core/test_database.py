@@ -18,7 +18,7 @@ class TestDatabase:
 
         # Verify tables exist
         cursor = db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = [row[0] for row in cursor.fetchall()]
+        tables = [row["name"] for row in cursor.fetchall()]
 
         assert "tracks" in tables
         assert "tracks_fts" in tables
