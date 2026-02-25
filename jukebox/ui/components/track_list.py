@@ -9,6 +9,7 @@ from PySide6.QtCore import (
     QPersistentModelIndex,
     QSortFilterProxyModel,
     Qt,
+    QTimer,
     Signal,
 )
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
@@ -80,7 +81,9 @@ class TrackListModel(QAbstractTableModel):
 
         # Duplicate checker — active only in curating mode
         # Index is lazy (built on first check) and rebuilt on mode switch.
+        # Check runs deferred (after UI display) via _schedule_duplicate_check.
         self._duplicate_checker: DuplicateChecker | None = None
+        self._dup_check_pending = False
         if mode == AppMode.CURATING.value and database:
             self._duplicate_checker = DuplicateChecker(database)
 
@@ -358,21 +361,19 @@ class TrackListModel(QAbstractTableModel):
             "duration_seconds": duration_seconds,
             "waveform_data": waveform,
             "has_stats": has_stats,  # For StatsStyler
-            "duplicate_status": "green",  # Default; updated below if curating
+            "duplicate_status": "green",  # Updated asynchronously after UI display
             "duplicate_match": None,
         }
-
-        # Compute duplicate status in curating mode
-        if self._duplicate_checker and self._mode == AppMode.CURATING.value:
-            result = self._duplicate_checker.check(track_dict)
-            track_dict["duplicate_status"] = result.status.value
-            track_dict["duplicate_match"] = result.match_info
 
         row = len(self.tracks)
         self.beginInsertRows(QModelIndex(), row, row)
         self.tracks.append(track_dict)
         self.filepath_to_row[filepath] = row
         self.endInsertRows()
+
+        # Schedule deferred batch duplicate check (coalesced — runs once after all add_track calls)
+        if self._duplicate_checker and self._mode == AppMode.CURATING.value:
+            self._schedule_duplicate_check()
 
     def clear(self) -> None:
         """Clear all tracks."""
@@ -412,6 +413,37 @@ class TrackListModel(QAbstractTableModel):
                     self._duplicate_checker = DuplicateChecker(self.database)
                 else:
                     self._duplicate_checker.rebuild_index()
+
+    def _schedule_duplicate_check(self) -> None:
+        """Schedule a deferred batch duplicate check.
+
+        Uses QTimer.singleShot(0) so the check runs on the next event loop
+        iteration, AFTER all pending add_track() calls and UI rendering.
+        Multiple calls are coalesced — only one check runs.
+        """
+        if not self._dup_check_pending:
+            self._dup_check_pending = True
+            QTimer.singleShot(0, self._run_deferred_duplicate_check)
+
+    def _run_deferred_duplicate_check(self) -> None:
+        """Run batch duplicate check after the UI is displayed."""
+        import logging
+
+        self._dup_check_pending = False
+        if not self._duplicate_checker or not self.tracks:
+            return
+
+        if self._duplicate_checker.recheck_tracks(self.tracks):
+            try:
+                dup_col = self.cell_renderer.columns.index("duplicate")
+            except ValueError:
+                return
+            top_left = self.index(0, dup_col)
+            bottom_right = self.index(len(self.tracks) - 1, dup_col)
+            self.dataChanged.emit(top_left, bottom_right)
+            logging.debug(
+                f"[TrackListModel] Deferred duplicate check complete: {len(self.tracks)} tracks"
+            )
 
 
 class TrackList(QTableView):
