@@ -434,6 +434,9 @@ class RecommendationsPlugin:
 - [x] Détection par métadonnées (title+artist)
 - [x] UI dialog
 - [x] Menu Tools → Find Duplicates
+- [x] **AMÉLIORÉ**: Indicateurs inline (vert/orange/rouge) dans la track list
+- [x] **AMÉLIORÉ**: Stratégie trois-pass (exact/filename/fuzzy)
+- [x] **AMÉLIORÉ**: Vérification non-bloquante (BackgroundCheckWorker)
 
 ### File Curator (Jours 2-3)
 - [x] Plugin créé avec organize_file()

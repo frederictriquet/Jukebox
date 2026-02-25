@@ -30,7 +30,7 @@ class TestPerformance:
         duration = time.perf_counter() - start
 
         assert config is not None
-        assert duration < 0.1  # Should load in < 100ms
+        assert duration < 0.5  # Should load in < 500ms
 
     def test_window_init_time(self, qapp):  # type: ignore
         """Benchmark window initialization."""

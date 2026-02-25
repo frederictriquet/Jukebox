@@ -193,6 +193,12 @@ class WaveformVisualizerPlugin:
             logging.warning("[Waveform] Cannot regenerate: missing track_id or filepath")
             return
 
+        import os
+
+        if not os.path.isfile(filepath):
+            logging.warning(f"[Waveform] Cannot regenerate: file not found: {filepath}")
+            return
+
         logging.info(f"[Waveform] Regenerating waveform for track {track_id}")
 
         # Delete existing waveform from cache
@@ -222,6 +228,8 @@ class WaveformVisualizerPlugin:
 
     def _start_batch_waveform(self) -> None:
         """Start batch waveform generation for all tracks."""
+        import os
+
         from jukebox.utils.batch_helper import start_batch_processing
 
         # Get all tracks
@@ -235,7 +243,10 @@ class WaveformVisualizerPlugin:
         items = [(track["id"], track["filepath"]) for track in tracks]
 
         def needs_waveform(track_id: int, filepath: str) -> bool:
-            """Check if track needs waveform generation."""
+            """Check if track needs waveform generation (and file still exists)."""
+            if not os.path.isfile(filepath):
+                logging.warning(f"[Waveform] Skipping missing file: {filepath}")
+                return False
             return self.context.database.waveforms.get(track_id) is None
 
         def worker_factory(item: tuple[int, str]) -> QThread:
@@ -575,6 +586,15 @@ class CompleteWaveformWorker(QThread):
     def run(self) -> None:
         """Generate complete waveform."""
         try:
+            import os
+
+            # Check file exists before expensive librosa import/processing
+            if not os.path.isfile(self.filepath):
+                filename = os.path.basename(self.filepath)
+                logging.warning(f"[WaveformWorker] File not found, skipping: {self.filepath}")
+                self.error.emit(f"File not found: {filename}")
+                return
+
             import librosa
             from scipy import signal
 

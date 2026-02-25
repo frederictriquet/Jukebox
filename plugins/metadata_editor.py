@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtWidgets import QGridLayout, QLabel, QLineEdit, QWidget
+from PySide6.QtWidgets import (
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QWidget,
+)
 
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
@@ -132,6 +140,9 @@ class MetadataEditorPlugin:
         track = self.context.database.tracks.get_by_id(track_id)
 
         if track:
+            # Pass filepath for filename splitting
+            self.editor_widget.set_current_filepath(track["filepath"])
+
             # Extract values and map back to tag names
             values = {}
             for idx, config in enumerate(field_configs):
@@ -239,6 +250,7 @@ class MetadataEditorWidget(QWidget):
         self.field_configs = field_configs
         self.field_widgets: list[QLineEdit] = []
         self.field_map: dict[str, QLineEdit] = {}  # tag name -> widget
+        self._current_filepath: Path | None = None
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -261,6 +273,20 @@ class MetadataEditorWidget(QWidget):
             line_edit = QLineEdit()
             if config.width:
                 line_edit.setMaximumWidth(config.width)
+
+            # For the "date" (Year) field: group with split-filename button
+            if config.tag == "date":
+                year_row = QHBoxLayout()
+                year_row.setSpacing(5)
+                year_row.setContentsMargins(0, 0, 0, 0)
+                year_row.addWidget(line_edit)
+                self._split_btn = QPushButton("Name → Artist / Title")
+                self._split_btn.setToolTip("Extract Artist and Title from filename")
+                self._split_btn.clicked.connect(self._on_split_filename)
+                year_row.addWidget(self._split_btn)
+                year_row.addStretch()
+                layout.addLayout(year_row, row, col_pair + 1)
+            elif config.width:
                 layout.addWidget(line_edit, row, col_pair + 1, alignment=Qt.AlignmentFlag.AlignLeft)
             else:
                 layout.addWidget(line_edit, row, col_pair + 1)
@@ -298,6 +324,38 @@ class MetadataEditorWidget(QWidget):
         for tag, value in values.items():
             if tag in self.field_map:
                 self.field_map[tag].setText(value)
+
+    def set_current_filepath(self, filepath: str | Path) -> None:
+        """Store the current track's filepath for filename splitting.
+
+        Args:
+            filepath: Path to the current audio file.
+        """
+        self._current_filepath = Path(filepath)
+
+    def _on_split_filename(self) -> None:
+        """Split filename 'Artist - Title.ext' into Artist and Title fields."""
+        if not self._current_filepath:
+            return
+
+        stem = Path(self._current_filepath).stem
+        if " - " not in stem:
+            return
+
+        artist, title = stem.split(" - ", 1)
+        artist = artist.strip()
+        title = title.strip()
+
+        artist_widget = self.field_map.get("artist")
+        title_widget = self.field_map.get("title")
+
+        if artist_widget and artist:
+            artist_widget.setText(artist)
+        if title_widget and title:
+            title_widget.setText(title)
+
+        # Trigger auto-save
+        self._on_field_changed()
 
     def _on_field_changed(self) -> None:
         """Handle field editing finished - auto-save."""
