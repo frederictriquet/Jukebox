@@ -55,6 +55,8 @@ class DuplicateChecker:
         self._database = database
         # (artist_norm, title_norm) -> display string "Artist - Title"
         self._exact_index: dict[tuple[str, str], str] = {}
+        # title_norm -> display string (for title-only matching, O(1) lookup)
+        self._title_index: dict[str, str] = {}
         # list of (filename_norm, display_string) for fuzzy matching
         self._filenames: list[tuple[str, str]] = []
         # inverted index: token -> list of indices in self._filenames
@@ -141,6 +143,7 @@ class DuplicateChecker:
     def _build_index(self) -> None:
         """Load all jukebox tracks into the in-memory index."""
         self._exact_index.clear()
+        self._title_index.clear()
         self._filenames.clear()
         self._token_index.clear()
 
@@ -162,6 +165,9 @@ class DuplicateChecker:
             title_norm = self._normalize(title)
             if artist_norm and title_norm:
                 self._exact_index[(artist_norm, title_norm)] = display
+                # Title-only index (first match wins; used for partial matching)
+                if title_norm not in self._title_index:
+                    self._title_index[title_norm] = display
 
             # Filename index for fuzzy matching
             filename_norm = self._normalize_filename(filename)
@@ -176,7 +182,7 @@ class DuplicateChecker:
 
         logging.debug(
             f"[DuplicateChecker] Index built: {len(self._exact_index)} exact, "
-            f"{len(self._filenames)} filenames"
+            f"{len(self._title_index)} titles, {len(self._filenames)} filenames"
         )
 
     # ------------------------------------------------------------------
@@ -196,10 +202,10 @@ class DuplicateChecker:
                 return DuplicateResult(DuplicateStatus.RED, match)
 
         if parsed_title_norm and not parsed_artist_norm:
-            # Only title extracted → look for title-only partial match
-            for (_, idx_title), display in self._exact_index.items():
-                if idx_title == parsed_title_norm:
-                    return DuplicateResult(DuplicateStatus.ORANGE, display)
+            # Only title extracted → O(1) title-only lookup
+            match = self._title_index.get(parsed_title_norm)
+            if match:
+                return DuplicateResult(DuplicateStatus.ORANGE, match)
 
         return None
 
@@ -213,14 +219,22 @@ class DuplicateChecker:
         if not tokens:
             return None
 
-        # Collect candidate indices sharing at least one token
-        candidate_indices: set[int] = set()
+        # Count how many tokens each candidate shares with the query
+        candidate_hits: dict[int, int] = {}
         for token in tokens:
-            candidate_indices.update(self._token_index.get(token, []))
+            for idx in self._token_index.get(token, []):
+                candidate_hits[idx] = candidate_hits.get(idx, 0) + 1
+
+        # Require at least 2 shared tokens (avoids noisy single-token matches)
+        candidates = [idx for idx, hits in candidate_hits.items() if hits >= 2]
+
+        # If too few multi-token candidates, fall back to single-token but cap at 50
+        if not candidates:
+            candidates = list(candidate_hits.keys())[:50]
 
         best_ratio = 0.0
         best_display: str | None = None
-        for idx in candidate_indices:
+        for idx in candidates:
             jb_filename_norm, jb_display = self._filenames[idx]
             ratio = SequenceMatcher(None, filename_norm, jb_filename_norm).ratio()
             if ratio > best_ratio:
