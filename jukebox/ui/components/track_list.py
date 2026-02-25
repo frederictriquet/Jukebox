@@ -79,6 +79,7 @@ class TrackListModel(QAbstractTableModel):
         self.event_bus = event_bus
 
         # Duplicate checker — active only in curating mode
+        # Index is lazy (built on first check) and rebuilt on mode switch.
         self._duplicate_checker: DuplicateChecker | None = None
         if mode == AppMode.CURATING.value and database:
             self._duplicate_checker = DuplicateChecker(database)
@@ -93,9 +94,6 @@ class TrackListModel(QAbstractTableModel):
             event_bus.subscribe(Events.AUDIO_ANALYSIS_COMPLETE, self._on_stats_complete)
             # Listen for track deletion (emitted by file_manager)
             event_bus.subscribe(Events.TRACK_DELETED, self._on_track_deleted)
-            # Listen for library changes to rebuild duplicate index
-            event_bus.subscribe(Events.TRACKS_ADDED, self._on_library_changed)
-            event_bus.subscribe(Events.TRACK_METADATA_UPDATED, self._on_library_changed)
 
     def _on_track_metadata_updated(self, filepath: Path) -> None:
         """Handle track metadata update event.
@@ -262,24 +260,7 @@ class TrackListModel(QAbstractTableModel):
         # Emit signal so MainWindow can safely query the updated model
         self.row_deleted.emit(deleted_row_index)
 
-    def _on_library_changed(self, **kwargs: Any) -> None:
-        """Rebuild duplicate index and recheck all curating tracks when library changes."""
-        import logging
 
-        if not self._duplicate_checker:
-            return
-
-        self._duplicate_checker.rebuild_index()
-        if self._duplicate_checker.recheck_tracks(self.tracks):
-            # Emit dataChanged for the duplicate column only
-            try:
-                dup_col = self.cell_renderer.columns.index("duplicate")
-            except ValueError:
-                return
-            top_left = self.index(0, dup_col)
-            bottom_right = self.index(len(self.tracks) - 1, dup_col)
-            self.dataChanged.emit(top_left, bottom_right)
-            logging.debug("[TrackListModel] Duplicate statuses refreshed")
 
     def rowCount(self, parent: QModelIndex | QPersistentModelIndex | None = None) -> int:
         """Get number of rows."""
