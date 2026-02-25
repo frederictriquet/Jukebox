@@ -14,13 +14,14 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import QMenu, QTableView
 
+from jukebox.core.duplicate_checker import DuplicateChecker
 from jukebox.core.event_bus import Events
 from jukebox.core.mode_manager import AppMode
 from jukebox.ui.components.track_cell_renderer import CellRenderer
 
 # Column configuration per mode
 COLUMNS_JUKEBOX = ["waveform", "artist", "title", "genre", "rating", "duration", "stats"]
-COLUMNS_CURATING = ["waveform", "filename", "genre", "rating", "duration", "stats"]
+COLUMNS_CURATING = ["waveform", "filename", "genre", "rating", "duration", "stats", "duplicate"]
 COLUMNS = COLUMNS_CURATING  # default (overridden by mode)
 
 # Column widths (in pixels)
@@ -32,7 +33,8 @@ COLUMN_WIDTHS = {
     "genre": 80,
     "rating": 80,
     "duration": 80,
-    "stats": 30,  # Small icon column
+    "stats": 30,     # Small icon column
+    "duplicate": 30,  # Duplicate status indicator (curating only)
 }
 
 # Row height
@@ -76,6 +78,11 @@ class TrackListModel(QAbstractTableModel):
         self.database = database
         self.event_bus = event_bus
 
+        # Duplicate checker — active only in curating mode
+        self._duplicate_checker: DuplicateChecker | None = None
+        if mode == AppMode.CURATING.value and database:
+            self._duplicate_checker = DuplicateChecker(database)
+
         # Subscribe to metadata updates (when genre/rating changes)
         if event_bus:
             # Listen for track metadata changes (emitted by genre_editor, metadata_editor)
@@ -86,6 +93,9 @@ class TrackListModel(QAbstractTableModel):
             event_bus.subscribe(Events.AUDIO_ANALYSIS_COMPLETE, self._on_stats_complete)
             # Listen for track deletion (emitted by file_manager)
             event_bus.subscribe(Events.TRACK_DELETED, self._on_track_deleted)
+            # Listen for library changes to rebuild duplicate index
+            event_bus.subscribe(Events.TRACKS_ADDED, self._on_library_changed)
+            event_bus.subscribe(Events.TRACK_METADATA_UPDATED, self._on_library_changed)
 
     def _on_track_metadata_updated(self, filepath: Path) -> None:
         """Handle track metadata update event.
@@ -252,6 +262,25 @@ class TrackListModel(QAbstractTableModel):
         # Emit signal so MainWindow can safely query the updated model
         self.row_deleted.emit(deleted_row_index)
 
+    def _on_library_changed(self, **kwargs: Any) -> None:
+        """Rebuild duplicate index and recheck all curating tracks when library changes."""
+        import logging
+
+        if not self._duplicate_checker:
+            return
+
+        self._duplicate_checker.rebuild_index()
+        if self._duplicate_checker.recheck_tracks(self.tracks):
+            # Emit dataChanged for the duplicate column only
+            try:
+                dup_col = self.cell_renderer.columns.index("duplicate")
+            except ValueError:
+                return
+            top_left = self.index(0, dup_col)
+            bottom_right = self.index(len(self.tracks) - 1, dup_col)
+            self.dataChanged.emit(top_left, bottom_right)
+            logging.debug("[TrackListModel] Duplicate statuses refreshed")
+
     def rowCount(self, parent: QModelIndex | QPersistentModelIndex | None = None) -> int:
         """Get number of rows."""
         return len(self.tracks)
@@ -338,21 +367,29 @@ class TrackListModel(QAbstractTableModel):
                 ).fetchone()
                 has_stats = analysis is not None
 
+        track_dict: dict[str, Any] = {
+            "filepath": filepath,
+            "filename": filepath.name,  # For FilenameStyler
+            "title": title,
+            "artist": artist,
+            "genre": genre or "",
+            "rating": genre or "",  # RatingStyler extracts from genre
+            "duration_seconds": duration_seconds,
+            "waveform_data": waveform,
+            "has_stats": has_stats,  # For StatsStyler
+            "duplicate_status": "green",  # Default; updated below if curating
+            "duplicate_match": None,
+        }
+
+        # Compute duplicate status in curating mode
+        if self._duplicate_checker and self._mode == AppMode.CURATING.value:
+            result = self._duplicate_checker.check(track_dict)
+            track_dict["duplicate_status"] = result.status.value
+            track_dict["duplicate_match"] = result.match_info
+
         row = len(self.tracks)
         self.beginInsertRows(QModelIndex(), row, row)
-        self.tracks.append(
-            {
-                "filepath": filepath,
-                "filename": filepath.name,  # For FilenameStyler
-                "title": title,
-                "artist": artist,
-                "genre": genre or "",
-                "rating": genre or "",  # RatingStyler extracts from genre
-                "duration_seconds": duration_seconds,
-                "waveform_data": waveform,
-                "has_stats": has_stats,  # For StatsStyler
-            }
-        )
+        self.tracks.append(track_dict)
         self.filepath_to_row[filepath] = row
         self.endInsertRows()
 
@@ -387,6 +424,13 @@ class TrackListModel(QAbstractTableModel):
             self.cell_renderer.columns = new_columns
             self.cell_renderer.set_mode(mode)
             self.endResetModel()
+
+            # Activate or rebuild duplicate checker when switching to curating
+            if mode == AppMode.CURATING.value and self.database:
+                if self._duplicate_checker is None:
+                    self._duplicate_checker = DuplicateChecker(self.database)
+                else:
+                    self._duplicate_checker.rebuild_index()
 
 
 class TrackList(QTableView):

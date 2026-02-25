@@ -60,6 +60,7 @@ class CellRenderer:
         self.stylers = {
             "waveform": WaveformStyler(),
             "stats": StatsStyler(),
+            "duplicate": DuplicateStatusStyler(),
             "filename": FilenameStyler(mode),
             "artist": ArtistStyler(),
             "title": TitleStyler(),
@@ -451,4 +452,41 @@ class StatsStyler(Styler):
 
     def alignment(self, data: Any, track: dict[str, Any]) -> Qt.AlignmentFlag:
         """Center-align the icon."""
+        return Qt.AlignmentFlag.AlignCenter
+
+
+class DuplicateStatusStyler(Styler):
+    """Styler for duplicate column (shows curating track's duplicate status)."""
+
+    _COLORS = {
+        "red": QColor("#FF4444"),
+        "orange": QColor("#FFA500"),
+        "green": QColor("#44CC44"),
+    }
+
+    def display(self, data: Any, track: dict[str, Any]) -> str:
+        """Display a colored dot indicator."""
+        return "●"
+
+    def tooltip(self, data: Any, track: dict[str, Any]) -> str | None:
+        """Explain the duplicate status with matched track info if available."""
+        status = track.get("duplicate_status", "green")
+        match_info = track.get("duplicate_match")
+        if status == "red":
+            if match_info:
+                return f"Doublon certain : {match_info}"
+            return "Doublon certain dans la bibliothèque"
+        if status == "orange":
+            if match_info:
+                return f"Doublon possible : {match_info}"
+            return "Doublon possible dans la bibliothèque"
+        return "Pas de doublon détecté"
+
+    def foreground(self, data: Any, track: dict[str, Any]) -> QColor:
+        """Color based on duplicate status."""
+        status = track.get("duplicate_status", "green")
+        return self._COLORS.get(status, self._COLORS["green"])
+
+    def alignment(self, data: Any, track: dict[str, Any]) -> Qt.AlignmentFlag:
+        """Center-align the dot."""
         return Qt.AlignmentFlag.AlignCenter
