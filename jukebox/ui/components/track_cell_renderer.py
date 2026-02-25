@@ -193,12 +193,20 @@ class FilenameStyler(Styler):
 
     def tooltip(self, data: Any, track: dict[str, Any]) -> str:
         """Show tooltip based on mode."""
+        if track.get("file_missing"):
+            return f"File missing: {track['filepath']}"
         if self.mode == AppMode.JUKEBOX.value:
             # Jukebox mode: show filename in tooltip
             return str(track["filepath"].name)
         else:
             # Curating mode: show full path in tooltip
             return str(track["filepath"])
+
+    def foreground(self, data: Any, track: dict[str, Any]) -> QColor | None:
+        """Red text if file is missing from disk."""
+        if track.get("file_missing"):
+            return QColor(Qt.GlobalColor.red)
+        return None
 
 
 class GenreStyler(Styler):
@@ -304,6 +312,12 @@ class ArtistStyler(Styler):
         """Show filename in tooltip."""
         return str(track["filepath"].name)
 
+    def foreground(self, data: Any, track: dict[str, Any]) -> QColor | None:
+        """Red text if file is missing from disk."""
+        if track.get("file_missing"):
+            return QColor(Qt.GlobalColor.red)
+        return None
+
 
 class TitleStyler(Styler):
     """Styler for title column."""
@@ -315,6 +329,12 @@ class TitleStyler(Styler):
     def tooltip(self, data: Any, track: dict[str, Any]) -> str:
         """Show filename in tooltip."""
         return str(track["filepath"].name)
+
+    def foreground(self, data: Any, track: dict[str, Any]) -> QColor | None:
+        """Red text if file is missing from disk."""
+        if track.get("file_missing"):
+            return QColor(Qt.GlobalColor.red)
+        return None
 
 
 class DurationStyler(Styler):
@@ -462,6 +482,7 @@ class DuplicateStatusStyler(Styler):
         "red": QColor("#FF4444"),
         "orange": QColor("#FFA500"),
         "green": QColor("#44CC44"),
+        "pending": QColor("#666666"),
     }
 
     def display(self, data: Any, track: dict[str, Any]) -> str:
@@ -480,6 +501,8 @@ class DuplicateStatusStyler(Styler):
             if match_info:
                 return f"Possible duplicate: {match_info}"
             return "Possible duplicate in library"
+        if status == "pending":
+            return "Checking for duplicates..."
         return "No duplicate detected"
 
     def foreground(self, data: Any, track: dict[str, Any]) -> QColor:

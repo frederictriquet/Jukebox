@@ -69,6 +69,8 @@ make ci
 
 **Configuration**: YAML-based configuration with Pydantic validation. Located at `config/config.yaml`.
 
+**Duplicate Detection** (curating mode only): `DuplicateChecker` scans curating tracks against the jukebox library using a three-pass strategy: (1) exact artist+title match → RED, (2) filename-parsed artist/title match → RED or ORANGE, (3) fuzzy filename match via token-accelerated SequenceMatcher ≥ 0.8 → ORANGE. Results appear as a colored dot column (`●`) at the far right of the track list. The check runs in a `BackgroundCheckWorker` (QThread) so the UI stays responsive; results are keyed by filepath to survive concurrent list modifications.
+
 ### Application Flow
 
 1. **Startup** (`jukebox/main.py`):
@@ -152,7 +154,10 @@ class MyPlugin:
 - `jukebox/core/database.py` - SQLite database with FTS5 search
 - `jukebox/core/event_bus.py` - Event pub/sub system
 - `jukebox/core/plugin_manager.py` - Plugin lifecycle management
+- `jukebox/core/duplicate_checker.py` - Three-pass duplicate detection engine (curating mode)
 - `jukebox/ui/ui_builder.py` - Plugin UI injection API
+- `jukebox/ui/components/track_list.py` - Track table model + BackgroundCheckWorker
+- `jukebox/ui/components/track_cell_renderer.py` - Per-column cell stylers (incl. DuplicateStatusStyler)
 - `jukebox/utils/metadata.py` - Audio file metadata extraction (mutagen)
 - `jukebox/utils/scanner.py` - Filesystem scanning for audio files
 
