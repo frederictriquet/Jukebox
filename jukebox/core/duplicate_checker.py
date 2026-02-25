@@ -47,7 +47,7 @@ class DuplicateChecker:
     MIN_TOKEN_LENGTH = 3  # Ignore short words in fuzzy matching
 
     def __init__(self, database: Database) -> None:
-        """Initialize and build the jukebox index.
+        """Initialize the checker (index is built lazily on first check).
 
         Args:
             database: Database instance (for loading jukebox tracks).
@@ -59,7 +59,7 @@ class DuplicateChecker:
         self._filenames: list[tuple[str, str]] = []
         # inverted index: token -> list of indices in self._filenames
         self._token_index: dict[str, list[int]] = {}
-        self._build_index()
+        self._index_built = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -74,6 +74,8 @@ class DuplicateChecker:
         Returns:
             DuplicateResult with status and optional match description.
         """
+        self._ensure_index()
+
         artist = track.get("artist") or ""
         title = track.get("title") or ""
         filename = track.get("filename") or ""
@@ -103,7 +105,14 @@ class DuplicateChecker:
     def rebuild_index(self) -> None:
         """Rebuild the jukebox index from the database."""
         self._build_index()
+        self._index_built = True
         logging.debug("[DuplicateChecker] Index rebuilt")
+
+    def _ensure_index(self) -> None:
+        """Build the index on first use (lazy initialization)."""
+        if not self._index_built:
+            self._build_index()
+            self._index_built = True
 
     def recheck_tracks(self, tracks: list[dict[str, Any]]) -> bool:
         """Recheck all tracks in-place and update their duplicate fields.
@@ -234,9 +243,10 @@ class DuplicateChecker:
 
     @staticmethod
     def _normalize_filename(filename: str) -> str:
-        """Remove extension, replace separators with spaces, lowercase."""
+        """Remove extension, replace separators (including underscore) with spaces, lowercase."""
         stem = Path(filename).stem
-        return re.sub(r"[^\w]", " ", stem.lower()).strip()
+        # Use [^a-z0-9] so underscores are treated as separators (not kept like \w does)
+        return re.sub(r"[^a-z0-9]", " ", stem.lower()).strip()
 
     @staticmethod
     def _parse_filename(filename: str) -> tuple[str, str]:
@@ -252,10 +262,13 @@ class DuplicateChecker:
         return ("", stem.strip())
 
     def _tokenize(self, text: str) -> set[str]:
-        """Split text into lowercase tokens, filtering short words."""
+        """Split normalized text into tokens, filtering short words.
+
+        Expects text already normalized (only [a-z0-9 ]).
+        """
         return {
             word
-            for word in re.split(r"\s+", text.lower())
+            for word in re.split(r"\s+", text)
             if len(word) >= self.MIN_TOKEN_LENGTH
         }
 
