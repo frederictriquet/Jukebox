@@ -474,13 +474,13 @@ class DuplicateStatusStyler(Styler):
         match_info = track.get("duplicate_match")
         if status == "red":
             if match_info:
-                return f"Doublon certain : {match_info}"
-            return "Doublon certain dans la bibliothèque"
+                return f"Certain duplicate: {match_info}"
+            return "Certain duplicate in library"
         if status == "orange":
             if match_info:
-                return f"Doublon possible : {match_info}"
-            return "Doublon possible dans la bibliothèque"
-        return "Pas de doublon détecté"
+                return f"Possible duplicate: {match_info}"
+            return "Possible duplicate in library"
+        return "No duplicate detected"
 
     def foreground(self, data: Any, track: dict[str, Any]) -> QColor:
         """Color based on duplicate status."""

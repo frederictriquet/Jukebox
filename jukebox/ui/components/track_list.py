@@ -13,7 +13,7 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
-from PySide6.QtWidgets import QMenu, QTableView
+from PySide6.QtWidgets import QMenu, QStyledItemDelegate, QStyleOptionViewItem, QTableView
 
 from jukebox.core.duplicate_checker import DuplicateChecker
 from jukebox.core.event_bus import Events
@@ -446,6 +446,16 @@ class TrackListModel(QAbstractTableModel):
             )
 
 
+class ColorPreservingDelegate(QStyledItemDelegate):
+    """Delegate that preserves ForegroundRole color even when the row is selected."""
+
+    def initStyleOption(self, option: QStyleOptionViewItem, index: QModelIndex) -> None:  # noqa: N802
+        super().initStyleOption(option, index)
+        color = index.data(Qt.ItemDataRole.ForegroundRole)
+        if color:
+            option.palette.setColor(option.palette.ColorRole.HighlightedText, color)
+
+
 class TrackList(QTableView):
     """Widget for displaying audio tracks as a table."""
 
@@ -493,6 +503,8 @@ class TrackList(QTableView):
         columns = COLUMNS_JUKEBOX if mode == AppMode.JUKEBOX.value else COLUMNS_CURATING
         for col_idx, col_name in enumerate(columns):
             self.setColumnWidth(col_idx, COLUMN_WIDTHS[col_name])
+            if col_name == "duplicate":
+                self.setItemDelegateForColumn(col_idx, ColorPreservingDelegate(self))
 
         # Never take keyboard focus - global shortcuts always active
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -649,10 +661,12 @@ class TrackList(QTableView):
             mode: Application mode ("jukebox" or "curating")
         """
         self._track_model.set_mode(mode)
-        # Reconfigure column widths for the new mode
+        # Reconfigure column widths and delegates for the new mode
         columns = self._track_model.cell_renderer.columns
         for col_idx, col_name in enumerate(columns):
             self.setColumnWidth(col_idx, COLUMN_WIDTHS[col_name])
+            if col_name == "duplicate":
+                self.setItemDelegateForColumn(col_idx, ColorPreservingDelegate(self))
 
     def _on_row_clicked(self, index: QModelIndex) -> None:
         """Handle row click."""
