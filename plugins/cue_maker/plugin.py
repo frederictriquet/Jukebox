@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from PySide6.QtCore import QSortFilterProxyModel, Qt
 from PySide6.QtWidgets import QSplitter, QVBoxLayout, QWidget
 
+from jukebox.core.constants import WORKER_WAIT_TIMEOUT_MS
 from plugins.cue_maker.widgets.bottom_drawer import BottomDrawer
 
 if TYPE_CHECKING:
@@ -287,7 +288,7 @@ class CueMakerPlugin:
         if self._targeted_worker is not None and self._targeted_worker.isRunning():
             self._targeted_worker.requestInterruption()
             self._targeted_worker.quit()
-            self._targeted_worker.wait(5000)
+            self._targeted_worker.wait(WORKER_WAIT_TIMEOUT_MS)
         self._targeted_worker = None
         self._targeted_row = -1
 
@@ -370,13 +371,13 @@ class CueMakerPlugin:
             if self._analyzer.isRunning():
                 self._analyzer.requestInterruption()
                 self._analyzer.quit()
-                self._analyzer.wait(5000)
+                self._analyzer.wait(WORKER_WAIT_TIMEOUT_MS)
             self._analyzer = None
         if self._targeted_worker is not None:
             if self._targeted_worker.isRunning():
                 self._targeted_worker.requestInterruption()
                 self._targeted_worker.quit()
-                self._targeted_worker.wait(5000)
+                self._targeted_worker.wait(WORKER_WAIT_TIMEOUT_MS)
             self._targeted_worker = None
         if self.main_widget:
             self.main_widget.cleanup_workers()

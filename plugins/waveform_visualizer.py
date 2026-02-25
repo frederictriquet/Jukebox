@@ -10,6 +10,14 @@ import pyqtgraph as pg
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
+from jukebox.core.constants import (
+    AUDIO_HOP_LENGTH,
+    AUDIO_SAMPLE_RATE_LOW,
+    FREQ_BASS_HIGH,
+    FREQ_MID_HIGH,
+    VLC_SEEK_DELAY_MS,
+    WORKER_WAIT_TIMEOUT_MS,
+)
 from jukebox.core.event_bus import Events
 
 if TYPE_CHECKING:
@@ -126,11 +134,11 @@ class WaveformVisualizerPlugin:
         if player.current_file is None or str(player.current_file) != self._current_track_filepath:
             playback.load_and_play(filepath)
             # Small delay to let VLC start, then seek
-            QTimer.singleShot(50, lambda: player.set_position(position))
+            QTimer.singleShot(VLC_SEEK_DELAY_MS, lambda: player.set_position(position))
         elif not player.is_playing():
             # Same file but stopped — resume and seek
             playback.play()
-            QTimer.singleShot(50, lambda: player.set_position(position))
+            QTimer.singleShot(VLC_SEEK_DELAY_MS, lambda: player.set_position(position))
         else:
             # Already playing this track — just seek
             player.set_position(position)
@@ -327,7 +335,7 @@ class WaveformVisualizerPlugin:
         if self._single_worker is not None and self._single_worker.isRunning():
             self._single_worker.requestInterruption()
             self._single_worker.quit()
-            self._single_worker.wait(5000)
+            self._single_worker.wait(WORKER_WAIT_TIMEOUT_MS)
             self._single_worker = None
 
         # Stop batch processor if running (but keep it alive in class variable)
@@ -578,13 +586,13 @@ class CompleteWaveformWorker(QThread):
                 return
 
             # Parameters
-            sr = 11025
-            hop = 2048
+            sr = AUDIO_SAMPLE_RATE_LOW
+            hop = AUDIO_HOP_LENGTH
 
             # Pre-calculate filter coefficients
-            sos_bass = signal.butter(4, 250, "lp", fs=sr, output="sos")
-            sos_mid = signal.butter(4, [250, 4000], "bandpass", fs=sr, output="sos")
-            sos_treble = signal.butter(4, 4000, "hp", fs=sr, output="sos")
+            sos_bass = signal.butter(4, FREQ_BASS_HIGH, "lp", fs=sr, output="sos")
+            sos_mid = signal.butter(4, [FREQ_BASS_HIGH, FREQ_MID_HIGH], "bandpass", fs=sr, output="sos")
+            sos_treble = signal.butter(4, FREQ_MID_HIGH, "hp", fs=sr, output="sos")
 
             # Pre-allocate arrays
             total_samples = int(duration * sr)

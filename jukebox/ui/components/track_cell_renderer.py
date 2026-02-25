@@ -6,6 +6,8 @@ from typing import Any, TypeVar
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPixmap
 
+from jukebox.core.mode_manager import AppMode
+
 K = TypeVar("K")
 V = TypeVar("V")
 
@@ -173,7 +175,7 @@ class FilenameStyler(Styler):
 
     def display(self, data: Any, track: dict[str, Any]) -> str:
         """Display based on mode."""
-        if self.mode == "jukebox":
+        if self.mode == AppMode.JUKEBOX.value:
             # Jukebox mode: show artist - title
             artist = track.get("artist", "")
             title = track.get("title", "")
@@ -190,7 +192,7 @@ class FilenameStyler(Styler):
 
     def tooltip(self, data: Any, track: dict[str, Any]) -> str:
         """Show tooltip based on mode."""
-        if self.mode == "jukebox":
+        if self.mode == AppMode.JUKEBOX.value:
             # Jukebox mode: show filename in tooltip
             return str(track["filepath"].name)
         else:
@@ -404,6 +406,7 @@ class WaveformStyler(Styler):
                 mid_h = int((bass_samples[i] + mid_samples[i]) * height)
                 treble_h = int((bass_samples[i] + mid_samples[i] + treble_samples[i]) * height)
 
+                # @hardcoded-ok: waveform preview colors match default config
                 # Draw treble (white) - full height
                 if treble_h > 0:
                     painter.fillRect(x, y_bottom - treble_h, 1, treble_h, QColor("#FFFFFF"))

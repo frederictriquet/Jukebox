@@ -7,6 +7,7 @@ class ThemeManager:
     """Manage application themes and styles."""
 
     THEMES = {
+        # @hardcoded-ok: theme colors defined inline in stylesheet
         "dark": """
             QMainWindow {
                 background-color: #1e1e1e;
@@ -91,6 +92,7 @@ class ThemeManager:
                 padding: 5px;
             }
         """,
+        # @hardcoded-ok: theme colors defined inline in stylesheet
         "light": """
             QMainWindow {
                 background-color: #ffffff;

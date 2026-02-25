@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from jukebox.core.audio_player import PlayerState
 from jukebox.core.event_bus import Events
 
 if TYPE_CHECKING:
@@ -126,11 +127,11 @@ class PlaybackController(QObject):
 
     def _on_state_changed(self, state: str) -> None:
         """Manage position timer based on player state."""
-        if state == "playing":
+        if state == PlayerState.PLAYING.value:
             self._position_timer.start()
-        elif state == "paused":
+        elif state == PlayerState.PAUSED.value:
             self._position_timer.stop()
-        elif state == "stopped":
+        elif state == PlayerState.STOPPED.value:
             self._position_timer.stop()
             self._event_bus.emit(Events.POSITION_UPDATE, position=0.0)
 

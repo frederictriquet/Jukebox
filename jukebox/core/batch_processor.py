@@ -7,6 +7,7 @@ from typing import Any
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
 
+from jukebox.core.constants import StatusColors
 from jukebox.core.event_bus import Events
 
 # Cleanup interval for orphan workers (in milliseconds)
@@ -138,7 +139,7 @@ class BatchProcessor(QObject):
         self.context.emit(
             Events.STATUS_MESSAGE,
             message=f"{self.name}: Starting ({self.total_items} items)",
-            color="#00FF00",
+            color=StatusColors.SUCCESS,
         )
 
         # Start processing first item
@@ -223,7 +224,7 @@ class BatchProcessor(QObject):
         self.context.emit(
             Events.STATUS_MESSAGE,
             message=f"{self.name}: {current}/{self.total_items}",
-            color="#00FF00",
+            color=StatusColors.SUCCESS,
         )
 
         # Create worker
@@ -395,7 +396,7 @@ class BatchProcessor(QObject):
         self.context.emit(
             Events.STATUS_MESSAGE,
             message=status_msg,
-            color="#00FF00" if failed_count == 0 else "#FFA500",
+            color=StatusColors.SUCCESS if failed_count == 0 else StatusColors.WARNING,
         )
 
         # Emit finished signal

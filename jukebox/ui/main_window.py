@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from jukebox.core.audio_player import AudioPlayer
+from jukebox.core.audio_player import AudioPlayer, PlayerState
 from jukebox.core.config import JukeboxConfig
 from jukebox.core.database import Database
 from jukebox.core.event_bus import EventBus, Events
@@ -93,7 +93,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
 
         # Search bar
-        self.search_bar = SearchBar()
+        self.search_bar = SearchBar(focus_shortcut=self.config.shortcuts.focus_search)
         self.search_bar.search_triggered.connect(self._perform_search)
         layout.addWidget(self.search_bar)
 
@@ -118,7 +118,10 @@ class MainWindow(QMainWindow):
         self.track_list.track_model.row_deleted.connect(self._on_row_deleted_complete)
 
         # Player controls (no stretch - fixed height)
-        self.controls = PlayerControls()
+        self.controls = PlayerControls(
+            play_pause_shortcut=self.config.shortcuts.play_pause,
+            stop_shortcut=self.config.shortcuts.stop,
+        )
         layout.addWidget(self.controls, stretch=0)
 
         # Set initial volume
@@ -187,17 +190,17 @@ class MainWindow(QMainWindow):
         Args:
             state: Player state ("playing", "paused", "stopped")
         """
-        self.controls.set_playing_state(state == "playing")
+        self.controls.set_playing_state(state == PlayerState.PLAYING.value)
 
     def _increase_volume(self) -> None:
         """Increase volume by 10."""
         current = self.player.get_volume()
-        self.player.set_volume(min(100, current + 10))
+        self.player.set_volume(min(100, current + 10))  # @hardcoded-ok: standard volume step
 
     def _decrease_volume(self) -> None:
         """Decrease volume by 10."""
         current = self.player.get_volume()
-        self.player.set_volume(max(0, current - 10))
+        self.player.set_volume(max(0, current - 10))  # @hardcoded-ok: standard volume step
 
     def _perform_search(self, query: str) -> None:
         """Perform FTS5 search within current mode.
@@ -210,7 +213,7 @@ class MainWindow(QMainWindow):
 
         # In cue_maker mode, search is handled by the proxy model (search_and_filter plugin)
         # Don't clear/reload tracks from database as there are no "cue_maker" mode tracks
-        if mode == "cue_maker":
+        if mode == AppMode.CUE_MAKER.value:
             return
 
         # Save current playing track

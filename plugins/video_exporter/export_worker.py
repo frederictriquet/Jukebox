@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from PySide6.QtCore import QThread, Signal
 
+from jukebox.core.constants import AUDIO_SAMPLE_RATE
+
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
@@ -89,7 +91,7 @@ class VideoExportWorker(QThread):
         try:
             audio, sr = librosa.load(
                 str(filepath),
-                sr=22050,
+                sr=AUDIO_SAMPLE_RATE,
                 offset=loop_start,
                 duration=duration,
                 mono=True,
@@ -158,6 +160,12 @@ class VideoExportWorker(QThread):
                 audio_start=loop_start,
                 audio_duration=duration,
                 fade_duration=self.config.get("fade_duration", 1.0),
+                video_codec=self.config.get("ffmpeg_video_codec", "libx264"),
+                preset=self.config.get("ffmpeg_preset", "medium"),
+                crf=self.config.get("ffmpeg_crf", "23"),
+                pixel_format=self.config.get("ffmpeg_pixel_format", "yuv420p"),
+                audio_codec=self.config.get("ffmpeg_audio_codec", "aac"),
+                audio_bitrate=self.config.get("ffmpeg_audio_bitrate", "192k"),
             )
             encoder.start()
         except Exception as e:

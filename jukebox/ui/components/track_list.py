@@ -15,6 +15,7 @@ from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import QMenu, QTableView
 
 from jukebox.core.event_bus import Events
+from jukebox.core.mode_manager import AppMode
 from jukebox.ui.components.track_cell_renderer import CellRenderer
 
 # Column configuration per mode
@@ -70,7 +71,7 @@ class TrackListModel(QAbstractTableModel):
             for code_config in config.genre_editor.codes:
                 genre_names[code_config.code] = code_config.name
 
-        columns = COLUMNS_JUKEBOX if mode == "jukebox" else COLUMNS_CURATING
+        columns = COLUMNS_JUKEBOX if mode == AppMode.JUKEBOX.value else COLUMNS_CURATING
         self.cell_renderer = CellRenderer(columns, genre_names, mode)
         self.database = database
         self.event_bus = event_bus
@@ -381,7 +382,7 @@ class TrackListModel(QAbstractTableModel):
         """
         if mode != self._mode:
             self._mode = mode
-            new_columns = COLUMNS_JUKEBOX if mode == "jukebox" else COLUMNS_CURATING
+            new_columns = COLUMNS_JUKEBOX if mode == AppMode.JUKEBOX.value else COLUMNS_CURATING
             self.beginResetModel()
             self.cell_renderer.columns = new_columns
             self.cell_renderer.set_mode(mode)
@@ -432,7 +433,7 @@ class TrackList(QTableView):
         h_header.setStretchLastSection(False)  # Manual column sizing
 
         # Set column widths from configuration
-        columns = COLUMNS_JUKEBOX if mode == "jukebox" else COLUMNS_CURATING
+        columns = COLUMNS_JUKEBOX if mode == AppMode.JUKEBOX.value else COLUMNS_CURATING
         for col_idx, col_name in enumerate(columns):
             self.setColumnWidth(col_idx, COLUMN_WIDTHS[col_name])
 
@@ -616,8 +617,11 @@ class TrackList(QTableView):
         menu = QMenu(self)
 
         # Default actions always available
-        show_in_finder = QAction("Show in Finder", self)
-        show_in_finder.triggered.connect(lambda: self._show_in_finder(filepath))
+        import sys
+
+        file_manager_label = "Show in Finder" if sys.platform == "darwin" else "Show in File Manager"
+        show_in_finder = QAction(file_manager_label, self)
+        show_in_finder.triggered.connect(lambda: self._show_in_file_manager(filepath))
         menu.addAction(show_in_finder)
 
         copy_path = QAction("Copy Path", self)
@@ -657,12 +661,20 @@ class TrackList(QTableView):
 
         menu.exec(self.mapToGlobal(position))
 
-    def _show_in_finder(self, filepath: Path) -> None:
-        """Open Finder and select the file."""
+    def _show_in_file_manager(self, filepath: Path) -> None:
+        """Open the platform file manager and select the file."""
         import subprocess
+        import sys
 
         filepath_str = str(filepath) if isinstance(filepath, Path) else filepath
-        subprocess.run(["open", "-R", filepath_str])
+        if sys.platform == "darwin":
+            subprocess.run(["open", "-R", filepath_str])
+        elif sys.platform == "win32":
+            subprocess.run(["explorer", "/select,", filepath_str])
+        else:
+            # Linux: open the containing directory
+            parent_dir = str(Path(filepath_str).parent)
+            subprocess.run(["xdg-open", parent_dir])
 
     def _copy_path_to_clipboard(self, filepath: Path) -> None:
         """Copy file path to clipboard."""

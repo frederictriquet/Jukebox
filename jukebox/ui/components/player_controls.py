@@ -13,14 +13,18 @@ class PlayerControls(QWidget):
     stop_clicked = Signal()
     volume_changed = Signal(int)
 
-    def __init__(self, parent=None):  # type: ignore
+    def __init__(self, parent=None, *, play_pause_shortcut: str = "Space", stop_shortcut: str = "Ctrl+S"):  # type: ignore
         """Initialize player controls.
 
         Args:
             parent: Parent widget
+            play_pause_shortcut: Keyboard shortcut text for play/pause
+            stop_shortcut: Keyboard shortcut text for stop
         """
         super().__init__(parent)
         self._is_playing = False
+        self._play_pause_shortcut = play_pause_shortcut
+        self._stop_shortcut = stop_shortcut
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -31,8 +35,8 @@ class PlayerControls(QWidget):
         self.play_btn = QPushButton("▶")
         self.stop_btn = QPushButton("⏹")
 
-        self.play_btn.setToolTip("Play/Pause (Space)")
-        self.stop_btn.setToolTip("Stop (Ctrl+S)")
+        self.play_btn.setToolTip(f"Play/Pause ({self._play_pause_shortcut})")
+        self.stop_btn.setToolTip(f"Stop ({self._stop_shortcut})")
 
         self.play_btn.clicked.connect(self.play_pause_clicked.emit)
         self.stop_btn.clicked.connect(self.stop_clicked.emit)
@@ -45,9 +49,9 @@ class PlayerControls(QWidget):
         # Volume slider
         layout.addWidget(QLabel("Volume:"))
         self.volume_slider = ClickableSlider(Qt.Orientation.Horizontal)
-        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setRange(0, 100)  # @hardcoded-ok: VLC volume range
         self.volume_slider.setValue(70)
-        self.volume_slider.setMaximumWidth(150)
+        self.volume_slider.setMaximumWidth(150)  # @hardcoded-ok: standard slider width
         self.volume_slider.valueChanged.connect(self.volume_changed.emit)
         layout.addWidget(self.volume_slider)
 
@@ -62,10 +66,10 @@ class PlayerControls(QWidget):
         self._is_playing = playing
         if playing:
             self.play_btn.setText("⏸")
-            self.play_btn.setToolTip("Pause (Space)")
+            self.play_btn.setToolTip(f"Pause ({self._play_pause_shortcut})")
         else:
             self.play_btn.setText("▶")
-            self.play_btn.setToolTip("Play (Space)")
+            self.play_btn.setToolTip(f"Play ({self._play_pause_shortcut})")
 
     def set_volume(self, volume: int) -> None:
         """Update volume slider (0-100).

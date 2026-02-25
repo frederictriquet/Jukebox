@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from jukebox.core.constants import AUDIO_SAMPLE_RATE, VLC_SEEK_DELAY_MS, StatusColors
 from jukebox.core.event_bus import Events
 from plugins.video_exporter.layers.vjing_layer import VJingLayer
 
@@ -147,7 +148,7 @@ class EffectPreviewDialog(QDialog):
         # Preview state
         self._vjing_layer = None
         self._audio = None
-        self._sr = 22050
+        self._sr = AUDIO_SAMPLE_RATE
         self._fps = 30
         self._playing = False
         self._frame = 0
@@ -246,7 +247,7 @@ class EffectPreviewDialog(QDialog):
             # Load audio
             self._audio, self._sr = librosa.load(
                 str(self.filepath),
-                sr=22050,
+                sr=AUDIO_SAMPLE_RATE,
                 offset=self.loop_start,
                 duration=duration,
                 mono=True,
@@ -322,7 +323,7 @@ class EffectPreviewDialog(QDialog):
         # Position at loop start (in milliseconds)
         self._vlc_player.play()
         # Wait a bit for player to initialize, then seek
-        QTimer.singleShot(50, lambda: self._vlc_player.set_time(int(self.loop_start * 1000)))
+        QTimer.singleShot(VLC_SEEK_DELAY_MS, lambda: self._vlc_player.set_time(int(self.loop_start * 1000)))
 
         self._timer.start(interval)
         self._playing = True
@@ -449,7 +450,7 @@ class ExportDialog(QDialog):
         # Preview state
         self._preview_renderer = None
         self._preview_audio = None
-        self._preview_sr = 22050
+        self._preview_sr = AUDIO_SAMPLE_RATE
         self._preview_playing = False
         self._preview_frame = 0
         self._preview_timer = QTimer(self)
@@ -1065,7 +1066,7 @@ class ExportDialog(QDialog):
             # Load audio
             self._preview_audio, self._preview_sr = librosa.load(
                 str(self.filepath),
-                sr=22050,
+                sr=AUDIO_SAMPLE_RATE,
                 offset=self.loop_start,
                 duration=duration,
                 mono=True,
@@ -1192,7 +1193,7 @@ class ExportDialog(QDialog):
             # Wait a bit for player to initialize, then seek
             preview_time = self._preview_frame / fps
             position_ms = int((self.loop_start + preview_time) * 1000)
-            QTimer.singleShot(50, lambda: self._vlc_player.set_time(position_ms))
+            QTimer.singleShot(VLC_SEEK_DELAY_MS, lambda: self._vlc_player.set_time(position_ms))
 
             self._preview_timer.start(interval)
             self._preview_playing = True
@@ -1378,6 +1379,13 @@ class ExportDialog(QDialog):
             "intro_video_path": self.intro_video_edit.text(),
             # Deterministic seed for reproducible VJing effects
             "rng_seed": self._rng_seed,
+            # FFmpeg encoding settings
+            "ffmpeg_video_codec": self.context.config.video_exporter.ffmpeg_video_codec,
+            "ffmpeg_preset": self.context.config.video_exporter.ffmpeg_preset,
+            "ffmpeg_crf": self.context.config.video_exporter.ffmpeg_crf,
+            "ffmpeg_pixel_format": self.context.config.video_exporter.ffmpeg_pixel_format,
+            "ffmpeg_audio_codec": self.context.config.video_exporter.ffmpeg_audio_codec,
+            "ffmpeg_audio_bitrate": self.context.config.video_exporter.ffmpeg_audio_bitrate,
         }
 
     def reject(self) -> None:
@@ -1430,7 +1438,7 @@ class ExportDialog(QDialog):
                 self.context.emit(
                     Events.STATUS_MESSAGE,
                     message=f"Cannot create output directory: {e}",
-                    color="#FF0000",
+                    color=StatusColors.ERROR,
                 )
                 return
 
@@ -1477,7 +1485,7 @@ class ExportDialog(QDialog):
         self.context.emit(
             Events.STATUS_MESSAGE,
             message=f"Video exported: {output_path}",
-            color="#00FF00",
+            color=StatusColors.SUCCESS,
         )
         logging.info(f"[Video Exporter] Export complete: {output_path}")
         self.accept()
@@ -1525,7 +1533,7 @@ class ExportDialog(QDialog):
         self.context.emit(
             Events.STATUS_MESSAGE,
             message=f"Export failed: {error}",
-            color="#FF0000",
+            color=StatusColors.ERROR,
         )
         logging.error(f"[Video Exporter] Export error: {error}")
         self.progress_label.setText(f"Error: {error}")

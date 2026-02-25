@@ -8,6 +8,7 @@ from typing import Any, TypeVar
 from PySide6.QtCore import QThread
 
 from jukebox.core.batch_processor import BatchProcessor
+from jukebox.core.constants import StatusColors
 from jukebox.core.event_bus import Events
 
 T = TypeVar("T")
@@ -118,7 +119,7 @@ class BatchProcessingHelper:
         on_error: Callable[[tuple[int, str], str], None],
         *,
         no_work_message: str | None = None,
-        success_status_color: str = "#00FF00",
+        success_status_color: str = StatusColors.SUCCESS,
         log_status: bool = True,
     ) -> BatchProcessor | None:
         """Start batch processing.
@@ -193,7 +194,7 @@ def start_batch_processing(
     *,
     batch_processor_attr: str = "_batch_processor",
     no_work_message: str | None = None,
-    success_status_color: str = "#00FF00",
+    success_status_color: str = StatusColors.SUCCESS,
     log_status: bool = True,
 ) -> BatchProcessor | None:
     """Convenience function to start batch processing.
