@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import random
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -16,7 +17,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
-    QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
@@ -468,6 +468,80 @@ class ExportDialog(QDialog):
         self._setup_ui()
         self._load_defaults()
 
+    def _randomize_seed(self) -> None:
+        """Generate a new random seed and update the input field."""
+        self._rng_seed = random.randint(0, 0xFFFFFFFF)
+        self.seed_input.setText(str(self._rng_seed))
+        self._reload_preview_if_active()
+
+    def _on_seed_edited(self) -> None:
+        """Update the internal seed from the input field."""
+        text = self.seed_input.text().strip()
+        try:
+            value = int(text) & 0xFFFFFFFF
+        except ValueError:
+            # Revert to current seed on invalid input
+            self.seed_input.setText(str(self._rng_seed))
+            return
+        self._rng_seed = value
+        self.seed_input.setText(str(self._rng_seed))
+        self._reload_preview_if_active()
+
+    def _reload_preview_if_active(self) -> None:
+        """Recreate the preview renderer (without reloading audio) if preview is active."""
+        if self._preview_renderer is None or self._preview_audio is None:
+            return
+
+        from plugins.video_exporter.renderers.frame_renderer import FrameRenderer
+
+        duration = self.loop_end - self.loop_start
+        fps = self.fps_spin.value()
+        resolution = RESOLUTION_PRESETS[self.resolution_combo.currentText()]
+        scale = min(1.0, 480 / resolution[1])
+
+        self._preview_renderer = FrameRenderer(
+            width=int(resolution[0] * scale),
+            height=int(resolution[1] * scale),
+            fps=fps,
+            audio=self._preview_audio,
+            sr=self._preview_sr,
+            duration=duration,
+            layers_config={
+                "waveform": self.waveform_check.isChecked(),
+                "text": self.text_check.isChecked(),
+                "dynamics": self.dynamics_check.isChecked(),
+                "vjing": self.vjing_check.isChecked(),
+                "video_background": self.video_bg_check.isChecked(),
+            },
+            track_metadata=self.track_metadata,
+            video_clips_folder=self.video_folder_edit.text(),
+            vjing_mappings={
+                m.letter: m.get_effects()
+                for m in self.context.config.video_exporter.vjing_mappings
+            },
+            vjing_preset=self.vjing_preset_combo.currentData(),
+            vjing_presets={
+                p.name: p.effects
+                for p in self.context.config.video_exporter.vjing_presets
+            },
+            waveform_config={
+                "height_ratio": self.context.config.video_exporter.waveform_height_ratio,
+                "bass_color": self.context.config.video_exporter.waveform_bass_color,
+                "mid_color": self.context.config.video_exporter.waveform_mid_color,
+                "treble_color": self.context.config.video_exporter.waveform_treble_color,
+                "cursor_color": self.context.config.video_exporter.waveform_cursor_color,
+            },
+            use_gpu=True,
+            effect_intensities=self._get_effect_intensities(),
+            color_palette=self._get_selected_palette(),
+            audio_sensitivity=self._get_audio_sensitivity(),
+            transitions_enabled=True,
+            simultaneous_effects=self.simultaneous_effects_spin.value(),
+            use_all_effects=self.use_all_effects_check.isChecked(),
+            rng_seed=self._rng_seed,
+        )
+        self._refresh_preview_frame()
+
     def _apply_dark_style(self) -> None:
         """Apply dark mode compatible styling."""
         self.setStyleSheet("""
@@ -569,6 +643,22 @@ class ExportDialog(QDialog):
         info_label.setStyleSheet("font-weight: bold; margin-bottom: 10px;")
         layout.addWidget(info_label)
 
+        # Seed controls (always visible above tabs)
+        seed_row = QHBoxLayout()
+        seed_row.addWidget(QLabel("Seed:"))
+        self.seed_input = QLineEdit(str(self._rng_seed))
+        self.seed_input.setFixedWidth(120)
+        self.seed_input.setToolTip("Seed for reproducible VJing effects (shared by preview and export)")
+        self.seed_input.editingFinished.connect(self._on_seed_edited)
+        seed_row.addWidget(self.seed_input)
+        self.seed_randomize_btn = QPushButton("🎲")
+        self.seed_randomize_btn.setFixedWidth(32)
+        self.seed_randomize_btn.setToolTip("Generate a new random seed")
+        self.seed_randomize_btn.clicked.connect(self._randomize_seed)
+        seed_row.addWidget(self.seed_randomize_btn)
+        seed_row.addStretch()
+        layout.addLayout(seed_row)
+
         # Tab widget for settings
         self.tabs = QTabWidget()
         self.tabs.setMinimumHeight(320)  # Prevent compression when progress appears
@@ -595,16 +685,19 @@ class ExportDialog(QDialog):
         layout.addWidget(self.progress_widget)
 
         # Buttons
-        self.button_box = QDialogButtonBox()
-        self.export_button = self.button_box.addButton(
-            "Export", QDialogButtonBox.ButtonRole.AcceptRole
-        )
-        self.cancel_button = self.button_box.addButton(
-            "Cancel", QDialogButtonBox.ButtonRole.RejectRole
-        )
-        self.button_box.accepted.connect(self._start_export)
-        self.button_box.rejected.connect(self._on_cancel)
-        layout.addWidget(self.button_box)
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.export_button = QPushButton("Export")
+        self.export_button.setAutoDefault(False)
+        self.export_button.setDefault(False)
+        self.export_button.clicked.connect(self._start_export)
+        btn_layout.addWidget(self.export_button)
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setAutoDefault(False)
+        self.cancel_button.setDefault(False)
+        self.cancel_button.clicked.connect(self._on_cancel)
+        btn_layout.addWidget(self.cancel_button)
+        layout.addLayout(btn_layout)
 
     def _create_general_tab(self) -> None:
         """Create the general settings tab."""
@@ -1547,6 +1640,10 @@ class ExportDialog(QDialog):
         self._vlc_player.stop()
 
         if self.worker and self.worker.isRunning():
+            self.cancel_button.setEnabled(False)
+            self.progress_label.setText("Cancelling...")
+            self.worker.finished.connect(self.reject)
+            self.worker.error.connect(self.reject)
             self.worker.cancel()
-            self.worker.wait()
-        self.reject()
+        else:
+            self.reject()

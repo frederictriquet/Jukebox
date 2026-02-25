@@ -14,7 +14,7 @@ from PySide6.QtCore import (
     QThread,
     Signal,
 )
-from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QPalette
 from PySide6.QtWidgets import QMenu, QStyledItemDelegate, QStyleOptionViewItem, QTableView
 
 from jukebox.core.duplicate_checker import DuplicateChecker
@@ -574,7 +574,7 @@ class ColorPreservingDelegate(QStyledItemDelegate):
             # Preserve the color even when item is selected/highlighted
             # Note: palette is available at runtime but not in stubs
             option.palette.setColor(  # type: ignore[attr-defined]
-                option.palette.HighlightedText, color  # type: ignore[attr-defined]
+                QPalette.ColorRole.HighlightedText, color
             )
 
 

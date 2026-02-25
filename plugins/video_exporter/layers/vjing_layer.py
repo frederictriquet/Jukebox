@@ -290,22 +290,22 @@ class VJingLayer(BaseVisualLayer):
     # Valid genres: D, C, P, T, H, G, I, A, W, B, F, R, L, U, O, N
     # Each genre maps to a list of effects (all rendered together)
     DEFAULT_MAPPINGS: dict[str, list[str]] = {
-        "D": ["aurora"],  # Deep - chill, ambient
-        "C": ["kaleidoscope"],  # Classic - elegant
-        "P": ["strobe"],  # Power - energetic
-        "T": ["fractal", "grid"],  # Trance - hypnotic, psychedelic
-        "H": ["fire"],  # House - groovy, warm
-        "G": ["flow_field"],  # Garden - natural
-        "I": ["neon"],  # Ibiza - club, colorful
-        "A": ["wave"],  # A Cappella - soft
-        "W": ["plasma"],  # Weed - chill, psychedelic
-        "B": ["explosion"],  # Banger - intense
-        "F": ["particles"],  # Fun - playful, festive
-        "R": ["vinyl"],  # Retro - vintage
-        "L": ["lissajous"],  # Loop - repetitive, hypnotic
-        "U": ["wormhole"],  # Unclassable - weird, experimental
-        "O": ["flow_field"],  # Organic - natural
-        "N": ["wave"],  # Namaste - zen, calm
+        "D": ["aurora", "nebula", "starfield", "smoke", "constellation", "feedback", "tunnel"],
+        "C": ["kaleidoscope", "halftone"],
+        "P": ["strobe", "pulse", "bass_warp", "lightning", "shockwave", "radar", "bloom"],
+        "T": ["fractal", "grid", "spiral", "moire", "hexgrid", "fft_rings", "timestretch"],
+        "H": ["pulse", "fft_bars", "neon"],
+        "G": ["flow_field", "water", "swarm"],
+        "I": ["neon", "bloom", "circuit", "hexgrid"],
+        "A": ["wave", "bokeh"],
+        "W": ["plasma", "spiral", "metaballs", "nebula", "feedback", "starfield"],
+        "B": ["explosion", "bass_warp", "lightning", "shockwave", "chromatic", "glitch"],
+        "F": ["particles", "pixelate", "swarm"],
+        "R": ["vinyl", "scanlines", "halftone", "pixelate"],
+        "L": ["lissajous", "moire", "spiral"],
+        "U": ["wormhole", "voronoi", "metaballs", "glitch", "chromatic"],
+        "O": ["flow_field", "water", "swarm", "smoke"],
+        "N": ["wave", "water", "smoke", "constellation", "bokeh"],
     }
 
     # These class attributes are built automatically from @vj_effect decorators
@@ -2039,53 +2039,6 @@ class VJingLayer(BaseVisualLayer):
     # ========================================================================
     # NATURE-INSPIRED EFFECTS
     # ========================================================================
-
-    @vj_effect("Fire", "Naturels")
-    def _render_fire(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
-        """Render fire/flame effect with Perlin noise turbulence."""
-        draw = ImageDraw.Draw(img)
-        bass = ctx["bass"]
-        s = min(self.width, self.height) / 512  # scale factor
-
-        # Fire height based on bass
-        fire_height = int(self.height * 0.4 * (0.5 + bass * 0.5) * self._current_intensity)
-
-        # Get colors from palette for fire gradient
-        colors = self.color_palette
-        n_colors = len(colors)
-
-        step = max(1, int(3 * s))
-        noise_scale = 30 * s
-
-        for y in range(fire_height):
-            progress = y / max(fire_height, 1)
-
-            # Color gradient through palette colors based on height
-            # Use reversed palette (bottom = first color, top = last color)
-            palette_pos = progress * (n_colors - 1)
-            idx1 = min(int(palette_pos), n_colors - 1)
-            idx2 = min(idx1 + 1, n_colors - 1)
-            blend = palette_pos - idx1
-
-            c1 = colors[idx1]
-            c2 = colors[idx2]
-            r = int(c1[0] + (c2[0] - c1[0]) * blend)
-            g = int(c1[1] + (c2[1] - c1[1]) * blend)
-            b = int(c1[2] + (c2[2] - c1[2]) * blend)
-
-            alpha = int(150 * (1 - progress) * self._current_intensity)
-
-            # Animated flame shape using turbulence noise
-            for x in range(0, self.width, step):
-                # Use turbulence for more natural flame motion
-                noise = (
-                    turbulence2d(x * 0.02 + time_pos * 2, y * 0.03 + time_pos * 3, octaves=3)
-                    * noise_scale
-                )
-                flame_y = self.height - y + int(noise * (1 - progress))
-
-                if 0 <= flame_y < self.height:
-                    draw.point((x, flame_y), fill=(r, g, b, alpha))
 
     @vj_effect("Water", "Naturels")
     def _render_water(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
