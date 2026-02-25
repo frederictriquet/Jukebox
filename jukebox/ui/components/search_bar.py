@@ -10,15 +10,17 @@ class SearchBar(QLineEdit):
 
     search_triggered = Signal(str)
 
-    def __init__(self, parent=None, debounce_ms: int = 300):  # type: ignore
+    def __init__(self, parent=None, debounce_ms: int = 300, *, focus_shortcut: str = "Ctrl+F"):  # type: ignore
         """Initialize search bar.
 
         Args:
             parent: Parent widget
             debounce_ms: Debounce delay in milliseconds
+            focus_shortcut: Keyboard shortcut text for focusing the search bar
         """
         super().__init__(parent)
-        self.setPlaceholderText("Search tracks... (Ctrl+F to focus)")
+        self._debounce_ms = debounce_ms
+        self.setPlaceholderText(f"Search tracks... ({focus_shortcut} to focus)")
         self.setClearButtonEnabled(True)
 
         # Only take focus when explicitly clicked or via Ctrl+F
@@ -35,7 +37,7 @@ class SearchBar(QLineEdit):
         """Handle text change with debounce."""
         self.debounce_timer.stop()
         if len(text) >= 2:
-            self.debounce_timer.start(300)
+            self.debounce_timer.start(self._debounce_ms)
         elif len(text) == 0:
             self.search_triggered.emit("")
 

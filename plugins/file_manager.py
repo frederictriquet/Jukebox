@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from PySide6.QtWidgets import QPushButton
 
 from jukebox.core.event_bus import Events
+from jukebox.core.mode_manager import AppMode
 from jukebox.core.shortcut_mixin import ShortcutMixin
 
 if TYPE_CHECKING:
@@ -22,7 +23,7 @@ class FileManagerPlugin(ShortcutMixin):
     name = "file_manager"
     version = "1.0.0"
     description = "File management with keyboard shortcuts"
-    modes = ["curating", "jukebox"]  # Active in both modes
+    modes = [AppMode.CURATING.value, AppMode.JUKEBOX.value]  # Active in both modes
 
     def __init__(self) -> None:
         """Initialize plugin."""
@@ -55,7 +56,7 @@ class FileManagerPlugin(ShortcutMixin):
 
             # Set initial visibility based on current mode
             current_mode = self.context.config.ui.mode
-            self.remove_button.setVisible(current_mode == "jukebox")
+            self.remove_button.setVisible(current_mode == AppMode.JUKEBOX.value)
 
             layout = controls.layout()
             # Find the stretch item and insert button before it
@@ -203,7 +204,7 @@ class FileManagerPlugin(ShortcutMixin):
             from jukebox.utils.metadata import MetadataExtractor
 
             metadata = MetadataExtractor.extract(dest_path)
-            new_track_id = self.context.database.tracks.add(metadata, mode="jukebox")
+            new_track_id = self.context.database.tracks.add(metadata, mode=AppMode.JUKEBOX.value)
             logging.info(f"Added {dest_path} to database in jukebox mode (id={new_track_id})")
 
             # Copy waveform data to the new track if it exists
@@ -358,13 +359,13 @@ class FileManagerPlugin(ShortcutMixin):
 
     def activate(self, mode: str) -> None:
         """Activate plugin for this mode."""
-        if mode == "curating":
+        if mode == AppMode.CURATING.value:
             # Enable shortcuts for curating mode
             self._activate_shortcuts()
             # Hide remove button in curating mode
             if self.remove_button:
                 self.remove_button.setVisible(False)
-        elif mode == "jukebox":
+        elif mode == AppMode.JUKEBOX.value:
             # Disable curating shortcuts in jukebox mode
             self._deactivate_shortcuts()
             # Show remove button in jukebox mode
@@ -374,10 +375,10 @@ class FileManagerPlugin(ShortcutMixin):
 
     def deactivate(self, mode: str) -> None:
         """Deactivate plugin for this mode."""
-        if mode == "curating":
+        if mode == AppMode.CURATING.value:
             # Disable shortcuts when leaving curating mode
             self._deactivate_shortcuts()
-        elif mode == "jukebox":
+        elif mode == AppMode.JUKEBOX.value:
             # Hide remove button when leaving jukebox mode
             if self.remove_button:
                 self.remove_button.setVisible(False)

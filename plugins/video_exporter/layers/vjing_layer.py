@@ -658,15 +658,17 @@ class VJingLayer(BaseVisualLayer):
             # Build audio context for this frame
             ctx = {
                 "energy": float(self.energy[frame_idx]) if frame_idx < len(self.energy) else 0.5,
-                "bass": float(self.bass_energy[frame_idx])
-                if frame_idx < len(self.bass_energy)
-                else 0.5,
-                "mid": float(self.mid_energy[frame_idx])
-                if frame_idx < len(self.mid_energy)
-                else 0.5,
-                "treble": float(self.treble_energy[frame_idx])
-                if frame_idx < len(self.treble_energy)
-                else 0.5,
+                "bass": (
+                    float(self.bass_energy[frame_idx]) if frame_idx < len(self.bass_energy) else 0.5
+                ),
+                "mid": (
+                    float(self.mid_energy[frame_idx]) if frame_idx < len(self.mid_energy) else 0.5
+                ),
+                "treble": (
+                    float(self.treble_energy[frame_idx])
+                    if frame_idx < len(self.treble_energy)
+                    else 0.5
+                ),
             }
 
             frame_cache: dict[str, Image.Image] = {}
@@ -878,6 +880,16 @@ class VJingLayer(BaseVisualLayer):
             self._init_timestretch()
         if "grid" in self.active_effects:
             self._init_grid()
+        if "bokeh" in self.active_effects:
+            self._init_bokeh()
+        if "circuit" in self.active_effects:
+            self._init_circuit()
+        if "constellation" in self.active_effects:
+            self._init_constellation()
+        if "shockwave" in self.active_effects:
+            self._init_shockwave()
+        if "swarm" in self.active_effects:
+            self._init_swarm()
 
         # Initialize GPU renderer if enabled
         if self._pending_gpu_init:
@@ -1523,8 +1535,8 @@ class VJingLayer(BaseVisualLayer):
         center = (self.width // 2, self.height // 2)
         s = min(self.width, self.height) / 512  # scale factor
 
-        # Trigger explosion on strong beats
-        if is_beat and energy > 0.6 and not self.explosion_active:
+        # Trigger explosion on beats
+        if is_beat and energy > 0.35 and not self.explosion_active:
             self.explosion_active = True
             self.explosion_frame = frame_idx
             self.explosion_particles = []
@@ -1548,7 +1560,7 @@ class VJingLayer(BaseVisualLayer):
         # Update and draw explosion particles
         if self.explosion_active:
             frames_since = frame_idx - self.explosion_frame
-            if frames_since > 60:
+            if frames_since > 40:
                 self.explosion_active = False
                 return
 
@@ -1626,38 +1638,41 @@ class VJingLayer(BaseVisualLayer):
     ) -> None:
         """Render Lissajous curves."""
         draw = ImageDraw.Draw(img)
-        energy = ctx["energy"]
-        bass = ctx["bass"]
         center = (self.width // 2, self.height // 2)
         s = min(self.width, self.height) / 512  # scale factor
 
-        # Lissajous parameters (modulated by audio)
-        a = 3 + int(bass * 4)
-        b = 4 + int(energy * 3)
-        delta = time_pos
+        # Lissajous parameters (fixed ratios, slow phase rotation)
+        a = 3.0
+        b = 4.0
+        delta = time_pos * 0.5
 
-        # Draw multiple curves with different phases
-        n_curves = 3
-        for curve in range(n_curves):
-            points = []
-            phase_offset = curve * math.pi / n_curves
+        # Single curve with color gradient along the path
+        amplitude_x = (self.width * 0.35) * self.intensity
+        amplitude_y = (self.height * 0.35) * self.intensity
+        n_pts = max(30, int(150 * s))
+        line_w = max(1, int(2 * s))
+        colors = self.color_palette
+        n_colors = len(colors)
 
-            amplitude_x = (self.width * 0.35) * self.intensity
-            amplitude_y = (self.height * 0.35) * self.intensity
+        points = []
+        for t in np.linspace(0, 1.2 * math.pi, n_pts):
+            x = center[0] + amplitude_x * math.cos(a * t + delta)
+            y = center[1] + amplitude_y * math.sin(b * t + delta)
+            points.append((x, y))
 
-            n_pts = max(40, int(200 * s))
-            for t in np.linspace(0, 2 * math.pi, n_pts):
-                x = center[0] + amplitude_x * math.sin(a * t + delta + phase_offset)
-                y = center[1] + amplitude_y * math.sin(b * t)
-                points.append((x, y))
-
-            # Color per curve from palette
-            base_color = self._get_palette_color(curve)
-            color = (*base_color, 150)
-            line_w = max(1, int(2 * s))
-
-            if len(points) >= 2:
-                draw.line(points, fill=color, width=line_w)
+        # Draw segment by segment with interpolated color
+        for i in range(len(points) - 1):
+            frac = i / max(1, len(points) - 2)
+            # Blend between two palette colors
+            ci = (frac * (n_colors - 1)) + time_pos * 0.5
+            idx0 = int(ci) % n_colors
+            idx1 = (idx0 + 1) % n_colors
+            blend = ci % 1.0
+            c0, c1 = colors[idx0], colors[idx1]
+            r = int(c0[0] * (1 - blend) + c1[0] * blend)
+            g = int(c0[1] * (1 - blend) + c1[1] * blend)
+            b_ = int(c0[2] * (1 - blend) + c1[2] * blend)
+            draw.line([points[i], points[i + 1]], fill=(r, g, b_, 150), width=line_w)
 
     @vj_effect("Tunnel", "Géométriques")
     def _render_tunnel(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
@@ -3371,7 +3386,1222 @@ class VJingLayer(BaseVisualLayer):
         self.smoke_particles = new_particles
 
     # =========================================================================
+    # Nebula effect - Cosmic multi-layer cloud with drifting Perlin noise
+    # =========================================================================
+
+    @vj_effect("Nebula", "Naturels")
+    def _render_nebula(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
+        """Render cosmic nebula clouds with layered Perlin noise.
+
+        Multiple noise layers at different scales and speeds create
+        depth. Colors drift slowly through the palette. Bass swells
+        brightness, beats trigger brief flares.
+        """
+        w, h = self.width, self.height
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        mid = ctx["mid"]
+        is_beat = ctx["is_beat"]
+        intensity = self._current_intensity
+        colors = self.color_palette
+        n_colors = len(colors)
+
+        # Three noise layers at different scales/speeds for depth
+        layers_cfg = [
+            (0.003, 0.08, 0, 0.5),  # (scale, speed, color_idx, weight)
+            (0.006, 0.12, 2, 0.35),
+            (0.012, 0.20, 4, 0.15),
+        ]
+
+        # Downsample for performance, never below 16px on any side
+        ds = max(1, min(w, h) // 128)
+        sw, sh = max(16, w // max(1, ds)), max(16, h // max(1, ds))
+
+        # Precompute coordinate grids once
+        ys, xs = np.mgrid[0:sh, 0 : w // ds].astype(np.float32)
+
+        result_r = np.zeros((sh, sw), dtype=np.float32)
+        result_g = np.zeros((sh, sw), dtype=np.float32)
+        result_b = np.zeros((sh, sw), dtype=np.float32)
+
+        for scale, speed, color_idx_base, weight in layers_cfg:
+            sc = scale * ds
+            t = time_pos * speed
+            ci = (color_idx_base + int(time_pos * 0.15)) % n_colors
+            ci2 = (ci + 1) % n_colors
+            c1 = np.array(colors[ci], dtype=np.float32)
+            c2 = np.array(colors[ci2], dtype=np.float32)
+
+            # Vectorized pseudo-FBM: sum of rotated sinusoids (4 octaves)
+            noise = np.zeros((sh, sw), dtype=np.float32)
+            amp = 1.0
+            freq = 1.0
+            for octave in range(4):
+                # Rotate coordinates per octave for less axis-aligned patterns
+                angle = 0.5 * octave + t * 0.3
+                cos_a, sin_a = math.cos(angle), math.sin(angle)
+                rx = xs * cos_a - ys * sin_a
+                ry = xs * sin_a + ys * cos_a
+                noise += (
+                    np.sin(rx * sc * freq + t * 1.3) * np.cos(ry * sc * freq * 0.8 + t * 0.9) * amp
+                )
+                amp *= 0.55
+                freq *= 2.0
+
+            # Normalize to [0, 1]
+            n_min, n_max = noise.min(), noise.max()
+            rng = n_max - n_min
+            if rng > 0.001:
+                noise = (noise - n_min) / rng
+            else:
+                noise[:] = 0.5
+
+            # Contrast curve for cloud-like appearance
+            noise = np.clip((noise - 0.3) * 2.0, 0.0, 1.0) ** 1.5
+            noise *= 1.0 + mid * 0.3
+
+            # Blend two palette colors
+            layer_r = c1[0] * (1 - noise) + c2[0] * noise
+            layer_g = c1[1] * (1 - noise) + c2[1] * noise
+            layer_b = c1[2] * (1 - noise) + c2[2] * noise
+
+            result_r += layer_r * noise * weight
+            result_g += layer_g * noise * weight
+            result_b += layer_b * noise * weight
+
+        # Bass swells overall brightness
+        brightness = 0.7 + bass * 0.5
+        # Beat flare
+        if is_beat:
+            brightness += 0.3 * energy
+
+        result_r = np.clip(result_r * brightness, 0, 255)
+        result_g = np.clip(result_g * brightness, 0, 255)
+        result_b = np.clip(result_b * brightness, 0, 255)
+        alpha = np.clip((result_r + result_g + result_b) / 3.0 * intensity * 1.5, 0, 255)
+
+        # Assemble RGBA
+        out = np.stack(
+            [
+                result_r.astype(np.uint8),
+                result_g.astype(np.uint8),
+                result_b.astype(np.uint8),
+                alpha.astype(np.uint8),
+            ],
+            axis=2,
+        )
+
+        # Upscale if downsampled
+        overlay = Image.fromarray(out, "RGBA")
+        if ds > 1:
+            overlay = overlay.resize((w, h), Image.Resampling.BILINEAR)
+
+        img.paste(Image.alpha_composite(img, overlay), (0, 0))
+
+    # =========================================================================
+    # Hexgrid effect - Hexagonal grid with FFT-driven cell illumination
+    # =========================================================================
+
+    @vj_effect("Hexgrid", "Spectraux")
+    def _render_hexgrid(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
+        """Render hexagonal grid with cells lit by FFT frequency bins.
+
+        Each hex cell maps to an FFT bin. Brightness and color shift
+        according to that bin's energy. Bass pulses the grid outline.
+        """
+        draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        is_beat = ctx["is_beat"]
+        fft = ctx["fft"]
+        intensity = self._current_intensity
+        w, h = self.width, self.height
+        s = min(w, h) / 512
+        colors = self.color_palette
+        n_colors = len(colors)
+        n_bins = len(fft)
+
+        # Hex cell size: responsive to resolution
+        hex_r = max(8, int(28 * s))
+        hex_w = hex_r * 2
+        hex_h = math.sqrt(3) * hex_r
+
+        # Accumulate scroll offset driven by energy
+        if not hasattr(self, "_hexgrid_scroll"):
+            self._hexgrid_scroll = 0.0
+        self._hexgrid_scroll += (0.5 + energy * 3.0) * s
+        scroll_y = self._hexgrid_scroll % (hex_h * 2)
+
+        # Grid outline alpha pulses with bass
+        outline_alpha = int((30 + bass * 60) * intensity)
+        outline_color = colors[int(time_pos * 0.3) % n_colors]
+
+        # Build hex centers with scroll offset
+        col = 0
+        bin_idx = 0
+        cx = hex_r
+        while cx < w + hex_r:
+            row = 0
+            # Offset odd columns
+            y_offset = hex_h / 2 if col % 2 else 0
+            cy = y_offset + hex_h / 2 - hex_h + (scroll_y % hex_h)
+            while cy < h + hex_h:
+                # Map cell to FFT bin: offset by scroll so bins travel with cells
+                scroll_row_offset = int(self._hexgrid_scroll / hex_h)
+                fft_val = float(fft[(row + scroll_row_offset + col * 7) % n_bins])
+                bin_idx += 1
+
+                # Hex vertices
+                vertices = []
+                for k in range(6):
+                    angle = math.pi / 3 * k + math.pi / 6
+                    vx = cx + hex_r * math.cos(angle)
+                    vy = cy + hex_r * math.sin(angle)
+                    vertices.append((vx, vy))
+
+                # Fill brightness from FFT value
+                brightness = min(1.0, fft_val * 1.5)
+                if is_beat:
+                    brightness = min(1.0, brightness + 0.2)
+
+                if brightness > 0.02:
+                    # Color from palette, cycling with time and bin
+                    ci = (bin_idx + int(time_pos * 0.5)) % n_colors
+                    color = colors[ci]
+                    r = min(255, int(color[0] * brightness))
+                    g = min(255, int(color[1] * brightness))
+                    b = min(255, int(color[2] * brightness))
+                    fill_alpha = int(brightness * 180 * intensity)
+                    draw.polygon(vertices, fill=(r, g, b, fill_alpha))
+
+                # Draw hex outline (always visible, dim)
+                draw.polygon(
+                    vertices,
+                    outline=(*outline_color, outline_alpha),
+                )
+
+                cy += hex_h
+                row += 1
+            cx += hex_w * 0.75
+            col += 1
+
+    # =========================================================================
     # Grid effect - Dynamic 2D grid deformed by sine waves triggered by kicks
+    # =========================================================================
+
+    # =========================================================================
+    # Glitch effect - Digital corruption triggered by transients
+    # =========================================================================
+
+    @vj_effect("Glitch", "Post-process", "post_processing")
+    def _render_glitch(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
+        """Render digital glitch: block displacement, RGB shift, and scanline tearing.
+
+        Operates as post-processing on the existing image. Stronger on beats
+        and high energy; produces random block shifts, color channel offsets,
+        and horizontal tear lines.
+        """
+        bass = ctx["bass"]
+        energy = ctx["energy"]
+        is_beat = ctx["is_beat"]
+        treble = ctx["treble"]
+        intensity = self._current_intensity
+        w, h = self.width, self.height
+        s = min(w, h) / 512
+
+        # Glitch probability: always some micro-glitches, heavy on beats
+        glitch_strength = energy * 0.3 + bass * 0.3
+        if is_beat:
+            glitch_strength += 0.4
+        glitch_strength *= intensity
+        if glitch_strength < 0.05:
+            return
+
+        data = np.array(img)
+
+        # --- 1. Block displacement: shift random horizontal slices ---
+        n_blocks = self._rng.randint(2, max(3, int(6 + glitch_strength * 10)))
+        for _ in range(n_blocks):
+            if self._rng.random() > glitch_strength:
+                continue
+            bh = self._rng.randint(max(1, int(2 * s)), max(3, int(20 * s + bass * 30 * s)))
+            by = self._rng.randint(0, h - bh)
+            shift = self._rng.randint(-int(40 * s * glitch_strength), int(40 * s * glitch_strength))
+            if shift == 0:
+                continue
+            block = data[by : by + bh].copy()
+            data[by : by + bh] = np.roll(block, shift, axis=1)
+
+        # --- 2. RGB channel offset: shift R and B horizontally ---
+        if self._rng.random() < glitch_strength * 0.8:
+            shift_r = self._rng.randint(
+                -max(1, int(8 * s * glitch_strength)), max(1, int(8 * s * glitch_strength))
+            )
+            shift_b = self._rng.randint(
+                -max(1, int(8 * s * glitch_strength)), max(1, int(8 * s * glitch_strength))
+            )
+            data[:, :, 0] = np.roll(data[:, :, 0], shift_r, axis=1)
+            data[:, :, 2] = np.roll(data[:, :, 2], shift_b, axis=1)
+
+        # --- 3. Scanline tears: bright or dark horizontal lines ---
+        n_tears = self._rng.randint(0, max(1, int(4 * glitch_strength)))
+        colors = self.color_palette
+        for _ in range(n_tears):
+            ty = self._rng.randint(0, h - 1)
+            tear_h = self._rng.randint(1, max(2, int(3 * s)))
+            te = min(h, ty + tear_h)
+            if self._rng.random() < 0.5:
+                # Bright colored tear
+                c = colors[self._rng.randint(0, len(colors) - 1)]
+                alpha = int(180 * intensity * treble + 40)
+                data[ty:te, :, 0] = c[0]
+                data[ty:te, :, 1] = c[1]
+                data[ty:te, :, 2] = c[2]
+                data[ty:te, :, 3] = min(255, alpha)
+            else:
+                # Dark tear (blackout)
+                data[ty:te, :, :3] = 0
+
+        # --- 4. Invert random block on strong beats ---
+        if is_beat and bass > 0.6 and self._rng.random() < 0.5:
+            bh = self._rng.randint(int(20 * s), int(80 * s))
+            bw = self._rng.randint(int(40 * s), int(w * 0.6))
+            by = self._rng.randint(0, max(1, h - bh))
+            bx = self._rng.randint(0, max(1, w - bw))
+            data[by : by + bh, bx : bx + bw, :3] = 255 - data[by : by + bh, bx : bx + bw, :3]
+
+        result = Image.fromarray(data, "RGBA")
+        img.paste(result, (0, 0))
+
+    # =========================================================================
+    # Scanlines effect - CRT scanlines + VHS distortion, intensity on drops
+    # =========================================================================
+
+    @vj_effect("Scanlines", "Post-process", "post_processing")
+    def _render_scanlines(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render CRT scanlines with VHS tracking distortion.
+
+        Post-processing effect that overlays horizontal scanlines, adds
+        chromatic aberration on edges, and applies VHS-style horizontal
+        jitter that intensifies on drops/beats.
+        """
+        bass = ctx["bass"]
+        energy = ctx["energy"]
+        is_beat = ctx["is_beat"]
+        intensity = self._current_intensity
+        w, h = self.width, self.height
+        s = min(w, h) / 512
+
+        data = np.array(img)
+
+        # --- 1. CRT scanlines: darken every other line group ---
+        # Line spacing adapts to resolution (2-4 px groups)
+        line_spacing = max(2, int(3 * s))
+        # Scrolling offset for moving scanlines
+        scroll = int(time_pos * 30 * s) % (line_spacing * 2)
+
+        scanline_mask = np.ones(h, dtype=np.float32)
+        for y in range(h):
+            pos_in_cycle = (y + scroll) % (line_spacing * 2)
+            if pos_in_cycle < line_spacing:
+                # Darken this line: stronger on high energy
+                darken = 0.55 + energy * 0.15
+                scanline_mask[y] = darken
+
+        # Apply scanline darkening to RGB channels
+        mask_col = scanline_mask[:, np.newaxis, np.newaxis]
+        data[:, :, :3] = np.clip(data[:, :, :3] * mask_col, 0, 255).astype(np.uint8)
+
+        # --- 2. VHS horizontal jitter on beats/drops ---
+        jitter_strength = bass * 0.3 + energy * 0.2
+        if is_beat:
+            jitter_strength += 0.5
+        jitter_strength *= intensity
+
+        if jitter_strength > 0.1:
+            # A few horizontal slices get shifted
+            n_jitter = self._rng.randint(2, max(3, int(5 + jitter_strength * 8)))
+            for _ in range(n_jitter):
+                if self._rng.random() > jitter_strength:
+                    continue
+                jh = self._rng.randint(1, max(2, int(4 * s)))
+                jy = self._rng.randint(0, h - jh)
+                shift = self._rng.randint(
+                    -max(1, int(15 * s * jitter_strength)),
+                    max(1, int(15 * s * jitter_strength)),
+                )
+                if shift != 0:
+                    data[jy : jy + jh] = np.roll(data[jy : jy + jh], shift, axis=1)
+
+        # --- 3. Chromatic aberration: offset R and B vertically ---
+        aberration = max(1, int(2 * s * (0.3 + energy * 0.7) * intensity))
+        if aberration >= 1:
+            data[:, :, 0] = np.roll(data[:, :, 0], -aberration, axis=0)  # R up
+            data[:, :, 2] = np.roll(data[:, :, 2], aberration, axis=0)  # B down
+
+        # --- 4. VHS tracking bar: a bright/noisy horizontal band ---
+        # Slowly drifts through the frame, more visible on high energy
+        bar_visibility = energy * 0.6 + bass * 0.4
+        if bar_visibility > 0.2:
+            bar_h = max(3, int(12 * s))
+            bar_y = int((time_pos * 20 * s) % (h + bar_h * 4)) - bar_h * 2
+            bar_y_start = max(0, bar_y)
+            bar_y_end = min(h, bar_y + bar_h)
+            if bar_y_start < bar_y_end:
+                # Brighten the bar region
+                boost = 1.3 + bar_visibility * 0.5
+                bar_region = data[bar_y_start:bar_y_end, :, :3].astype(np.float32)
+                bar_region = np.clip(bar_region * boost + 20, 0, 255)
+                data[bar_y_start:bar_y_end, :, :3] = bar_region.astype(np.uint8)
+                # Add noise to the bar
+                noise = np.array([self._rng.randint(0, 40) for _ in range(bar_y_end - bar_y_start)])
+                for c in range(3):
+                    data[bar_y_start:bar_y_end, :, c] = np.clip(
+                        data[bar_y_start:bar_y_end, :, c].astype(np.int16) + noise[:, np.newaxis],
+                        0,
+                        255,
+                    ).astype(np.uint8)
+
+        # --- 5. Subtle phosphor glow: tint bright scanlines toward palette color ---
+        colors = self.color_palette
+        tint = colors[int(time_pos * 0.5) % len(colors)]
+        tint_strength = 0.06 * intensity
+        # Build mask for bright lines (not darkened)
+        ys = (np.arange(h) + scroll) % (line_spacing * 2)
+        bright_mask = ys >= line_spacing
+        if np.any(bright_mask):
+            for c in range(3):
+                data[bright_mask, :, c] = np.clip(
+                    data[bright_mask, :, c].astype(np.float32) + tint[c] * tint_strength,
+                    0,
+                    255,
+                ).astype(np.uint8)
+
+        result = Image.fromarray(data, "RGBA")
+        img.paste(result, (0, 0))
+
+    # =========================================================================
+    # Shockwave effect - Circular distortion wave triggered by strong kicks
+    # =========================================================================
+
+    def _init_shockwave(self) -> None:
+        """Initialize shockwave state."""
+        self.shockwaves: list[dict[str, float]] = []
+
+    @vj_effect("Shockwave", "Post-process", "post_processing")
+    def _render_shockwave(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render circular shockwave distortion triggered by strong kicks.
+
+        Expanding rings that displace pixels radially outward, creating
+        a ripple/lens distortion effect. Multiple waves can overlap.
+        """
+        bass = ctx["bass"]
+        energy = ctx["energy"]
+        is_beat = ctx["is_beat"]
+        intensity = self._current_intensity
+        w, h = self.width, self.height
+        s = min(w, h) / 512
+
+        # Spawn shockwave on strong beats
+        if is_beat and bass > 0.4:
+            cx = w // 2 + int((self._rng.random() - 0.5) * w * 0.3)
+            cy = h // 2 + int((self._rng.random() - 0.5) * h * 0.3)
+            self.shockwaves.append(
+                {
+                    "cx": float(cx),
+                    "cy": float(cy),
+                    "radius": 0.0,
+                    "speed": (8.0 + energy * 6.0) * s,
+                    "strength": 0.6 + bass * 0.4,
+                    "life": 1.0,
+                    "decay": 0.02 + energy * 0.01,
+                }
+            )
+
+        # Remove dead waves early
+        if not self.shockwaves:
+            return
+
+        data = np.array(img)
+        h_arr, w_arr = data.shape[:2]
+
+        # Precompute pixel coordinate grids
+        ys, xs = np.mgrid[0:h_arr, 0:w_arr].astype(np.float32)
+
+        result = data.copy()
+
+        new_waves = []
+        for wave in self.shockwaves:
+            wave["radius"] += wave["speed"]
+            wave["life"] -= wave["decay"]
+            if wave["life"] <= 0:
+                continue
+
+            cx, cy = wave["cx"], wave["cy"]
+            radius = wave["radius"]
+            strength = wave["strength"] * wave["life"] * intensity
+
+            # Distance from each pixel to wave center
+            dx = xs - cx
+            dy = ys - cy
+            dist = np.sqrt(dx * dx + dy * dy)
+
+            # Ring mask: pixels near the wave radius get displaced
+            ring_width = 30.0 * s
+            ring_dist = np.abs(dist - radius)
+            mask = np.clip(1.0 - ring_dist / ring_width, 0.0, 1.0)
+
+            # Displacement: push pixels radially outward
+            displacement = mask * strength * 15.0 * s
+
+            # Normalized direction from center
+            safe_dist = np.maximum(dist, 0.1)
+            dir_x = dx / safe_dist
+            dir_y = dy / safe_dist
+
+            # Source coordinates (where to sample from)
+            src_x = np.clip((xs - dir_x * displacement).astype(np.int32), 0, w_arr - 1)
+            src_y = np.clip((ys - dir_y * displacement).astype(np.int32), 0, h_arr - 1)
+
+            # Apply displacement
+            displaced = data[src_y.ravel(), src_x.ravel()].reshape(data.shape)
+
+            # Blend displaced with current result using ring mask
+            mask_4ch = mask[:, :, np.newaxis]
+            result = (result * (1.0 - mask_4ch) + displaced * mask_4ch).astype(np.uint8)
+
+            # Subtle colored edge at the wave front
+            edge_width = 4.0 * s
+            edge_dist = np.abs(dist - radius)
+            edge_mask = np.clip(1.0 - edge_dist / edge_width, 0.0, 1.0)
+            edge_tint = edge_mask * strength * 60
+            color = self._get_palette_color(int(wave["cx"] + wave["cy"]))
+            for c in range(3):
+                result[:, :, c] = np.clip(
+                    result[:, :, c].astype(np.float32) + edge_tint * (color[c] / 255.0),
+                    0,
+                    255,
+                ).astype(np.uint8)
+
+            new_waves.append(wave)
+
+        self.shockwaves = new_waves
+
+        out = Image.fromarray(result, "RGBA")
+        img.paste(out, (0, 0))
+
+    # =========================================================================
+    # Halftone effect - Pop art dot screen with audio-reactive dot sizes
+    # =========================================================================
+
+    @vj_effect("Halftone", "Post-process", "post_processing")
+    def _render_halftone(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render halftone dot screen effect.
+
+        Converts the image into a grid of circles whose size encodes
+        local brightness. Dot grid size pulses with bass, palette
+        colors tint the dots.
+        """
+        bass = ctx["bass"]
+        energy = ctx["energy"]
+        intensity = self._current_intensity
+        w, h = self.width, self.height
+        s = min(w, h) / 512
+
+        data = np.array(img)
+
+        # Compute luminance from RGB
+        lum = (
+            data[:, :, 0].astype(np.float32) * 0.299 + data[:, :, 1] * 0.587 + data[:, :, 2] * 0.114
+        ) / 255.0
+
+        # Cell size: larger cells = coarser dots, bass makes them bigger
+        cell = max(4, int((8 + bass * 4) * s))
+
+        # Output: start with black RGBA
+        out = np.zeros_like(data)
+        out[:, :, 3] = data[:, :, 3]  # Preserve original alpha
+
+        colors = self.color_palette
+        n_colors = len(colors)
+        # Slow color rotation
+        color_shift = int(time_pos * 0.4)
+
+        # Draw dots grid
+        out_img = Image.fromarray(out, "RGBA")
+        draw = ImageDraw.Draw(out_img)
+
+        rows = range(cell // 2, h, cell)
+        cols = range(cell // 2, w, cell)
+
+        for yi, cy in enumerate(rows):
+            for xi, cx in enumerate(cols):
+                # Average luminance in this cell
+                y0 = max(0, cy - cell // 2)
+                y1 = min(h, cy + cell // 2)
+                x0 = max(0, cx - cell // 2)
+                x1 = min(w, cx + cell // 2)
+                cell_lum = float(np.mean(lum[y0:y1, x0:x1]))
+
+                # Dot radius proportional to brightness
+                max_r = cell * 0.48
+                r = int(cell_lum * max_r * (1.0 + energy * 0.3))
+                if r < 1:
+                    continue
+
+                # Pick color from palette based on grid position
+                color = colors[(xi + yi + color_shift) % n_colors]
+
+                # Blend dot color with original luminance
+                bright = 0.4 + cell_lum * 0.6
+                cr = min(255, int(color[0] * bright))
+                cg = min(255, int(color[1] * bright))
+                cb = min(255, int(color[2] * bright))
+                alpha = int(200 * intensity)
+
+                draw.ellipse(
+                    [cx - r, cy - r, cx + r, cy + r],
+                    fill=(cr, cg, cb, alpha),
+                )
+
+        img.paste(Image.alpha_composite(img, out_img), (0, 0))
+
+    # =========================================================================
+    # Moiré effect - Interference patterns from overlapping rotating grids
+    # =========================================================================
+
+    @vj_effect("Moiré", "Géométriques")
+    def _render_moire(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
+        """Render moiré interference from concentric circles with offset centers.
+
+        Two sets of concentric rings emanate from slightly offset origins;
+        their overlap produces dramatic sweeping interference fringes.
+        """
+        w, h = self.width, self.height
+        s = min(w, h) / 512
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        mid = ctx["mid"]
+        intensity = self._current_intensity
+
+        # Ring spacing: controls fringe density
+        spacing = (22 + self.lfo_slow.value(time_pos) * 4 - bass * 3) * s
+
+        # Two ring centers, offset from image center and orbiting slowly
+        orbit_r = (60 + energy * 40) * s
+        cx1 = w / 2 + orbit_r * math.cos(time_pos * 0.4)
+        cy1 = h / 2 + orbit_r * math.sin(time_pos * 0.4)
+        cx2 = w / 2 + orbit_r * math.cos(time_pos * 0.4 + math.pi)
+        cy2 = h / 2 + orbit_r * math.sin(time_pos * 0.4 + math.pi)
+
+        # Precompute distance fields
+        ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+        d1 = np.sqrt((xs - cx1) ** 2 + (ys - cy1) ** 2)
+        d2 = np.sqrt((xs - cx2) ** 2 + (ys - cy2) ** 2)
+
+        # Concentric rings as cosine waves
+        freq = 2 * math.pi / max(4.0, spacing)
+        rings1 = np.cos(d1 * freq) * 0.5 + 0.5
+        rings2 = np.cos(d2 * freq) * 0.5 + 0.5
+
+        # Interference = product; fringes appear where rings align/misalign
+        moire = rings1 * rings2
+
+        # Strong contrast boost for dramatic fringes
+        moire = np.clip((moire - 0.25) * (2.0 + energy * 2.5), 0.0, 1.0)
+
+        # Two-tone coloring from palette
+        colors = self.color_palette
+        t_color = self.lfo_triangle.value_normalized(time_pos)
+        idx1 = int(time_pos * 0.3) % len(colors)
+        idx2 = (idx1 + 2) % len(colors)
+        c1 = np.array(colors[idx1], dtype=np.float32)
+        c2 = np.array(colors[idx2], dtype=np.float32)
+        # Bright areas get color1, dark fringes get color2
+        r = (moire * c1[0] + (1 - moire) * c2[0] * 0.3 * t_color).astype(np.uint8)
+        g = (moire * c1[1] + (1 - moire) * c2[1] * 0.3 * t_color).astype(np.uint8)
+        b = (moire * c1[2] + (1 - moire) * c2[2] * 0.3 * t_color).astype(np.uint8)
+
+        alpha = (np.maximum(moire * 0.9, (1 - moire) * 0.15 * mid) * 255 * intensity).astype(
+            np.uint8
+        )
+
+        result = np.stack([r, g, b, alpha], axis=2)
+        overlay = Image.fromarray(result, "RGBA")
+        img.paste(Image.alpha_composite(img, overlay), (0, 0))
+
+    # =========================================================================
+    # Circuit effect - Animated PCB traces with light signals traveling along
+    # =========================================================================
+
+    def _init_circuit(self) -> None:
+        """Initialize circuit board trace network.
+
+        Generates a grid of orthogonal traces with nodes at intersections.
+        """
+        s = min(self.width, self.height) / 512
+        w, h = self.width, self.height
+
+        # Grid of nodes
+        cols = self._rng.randint(5, 8)
+        rows = self._rng.randint(4, 7)
+        margin_x = int(w * 0.08)
+        margin_y = int(h * 0.08)
+        step_x = (w - 2 * margin_x) / max(1, cols - 1)
+        step_y = (h - 2 * margin_y) / max(1, rows - 1)
+
+        # Nodes: grid positions with slight random jitter
+        self.circuit_nodes: list[tuple[int, int]] = []
+        for r in range(rows):
+            for c in range(cols):
+                jx = int((self._rng.random() - 0.5) * step_x * 0.3)
+                jy = int((self._rng.random() - 0.5) * step_y * 0.3)
+                nx = int(margin_x + c * step_x + jx)
+                ny = int(margin_y + r * step_y + jy)
+                self.circuit_nodes.append((nx, ny))
+
+        # Traces: edges between nearby nodes (orthogonal segments)
+        # Each trace is a list of (x, y) waypoints forming an L-shaped path
+        self.circuit_traces: list[list[tuple[int, int]]] = []
+        node_count = len(self.circuit_nodes)
+        for i in range(node_count):
+            # Connect to 1-3 random other nodes
+            n_connections = self._rng.randint(1, 3)
+            candidates = list(range(node_count))
+            candidates.remove(i)
+            self._rng.shuffle(candidates)
+            for j in candidates[:n_connections]:
+                x1, y1 = self.circuit_nodes[i]
+                x2, y2 = self.circuit_nodes[j]
+                # L-shaped path: horizontal then vertical, or vice versa
+                if self._rng.random() < 0.5:
+                    waypoints = [(x1, y1), (x2, y1), (x2, y2)]
+                else:
+                    waypoints = [(x1, y1), (x1, y2), (x2, y2)]
+                self.circuit_traces.append(waypoints)
+
+        # Signals: light pulses traveling along traces
+        self.circuit_signals: list[dict[str, Any]] = []
+        self.circuit_max_signals = int(30 + 10 * s)
+        self.circuit_trace_width = max(1, int(1.5 * s))
+        self.circuit_node_radius = max(2, int(4 * s))
+
+    def _spawn_circuit_signal(self) -> None:
+        """Spawn a new light signal on a random trace."""
+        if not self.circuit_traces:
+            return
+        trace_idx = self._rng.randint(0, len(self.circuit_traces) - 1)
+        self.circuit_signals.append(
+            {
+                "trace_idx": trace_idx,
+                "progress": 0.0,
+                "speed": self._rng.uniform(0.01, 0.03),
+                "color_idx": self._rng.randint(0, 99),
+                "tail_length": self._rng.uniform(0.08, 0.2),
+            }
+        )
+
+    @vj_effect("Circuit", "Géométriques")
+    def _render_circuit(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
+        """Render animated circuit board with light signals traveling along traces.
+
+        Static PCB-like trace network with pulsing nodes and moving light
+        pulses that are spawned on beats and travel at energy-modulated speed.
+        """
+        draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        is_beat = ctx["is_beat"]
+        s = min(self.width, self.height) / 512
+        intensity = self._current_intensity
+        colors = self.color_palette
+
+        # Spawn signals on beats
+        if is_beat and len(self.circuit_signals) < self.circuit_max_signals:
+            n_spawn = self._rng.randint(2, 5)
+            for _ in range(n_spawn):
+                self._spawn_circuit_signal()
+
+        # Steady trickle of signals
+        if (
+            self._rng.random() < 0.15 + energy * 0.3
+            and len(self.circuit_signals) < self.circuit_max_signals
+        ):
+            self._spawn_circuit_signal()
+
+        # --- Draw static traces (dim) ---
+        trace_color_base = colors[int(time_pos * 0.2) % len(colors)]
+        dim_alpha = int(40 * intensity)
+        tw = self.circuit_trace_width
+
+        for trace in self.circuit_traces:
+            for k in range(len(trace) - 1):
+                draw.line(
+                    [trace[k], trace[k + 1]],
+                    fill=(*trace_color_base, dim_alpha),
+                    width=tw,
+                )
+
+        # --- Draw nodes (pads) ---
+        node_alpha = int((60 + bass * 80) * intensity)
+        nr = self.circuit_node_radius
+        for nx, ny in self.circuit_nodes:
+            draw.ellipse(
+                [nx - nr, ny - nr, nx + nr, ny + nr],
+                fill=(*trace_color_base, node_alpha),
+            )
+
+        # --- Update and draw signals ---
+        def _trace_point(trace: list[tuple[int, int]], progress: float) -> tuple[int, int]:
+            """Get (x, y) position along a trace at given progress [0..1]."""
+            # Compute total length
+            segments: list[float] = []
+            total = 0.0
+            for k in range(len(trace) - 1):
+                dx = trace[k + 1][0] - trace[k][0]
+                dy = trace[k + 1][1] - trace[k][1]
+                seg_len = math.sqrt(dx * dx + dy * dy)
+                segments.append(seg_len)
+                total += seg_len
+            if total == 0:
+                return trace[0]
+            target = progress * total
+            accumulated = 0.0
+            for k, seg_len in enumerate(segments):
+                if accumulated + seg_len >= target:
+                    t = (target - accumulated) / seg_len if seg_len > 0 else 0
+                    x = int(trace[k][0] + (trace[k + 1][0] - trace[k][0]) * t)
+                    y = int(trace[k][1] + (trace[k + 1][1] - trace[k][1]) * t)
+                    return (x, y)
+                accumulated += seg_len
+            return trace[-1]
+
+        speed_mult = 1.0 + energy * 3.0
+        new_signals = []
+        for sig in self.circuit_signals:
+            sig["progress"] += sig["speed"] * speed_mult
+
+            if sig["progress"] > 1.0 + sig["tail_length"]:
+                continue  # Signal finished
+
+            trace = self.circuit_traces[sig["trace_idx"]]
+            color = self._get_palette_color(sig["color_idx"])
+
+            # Draw signal tail
+            n_tail = max(3, int(8 * s))
+            for t in range(n_tail):
+                frac = t / n_tail
+                p = sig["progress"] - frac * sig["tail_length"]
+                if p < 0 or p > 1:
+                    continue
+                px, py = _trace_point(trace, p)
+                fade = (1.0 - frac) ** 2
+                a = int(220 * fade * intensity)
+                r = max(1, int((3 - frac * 2) * s))
+                # Brighten head toward white
+                white_blend = fade * 0.5
+                cr = min(255, int(color[0] * (1 - white_blend) + 255 * white_blend))
+                cg = min(255, int(color[1] * (1 - white_blend) + 255 * white_blend))
+                cb = min(255, int(color[2] * (1 - white_blend) + 255 * white_blend))
+                draw.ellipse(
+                    [px - r, py - r, px + r, py + r],
+                    fill=(cr, cg, cb, a),
+                )
+
+            new_signals.append(sig)
+
+        self.circuit_signals = new_signals
+
+    # =========================================================================
+    # Constellation effect - Stars connected by lines, reconfiguring on beats
+    # =========================================================================
+
+    def _init_constellation(self) -> None:
+        """Initialize constellation star field."""
+        s = min(self.width, self.height) / 512
+        self.constellation_stars: list[dict[str, Any]] = []
+        self.constellation_num = 50
+        self.constellation_link_dist = 120 * s
+        # Target positions for reconfiguration
+        self.constellation_targets: list[tuple[float, float]] | None = None
+        self.constellation_lerp = 1.0  # 1.0 = at target, <1.0 = transitioning
+
+        for i in range(self.constellation_num):
+            self.constellation_stars.append(
+                {
+                    "x": self._rng.random() * self.width,
+                    "y": self._rng.random() * self.height,
+                    "tx": 0.0,
+                    "ty": 0.0,
+                    "brightness": self._rng.uniform(0.4, 1.0),
+                    "phase": self._rng.random() * math.pi * 2,
+                    "color_idx": i,
+                    "size": self._rng.uniform(1.5, 4.0) * s,
+                }
+            )
+
+    @vj_effect("Constellation", "Particules")
+    def _render_constellation(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render connected star constellation that reconfigures on beats.
+
+        Stars drift slowly and twinkle. On beats, new target positions
+        are set and stars smoothly migrate, rewiring connections.
+        Lines connect nearby stars with distance-based alpha fade.
+        """
+        draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        mid = ctx["mid"]
+        is_beat = ctx["is_beat"]
+        s = min(self.width, self.height) / 512
+        intensity = self._current_intensity
+        w, h = self.width, self.height
+
+        # --- Reconfigure on strong beats ---
+        if is_beat and energy > 0.4 and self.constellation_lerp >= 0.95:
+            self.constellation_lerp = 0.0
+            for star in self.constellation_stars:
+                star["tx"] = self._rng.random() * w
+                star["ty"] = self._rng.random() * h
+
+        # --- Advance lerp ---
+        if self.constellation_lerp < 1.0:
+            self.constellation_lerp = min(1.0, self.constellation_lerp + 0.02 + energy * 0.03)
+            t = self.constellation_lerp
+            # Ease-out cubic
+            t_ease = 1.0 - (1.0 - t) ** 3
+            for star in self.constellation_stars:
+                star["x"] += (star["tx"] - star["x"]) * t_ease * 0.08
+                star["y"] += (star["ty"] - star["y"]) * t_ease * 0.08
+
+        # --- Gentle drift ---
+        for star in self.constellation_stars:
+            drift_x = math.sin(time_pos * 0.15 + star["phase"]) * 0.3 * s
+            drift_y = math.cos(time_pos * 0.12 + star["phase"] * 1.7) * 0.2 * s
+            star["x"] = (star["x"] + drift_x) % w
+            star["y"] = (star["y"] + drift_y) % h
+
+        # --- Draw connection lines between nearby stars ---
+        link_dist = self.constellation_link_dist * (1.0 + mid * 0.3)
+        link_dist_sq = link_dist * link_dist
+        n = len(self.constellation_stars)
+        line_w = max(1, int(1.2 * s))
+
+        for i in range(n):
+            si = self.constellation_stars[i]
+            xi, yi = si["x"], si["y"]
+            for j in range(i + 1, n):
+                sj = self.constellation_stars[j]
+                dx = xi - sj["x"]
+                dy = yi - sj["y"]
+                dist_sq = dx * dx + dy * dy
+                if dist_sq < link_dist_sq and dist_sq > 0:
+                    dist = math.sqrt(dist_sq)
+                    fade = 1.0 - dist / link_dist
+                    line_alpha = int(fade * 100 * intensity)
+                    if line_alpha < 5:
+                        continue
+                    color = self._get_palette_color(si["color_idx"])
+                    draw.line(
+                        [(int(xi), int(yi)), (int(sj["x"]), int(sj["y"]))],
+                        fill=(*color, line_alpha),
+                        width=line_w,
+                    )
+
+        # --- Draw stars ---
+        for star in self.constellation_stars:
+            # Twinkle: sinusoidal brightness modulation
+            twinkle = 0.6 + 0.4 * math.sin(time_pos * 2.5 + star["phase"])
+            bright = star["brightness"] * twinkle
+            if is_beat:
+                bright = min(1.0, bright + 0.3)
+
+            color = self._get_palette_color(star["color_idx"])
+            alpha = int(bright * 220 * intensity)
+            r_star = max(1, int(star["size"] * (1.0 + bass * 0.5)))
+
+            x, y = int(star["x"]), int(star["y"])
+
+            # Glow halo
+            halo_r = int(r_star * 2.5)
+            halo_alpha = int(alpha * 0.2)
+            if halo_alpha > 3:
+                draw.ellipse(
+                    [x - halo_r, y - halo_r, x + halo_r, y + halo_r],
+                    fill=(*color, halo_alpha),
+                )
+
+            # Star core (brighter, toward white)
+            wb = bright * 0.4
+            cr = min(255, int(color[0] * (1 - wb) + 255 * wb))
+            cg = min(255, int(color[1] * (1 - wb) + 255 * wb))
+            cb = min(255, int(color[2] * (1 - wb) + 255 * wb))
+            draw.ellipse(
+                [x - r_star, y - r_star, x + r_star, y + r_star],
+                fill=(cr, cg, cb, alpha),
+            )
+
+    # =========================================================================
+    # Swarm effect - Boids flocking with audio-reactive cohesion
+    # =========================================================================
+
+    def _init_swarm(self) -> None:
+        """Initialize boid swarm."""
+        s = min(self.width, self.height) / 512
+        self.swarm_boids: list[dict[str, float]] = []
+        self.swarm_count = 120
+
+        for i in range(self.swarm_count):
+            angle = self._rng.random() * math.pi * 2
+            speed = self._rng.uniform(1.0, 3.0) * s
+            self.swarm_boids.append(
+                {
+                    "x": self._rng.random() * self.width,
+                    "y": self._rng.random() * self.height,
+                    "vx": math.cos(angle) * speed,
+                    "vy": math.sin(angle) * speed,
+                    "color_idx": i,
+                }
+            )
+
+    @vj_effect("Swarm", "Particules")
+    def _render_swarm(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
+        """Render boid flocking swarm.
+
+        Agents follow cohesion/separation/alignment rules. The swarm
+        contracts toward center on kicks, spreads on low energy.
+        Trails connect nearby boids.
+        """
+        draw = ImageDraw.Draw(img)
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        is_beat = ctx["is_beat"]
+        intensity = self._current_intensity
+        w, h = self.width, self.height
+        s = min(w, h) / 512
+
+        # Boid parameters modulated by audio
+        cohesion_strength = 0.002 + energy * 0.004
+        separation_dist = (20 + bass * 15) * s
+        alignment_strength = 0.05
+        max_speed = (2.5 + energy * 3.0) * s
+
+        # Contract toward center on beats
+        center_pull = 0.0
+        if is_beat:
+            center_pull = 0.03 + bass * 0.04
+
+        cx, cy = w / 2.0, h / 2.0
+        n = len(self.swarm_boids)
+
+        # Compute average position and velocity for alignment/cohesion
+        avg_x = sum(b["x"] for b in self.swarm_boids) / n
+        avg_y = sum(b["y"] for b in self.swarm_boids) / n
+        avg_vx = sum(b["vx"] for b in self.swarm_boids) / n
+        avg_vy = sum(b["vy"] for b in self.swarm_boids) / n
+
+        for boid in self.swarm_boids:
+            bx, by = boid["x"], boid["y"]
+
+            # Cohesion: steer toward flock center
+            boid["vx"] += (avg_x - bx) * cohesion_strength
+            boid["vy"] += (avg_y - by) * cohesion_strength
+
+            # Alignment: match average velocity
+            boid["vx"] += (avg_vx - boid["vx"]) * alignment_strength
+            boid["vy"] += (avg_vy - boid["vy"]) * alignment_strength
+
+            # Separation: avoid nearby boids
+            sep_x, sep_y = 0.0, 0.0
+            for other in self.swarm_boids:
+                if other is boid:
+                    continue
+                dx = bx - other["x"]
+                dy = by - other["y"]
+                dist_sq = dx * dx + dy * dy
+                if 0 < dist_sq < separation_dist * separation_dist:
+                    dist = math.sqrt(dist_sq)
+                    sep_x += dx / dist
+                    sep_y += dy / dist
+            boid["vx"] += sep_x * 0.15
+            boid["vy"] += sep_y * 0.15
+
+            # Beat contraction toward center
+            if center_pull > 0:
+                boid["vx"] += (cx - bx) * center_pull
+                boid["vy"] += (cy - by) * center_pull
+
+            # Clamp speed
+            speed = math.sqrt(boid["vx"] ** 2 + boid["vy"] ** 2)
+            if speed > max_speed:
+                boid["vx"] = boid["vx"] / speed * max_speed
+                boid["vy"] = boid["vy"] / speed * max_speed
+
+            # Update position with wrap
+            boid["x"] = (boid["x"] + boid["vx"]) % w
+            boid["y"] = (boid["y"] + boid["vy"]) % h
+
+        # Draw connections between close boids
+        link_dist = (40 + energy * 20) * s
+        link_dist_sq = link_dist * link_dist
+        line_w = max(1, int(1.0 * s))
+        for i in range(n):
+            bi = self.swarm_boids[i]
+            for j in range(i + 1, n):
+                bj = self.swarm_boids[j]
+                dx = bi["x"] - bj["x"]
+                dy = bi["y"] - bj["y"]
+                dist_sq = dx * dx + dy * dy
+                if dist_sq < link_dist_sq and dist_sq > 0:
+                    fade = 1.0 - math.sqrt(dist_sq) / link_dist
+                    line_alpha = int(fade * 60 * intensity)
+                    if line_alpha > 3:
+                        color = self._get_palette_color(bi["color_idx"])
+                        draw.line(
+                            [(int(bi["x"]), int(bi["y"])), (int(bj["x"]), int(bj["y"]))],
+                            fill=(*color, line_alpha),
+                            width=line_w,
+                        )
+
+        # Draw boids
+        boid_r = max(1, int(2.5 * s))
+        for boid in self.swarm_boids:
+            color = self._get_palette_color(boid["color_idx"])
+            alpha = int(200 * intensity)
+            x, y = int(boid["x"]), int(boid["y"])
+            draw.ellipse(
+                [x - boid_r, y - boid_r, x + boid_r, y + boid_r],
+                fill=(*color, alpha),
+            )
+
+    # =========================================================================
+    # Bokeh effect - Luminous out-of-focus circles modulated by bass
+    # =========================================================================
+
+    def _init_bokeh(self) -> None:
+        """Initialize bokeh particle system."""
+        s = min(self.width, self.height) / 512
+        self.bokeh_orbs: list[dict[str, Any]] = []
+        self.max_bokeh_orbs = 40
+
+        for _ in range(self.max_bokeh_orbs):
+            self._spawn_bokeh_orb(s)
+
+    def _spawn_bokeh_orb(self, s: float) -> None:
+        """Spawn a single bokeh orb with random properties."""
+        self.bokeh_orbs.append(
+            {
+                "x": self._rng.random() * self.width,
+                "y": self._rng.random() * self.height,
+                "vx": (self._rng.random() - 0.5) * 0.6 * s,
+                "vy": (self._rng.random() - 0.5) * 0.4 * s - 0.3 * s,
+                "base_radius": (self._rng.random() * 25 + 15) * s,
+                "color_idx": self._rng.randint(0, 99),
+                "phase": self._rng.random() * math.pi * 2,
+                "depth": self._rng.random(),
+            }
+        )
+
+    @vj_effect("Bokeh", "Particules")
+    def _render_bokeh(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
+        """Render luminous out-of-focus bokeh circles.
+
+        Floating translucent discs with bright edges and soft interiors,
+        size pulsing with bass, gentle drifting motion.
+        """
+        draw = ImageDraw.Draw(img)
+        bass = ctx["bass"]
+        energy = ctx["energy"]
+        is_beat = ctx["is_beat"]
+        s = min(self.width, self.height) / 512
+        intensity = self._current_intensity
+
+        # Spawn extra orb on strong beats
+        if is_beat and energy > 0.5 and len(self.bokeh_orbs) < self.max_bokeh_orbs + 10:
+            self._spawn_bokeh_orb(s)
+
+        new_orbs = []
+        for orb in self.bokeh_orbs:
+            # Gentle floating drift
+            drift_x = math.sin(time_pos * 0.3 + orb["phase"]) * 0.4 * s
+            drift_y = math.cos(time_pos * 0.2 + orb["phase"] * 1.3) * 0.3 * s
+            orb["x"] += orb["vx"] + drift_x
+            orb["y"] += orb["vy"] + drift_y
+
+            # Wrap around with margin
+            margin = orb["base_radius"] * 2
+            if orb["x"] < -margin:
+                orb["x"] = self.width + margin * 0.5
+            elif orb["x"] > self.width + margin:
+                orb["x"] = -margin * 0.5
+            if orb["y"] < -margin:
+                orb["y"] = self.height + margin * 0.5
+            elif orb["y"] > self.height + margin:
+                orb["y"] = -margin * 0.5
+
+            # Bass modulates radius — deep orbs swell more
+            depth_factor = 0.5 + orb["depth"] * 0.5
+            bass_swell = 1.0 + bass * 1.2 * depth_factor
+            breath = 1.0 + math.sin(time_pos * 0.8 + orb["phase"]) * 0.15
+            radius = orb["base_radius"] * bass_swell * breath
+            radius = max(4 * s, radius)
+            ri = int(radius)
+
+            # Depth-based alpha (farther = more transparent, dreamier)
+            base_alpha = 0.15 + (1.0 - orb["depth"]) * 0.25
+            alpha = int(base_alpha * 255 * intensity)
+
+            r, g, b = self._get_palette_color(orb["color_idx"])
+            x, y = int(orb["x"]), int(orb["y"])
+
+            # Draw concentric rings: bright edge, soft fill (bokeh look)
+            # Outer ring (bright edge highlight)
+            edge_alpha = min(255, int(alpha * 1.8))
+            draw.ellipse(
+                [x - ri, y - ri, x + ri, y + ri],
+                outline=(r, g, b, edge_alpha),
+                width=max(1, int(2.5 * s)),
+            )
+
+            # Inner glow fill (soft, translucent)
+            inner_ri = max(1, int(ri * 0.85))
+            fill_alpha = int(alpha * 0.4)
+            draw.ellipse(
+                [x - inner_ri, y - inner_ri, x + inner_ri, y + inner_ri],
+                fill=(r, g, b, fill_alpha),
+            )
+
+            # Hot center spot
+            center_ri = max(1, int(ri * 0.25))
+            center_alpha = min(255, int(alpha * 1.5))
+            draw.ellipse(
+                [x - center_ri, y - center_ri, x + center_ri, y + center_ri],
+                fill=(
+                    min(255, r + 80),
+                    min(255, g + 80),
+                    min(255, b + 80),
+                    center_alpha,
+                ),
+            )
+
+            new_orbs.append(orb)
+
+        self.bokeh_orbs = new_orbs
+
+        # Remove excess orbs gradually
+        while len(self.bokeh_orbs) > self.max_bokeh_orbs:
+            self.bokeh_orbs.pop(0)
+
+    # =========================================================================
+    # Grid effect - 2D grid deformed by beat-triggered sine waves
     # =========================================================================
 
     def _init_grid(self) -> None:

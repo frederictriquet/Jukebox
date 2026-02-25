@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from PIL import Image, ImageDraw
 
+from jukebox.core.constants import FREQ_BASS_HIGH, FREQ_BASS_LOW, FREQ_MID_HIGH
 from plugins.video_exporter.layers.base import BaseVisualLayer
 
 if TYPE_CHECKING:
@@ -107,17 +108,17 @@ class WaveformLayer(BaseVisualLayer):
         nyquist = self.sr / 2
 
         # Bass filter: 20-250 Hz
-        bass_low = 20 / nyquist
-        bass_high = 250 / nyquist
+        bass_low = FREQ_BASS_LOW / nyquist
+        bass_high = FREQ_BASS_HIGH / nyquist
         self.bass_b, self.bass_a = signal.butter(4, [bass_low, bass_high], btype="band")
 
         # Mid filter: 250-4000 Hz
-        mid_low = 250 / nyquist
-        mid_high = min(4000 / nyquist, 0.99)
+        mid_low = FREQ_BASS_HIGH / nyquist
+        mid_high = min(FREQ_MID_HIGH / nyquist, 0.99)
         self.mid_b, self.mid_a = signal.butter(4, [mid_low, mid_high], btype="band")
 
         # Treble filter: 4000+ Hz
-        treble_low = min(4000 / nyquist, 0.99)
+        treble_low = min(FREQ_MID_HIGH / nyquist, 0.99)
         self.treble_b, self.treble_a = signal.butter(4, treble_low, btype="high")
 
         # Apply filters

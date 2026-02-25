@@ -27,6 +27,13 @@ class FFmpegEncoder:
         audio_start: float,
         audio_duration: float,
         fade_duration: float = 1.0,
+        *,
+        video_codec: str = "libx264",
+        preset: str = "medium",
+        crf: str = "23",
+        pixel_format: str = "yuv420p",
+        audio_codec: str = "aac",
+        audio_bitrate: str = "192k",
     ) -> None:
         """Initialize FFmpeg encoder.
 
@@ -39,6 +46,12 @@ class FFmpegEncoder:
             audio_start: Start time in the audio file (seconds).
             audio_duration: Duration of audio to include (seconds).
             fade_duration: Duration of fade in/out in seconds (0 to disable).
+            video_codec: FFmpeg video codec (default: libx264).
+            preset: FFmpeg encoding preset (default: medium).
+            crf: FFmpeg constant rate factor (default: 23).
+            pixel_format: FFmpeg pixel format (default: yuv420p).
+            audio_codec: FFmpeg audio codec (default: aac).
+            audio_bitrate: FFmpeg audio bitrate (default: 192k).
 
         Raises:
             RuntimeError: If FFmpeg is not found.
@@ -51,6 +64,12 @@ class FFmpegEncoder:
         self.audio_start = audio_start
         self.audio_duration = audio_duration
         self.fade_duration = fade_duration
+        self.video_codec = video_codec
+        self.preset = preset
+        self.crf = crf
+        self.pixel_format = pixel_format
+        self.audio_codec = audio_codec
+        self.audio_bitrate = audio_bitrate
         self.process: subprocess.Popen | None = None
         self._frame_count = 0
 
@@ -109,17 +128,17 @@ class FFmpegEncoder:
         # Output settings
         cmd.extend([
             "-c:v",
-            "libx264",
+            self.video_codec,
             "-preset",
-            "medium",
+            self.preset,
             "-crf",
-            "23",
+            self.crf,
             "-pix_fmt",
-            "yuv420p",
+            self.pixel_format,
             "-c:a",
-            "aac",
+            self.audio_codec,
             "-b:a",
-            "192k",
+            self.audio_bitrate,
             "-shortest",  # End when shortest stream ends
             str(self.output_path),
         ])

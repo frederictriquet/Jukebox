@@ -6,6 +6,8 @@ from typing import Any, TypeVar
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPixmap
 
+from jukebox.core.mode_manager import AppMode
+
 K = TypeVar("K")
 V = TypeVar("V")
 
@@ -58,6 +60,7 @@ class CellRenderer:
         self.stylers = {
             "waveform": WaveformStyler(),
             "stats": StatsStyler(),
+            "duplicate": DuplicateStatusStyler(),
             "filename": FilenameStyler(mode),
             "artist": ArtistStyler(),
             "title": TitleStyler(),
@@ -173,7 +176,7 @@ class FilenameStyler(Styler):
 
     def display(self, data: Any, track: dict[str, Any]) -> str:
         """Display based on mode."""
-        if self.mode == "jukebox":
+        if self.mode == AppMode.JUKEBOX.value:
             # Jukebox mode: show artist - title
             artist = track.get("artist", "")
             title = track.get("title", "")
@@ -190,12 +193,20 @@ class FilenameStyler(Styler):
 
     def tooltip(self, data: Any, track: dict[str, Any]) -> str:
         """Show tooltip based on mode."""
-        if self.mode == "jukebox":
+        if track.get("file_missing"):
+            return f"File missing: {track['filepath']}"
+        if self.mode == AppMode.JUKEBOX.value:
             # Jukebox mode: show filename in tooltip
             return str(track["filepath"].name)
         else:
             # Curating mode: show full path in tooltip
             return str(track["filepath"])
+
+    def foreground(self, data: Any, track: dict[str, Any]) -> QColor | None:
+        """Red text if file is missing from disk."""
+        if track.get("file_missing"):
+            return QColor(Qt.GlobalColor.red)
+        return None
 
 
 class GenreStyler(Styler):
@@ -301,6 +312,12 @@ class ArtistStyler(Styler):
         """Show filename in tooltip."""
         return str(track["filepath"].name)
 
+    def foreground(self, data: Any, track: dict[str, Any]) -> QColor | None:
+        """Red text if file is missing from disk."""
+        if track.get("file_missing"):
+            return QColor(Qt.GlobalColor.red)
+        return None
+
 
 class TitleStyler(Styler):
     """Styler for title column."""
@@ -312,6 +329,12 @@ class TitleStyler(Styler):
     def tooltip(self, data: Any, track: dict[str, Any]) -> str:
         """Show filename in tooltip."""
         return str(track["filepath"].name)
+
+    def foreground(self, data: Any, track: dict[str, Any]) -> QColor | None:
+        """Red text if file is missing from disk."""
+        if track.get("file_missing"):
+            return QColor(Qt.GlobalColor.red)
+        return None
 
 
 class DurationStyler(Styler):
@@ -404,6 +427,7 @@ class WaveformStyler(Styler):
                 mid_h = int((bass_samples[i] + mid_samples[i]) * height)
                 treble_h = int((bass_samples[i] + mid_samples[i] + treble_samples[i]) * height)
 
+                # @hardcoded-ok: waveform preview colors match default config
                 # Draw treble (white) - full height
                 if treble_h > 0:
                     painter.fillRect(x, y_bottom - treble_h, 1, treble_h, QColor("#FFFFFF"))
@@ -448,4 +472,44 @@ class StatsStyler(Styler):
 
     def alignment(self, data: Any, track: dict[str, Any]) -> Qt.AlignmentFlag:
         """Center-align the icon."""
+        return Qt.AlignmentFlag.AlignCenter
+
+
+class DuplicateStatusStyler(Styler):
+    """Styler for duplicate column (shows curating track's duplicate status)."""
+
+    _COLORS = {
+        "red": QColor("#FF4444"),
+        "orange": QColor("#FFA500"),
+        "green": QColor("#44CC44"),
+        "pending": QColor("#666666"),
+    }
+
+    def display(self, data: Any, track: dict[str, Any]) -> str:
+        """Display a colored dot indicator."""
+        return "●"
+
+    def tooltip(self, data: Any, track: dict[str, Any]) -> str | None:
+        """Explain the duplicate status with matched track info if available."""
+        status = track.get("duplicate_status", "green")
+        match_info = track.get("duplicate_match")
+        if status == "red":
+            if match_info:
+                return f"Certain duplicate: {match_info}"
+            return "Certain duplicate in library"
+        if status == "orange":
+            if match_info:
+                return f"Possible duplicate: {match_info}"
+            return "Possible duplicate in library"
+        if status == "pending":
+            return "Checking for duplicates..."
+        return "No duplicate detected"
+
+    def foreground(self, data: Any, track: dict[str, Any]) -> QColor:
+        """Color based on duplicate status."""
+        status = track.get("duplicate_status", "green")
+        return self._COLORS.get(status, self._COLORS["green"])
+
+    def alignment(self, data: Any, track: dict[str, Any]) -> Qt.AlignmentFlag:
+        """Center-align the dot."""
         return Qt.AlignmentFlag.AlignCenter

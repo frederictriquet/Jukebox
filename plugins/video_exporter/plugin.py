@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6.QtWidgets import QPushButton
 
+from jukebox.core.constants import StatusColors
 from jukebox.core.event_bus import Events
 
 if TYPE_CHECKING:
@@ -61,9 +62,10 @@ class VideoExporterPlugin:
             ui_builder: UI builder for adding widgets.
         """
         # Create export button (hidden by default)
+        export_shortcut = "Ctrl+Shift+E"
         self.export_button = QPushButton("Export Video")
-        self.export_button.setToolTip("Export loop as video clip (Ctrl+Shift+E)")
-        self.export_button.setMaximumWidth(120)
+        self.export_button.setToolTip(f"Export loop as video clip ({export_shortcut})")
+        self.export_button.setMaximumWidth(120)  # @hardcoded-ok: standard button width
         self.export_button.clicked.connect(self._show_export_dialog)
         self.export_button.setVisible(False)  # Hidden until loop is active
 
@@ -76,7 +78,7 @@ class VideoExporterPlugin:
             menu,
             "Export Video from Loop...",
             self._show_export_dialog,
-            shortcut="Ctrl+Shift+E",
+            shortcut=export_shortcut,
         )
 
         logging.info("[Video Exporter] UI registered")
@@ -180,7 +182,7 @@ class VideoExporterPlugin:
             self.context.emit(
                 Events.STATUS_MESSAGE,
                 message="No active loop to export",
-                color="#FF6600",
+                color=StatusColors.WARNING_ALT,
             )
             return
 

@@ -44,6 +44,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from jukebox.core.audio_player import PlayerState
+from jukebox.core.constants import (
+    AUDIO_HOP_LENGTH,
+    AUDIO_SAMPLE_RATE_LOW,
+    VLC_SEEK_DELAY_MS,
+    WORKER_WAIT_TIMEOUT_MS,
+)
 from jukebox.core.event_bus import Events
 from plugins.cue_maker.constants import (
     ACTION_DELETE,
@@ -710,14 +717,14 @@ class CueMakerWidget(QWidget):
             self._mix_position_timer.stop()
             return
 
-        if state == "playing":
+        if state == PlayerState.PLAYING.value:
             self.play_btn.setText("\u23f8")
             self.stop_btn.setEnabled(True)
             self._mix_position_timer.start()
-        elif state == "paused":
+        elif state == PlayerState.PAUSED.value:
             self.play_btn.setText("\u25b6")
             self._mix_position_timer.stop()
-        elif state == "stopped":
+        elif state == PlayerState.STOPPED.value:
             self.play_btn.setText("\u25b6")
             self.stop_btn.setEnabled(False)
             self._mix_position_timer.stop()
@@ -754,7 +761,7 @@ class CueMakerWidget(QWidget):
         if freshly_loaded or not player.is_playing():
             player.play()
             # VLC ignores seek when just started — small delay then seek
-            QTimer.singleShot(50, lambda: player.set_position(position))
+            QTimer.singleShot(VLC_SEEK_DELAY_MS, lambda: player.set_position(position))
         else:
             player.set_position(position)
 
@@ -783,7 +790,7 @@ class CueMakerWidget(QWidget):
         if self._waveform_worker is not None:
             self._waveform_worker.requestInterruption()
             self._waveform_worker.quit()
-            self._waveform_worker.wait(5000)
+            self._waveform_worker.wait(WORKER_WAIT_TIMEOUT_MS)
             self._waveform_worker = None
 
         # Clear existing waveform
@@ -795,7 +802,7 @@ class CueMakerWidget(QWidget):
         cached = load_cached_waveform(filepath)
         if cached is not None:
             self.waveform_widget.display_waveform(cached)
-            self._mix_duration_s = len(cached["bass"]) * 2048 / 11025
+            self._mix_duration_s = len(cached["bass"]) * AUDIO_HOP_LENGTH / AUDIO_SAMPLE_RATE_LOW
             self.timing_bar.set_mix_duration(int(self._mix_duration_s * 1000))
             logger.info("[Cue Maker] Loaded waveform from cache for %s", filepath)
             return
@@ -1267,5 +1274,5 @@ class CueMakerWidget(QWidget):
         if self._waveform_worker is not None:
             self._waveform_worker.requestInterruption()
             self._waveform_worker.quit()
-            self._waveform_worker.wait(5000)
+            self._waveform_worker.wait(WORKER_WAIT_TIMEOUT_MS)
             self._waveform_worker = None

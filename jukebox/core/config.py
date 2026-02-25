@@ -202,6 +202,13 @@ class VideoExporterConfig(BaseModel):
     # VJing presets (predefined effect combinations)
     vjing_presets: list[VJingPresetConfig] = []
     vjing_default_preset: str = ""  # Empty = use genre mappings
+    # FFmpeg encoding settings
+    ffmpeg_video_codec: str = "libx264"
+    ffmpeg_preset: str = "medium"
+    ffmpeg_crf: str = "23"
+    ffmpeg_pixel_format: str = "yuv420p"
+    ffmpeg_audio_codec: str = "aac"
+    ffmpeg_audio_bitrate: str = "192k"
     # VJing simultaneous effects (how many effects are visible at once)
     vjing_simultaneous_effects: int = Field(ge=1, le=10, default=1)
 

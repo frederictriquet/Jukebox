@@ -1,5 +1,6 @@
 """Audio player wrapper for python-vlc."""
 
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -7,11 +8,19 @@ import vlc
 from PySide6.QtCore import QObject, Signal
 
 
+class PlayerState(Enum):
+    """Audio player states."""
+
+    PLAYING = "playing"
+    PAUSED = "paused"
+    STOPPED = "stopped"
+
+
 class AudioPlayer(QObject):
     """Wrapper around python-vlc for audio playback."""
 
     # Signals
-    state_changed = Signal(str)  # "playing", "paused", "stopped"
+    state_changed = Signal(str)  # PlayerState.value
     position_changed = Signal(float)  # 0.0 to 1.0
     volume_changed = Signal(int)  # 0 to 100
     track_finished = Signal()
@@ -50,17 +59,17 @@ class AudioPlayer(QObject):
     def play(self) -> None:
         """Start playback."""
         self._player.play()
-        self.state_changed.emit("playing")
+        self.state_changed.emit(PlayerState.PLAYING.value)
 
     def pause(self) -> None:
         """Pause playback."""
         self._player.pause()
-        self.state_changed.emit("paused")
+        self.state_changed.emit(PlayerState.PAUSED.value)
 
     def stop(self) -> None:
         """Stop playback."""
         self._player.stop()
-        self.state_changed.emit("stopped")
+        self.state_changed.emit(PlayerState.STOPPED.value)
 
     def set_volume(self, volume: int) -> None:
         """Set volume (0-100).
