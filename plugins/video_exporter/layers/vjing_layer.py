@@ -4745,6 +4745,99 @@ class VJingLayer(BaseVisualLayer):
         result_img = Image.fromarray(data.astype(np.uint8), "RGBA")
         img.paste(result_img, (0, 0))
 
+    @vj_effect("Attractor", "Particules")
+    def _render_attractor(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Strange attractor — transcribed from dwitter.net.
+
+        Iterates 3000+ times:
+            X_new = cos(Y + j) + cos(X + t/4 + j×7)
+            Y_new = sin(Y + j) + sin(X + t/4 + j×7)
+        where j scales through 21 families producing a rich Clifford morphing
+        pattern. Colors are drawn from the active palette as a smooth gradient.
+        Each point is drawn as a 2×2 pixel block (mirrors original fillRect(…,2,2)).
+
+        Original JS by p01 on dwitter.net — 30 000 iterations, 1920×1080 canvas.
+        """
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        is_beat = ctx["is_beat"]
+
+        w, h = self.width, self.height
+
+        # Iteration count proportional to canvas area; capped for performance
+        N = min(5000, max(w * h // 100, 60))
+
+        # Time: audio energy speeds up animation; beat adds a transient phase kick
+        t_anim = time_pos * (1.0 + energy * 0.06)
+        if is_beat:
+            self._attractor_kick = getattr(self, "_attractor_kick", 0.0) + 0.04
+        self._attractor_kick = getattr(self, "_attractor_kick", 0.0) * 0.85
+        t_anim += self._attractor_kick
+
+        # Starting point evolves slowly with time (attractor basin reached after ~10 iters)
+        X = 0.5 * math.sin(time_pos * 0.11)
+        Y = 0.5 * math.cos(time_pos * 0.07)
+
+        # Attractor loop — inherently sequential
+        # j scales 0→20 giving 21 attractor families regardless of N
+        Xs = np.empty(N, dtype=np.float32)
+        Ys = np.empty(N, dtype=np.float32)
+        for k in range(N):
+            j = (N - k) * 20 // N
+            a = Y + j
+            b = X + t_anim / 4.0 + j * 7.0
+            X = math.cos(a) + math.cos(b)
+            Y = math.sin(a) + math.sin(b)
+            Xs[k] = X
+            Ys[k] = Y
+
+        # Map to pixel coords (original: center 920,540 on 1920×1080, scale=250)
+        # Normalize by height so the [-2,2] attractor range stays on-canvas
+        cx = w * 0.48
+        cy = h * 0.50
+        scale = min(w, h) * (250.0 / 1080.0) * (1.0 + bass * 0.04) * self._current_intensity
+        px = np.clip((cx + Xs * scale).astype(np.int32), 0, w - 1)
+        py = np.clip((cy + Ys * scale).astype(np.int32), 0, h - 1)
+
+        # Palette gradient LUT — interpolated between active palette colors (512 entries)
+        palette_key = self.color_palette_name
+        if (
+            not hasattr(self, "_attractor_lut")
+            or getattr(self, "_attractor_lut_key", None) != palette_key
+        ):
+            palette = self.color_palette
+            n_colors = len(palette)
+            lut_size = 512
+            lut = np.zeros((lut_size, 3), dtype=np.uint8)
+            for i in range(lut_size):
+                t = (i / lut_size) * n_colors
+                idx0 = int(t) % n_colors
+                idx1 = (int(t) + 1) % n_colors
+                f = t - int(t)
+                c0 = palette[idx0]
+                c1 = palette[idx1]
+                lut[i] = [int(c0[ch] * (1.0 - f) + c1[ch] * f) for ch in range(3)]
+            self._attractor_lut: np.ndarray = lut
+            self._attractor_lut_key: str = palette_key
+
+        # Color index spread evenly across the palette LUT (one color band per 16 iters)
+        color_idx = (np.arange(N, dtype=np.int32) >> 4) % 512
+        colors = self._attractor_lut[color_idx]  # (N, 3)
+
+        # Scatter-assign to RGBA array — 2×2 pixels to match original fillRect(…,2,2)
+        arr = np.zeros((h, w, 4), dtype=np.uint8)
+        alpha = min(255, int(210 * self._current_intensity))
+        px1 = np.clip(px + 1, 0, w - 1)
+        py1 = np.clip(py + 1, 0, h - 1)
+        for qx, qy in ((px, py), (px1, py), (px, py1), (px1, py1)):
+            arr[qy, qx, :3] = colors
+            arr[qy, qx, 3] = alpha
+
+        result = Image.fromarray(arr, "RGBA")
+        img.paste(result, (0, 0), result)
+
 
 # Build effect registries from @vj_effect decorators
 VJingLayer._build_registries()
