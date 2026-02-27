@@ -32,6 +32,7 @@ except ImportError:
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QGridLayout,
@@ -43,6 +44,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QPushButton,
+    QRadioButton,
     QScrollArea,
     QSlider,
     QSplitter,
@@ -445,23 +447,29 @@ class VJingPlayground(QMainWindow):
 
         left_layout.addWidget(effects_box)
 
-        # Post-processing effects
+        # Post-processing effects (mutually exclusive — radio buttons)
         post_box = QGroupBox("Post-Processing")
         post_layout = QHBoxLayout(post_box)
         post_layout.setContentsMargins(4, 4, 4, 4)
         post_layout.setSpacing(8)
-        for effect_name in post_effects:
-            cb = QCheckBox(effect_name)
-            cb.setChecked(False)
-            cb.toggled.connect(self._on_effect_toggled)
-            post_layout.addWidget(cb)
-            self._effect_checkboxes[effect_name] = cb
-        for effect_name in final_effects:
-            cb = QCheckBox(effect_name)
-            cb.setChecked(False)
-            cb.toggled.connect(self._on_effect_toggled)
-            post_layout.addWidget(cb)
-            self._effect_checkboxes[effect_name] = cb
+
+        self._post_fx_group = QButtonGroup(self)
+        self._post_fx_group.setExclusive(True)
+        self._post_fx_radios: dict[str, QRadioButton] = {}
+
+        none_radio = QRadioButton("none")
+        none_radio.setChecked(True)
+        self._post_fx_group.addButton(none_radio)
+        post_layout.addWidget(none_radio)
+
+        for effect_name in post_effects + final_effects:
+            rb = QRadioButton(effect_name)
+            rb.setChecked(False)
+            self._post_fx_group.addButton(rb)
+            post_layout.addWidget(rb)
+            self._post_fx_radios[effect_name] = rb
+
+        self._post_fx_group.buttonToggled.connect(self._on_effect_toggled)
         post_layout.addStretch()
 
         left_layout.addWidget(post_box)
@@ -486,6 +494,21 @@ class VJingPlayground(QMainWindow):
         self._simul_combo.currentTextChanged.connect(self._on_effect_toggled)
         simul_row.addWidget(self._simul_combo)
         left_layout.addLayout(simul_row)
+
+        # Audio sensitivity slider (0.5x — 3.0x, default 1.0x)
+        sens_row = QHBoxLayout()
+        sens_row.addWidget(QLabel("Sensitivity:"))
+        self._sensitivity_slider = QSlider(Qt.Orientation.Horizontal)
+        self._sensitivity_slider.setRange(50, 300)  # 0.50 to 3.00
+        self._sensitivity_slider.setValue(100)  # 1.0x
+        self._sensitivity_slider.setTickInterval(50)
+        self._sensitivity_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self._sensitivity_slider.valueChanged.connect(self._on_sensitivity_changed)
+        sens_row.addWidget(self._sensitivity_slider)
+        self._sensitivity_label = QLabel("1.0x")
+        self._sensitivity_label.setFixedWidth(35)
+        sens_row.addWidget(self._sensitivity_label)
+        left_layout.addLayout(sens_row)
 
         # Right panel — previews
         right = QWidget()
@@ -640,7 +663,11 @@ class VJingPlayground(QMainWindow):
     # ─── VJing Layer Management ────────────────────────────────────────
 
     def _get_checked_effects(self) -> list[str]:
-        return [name for name, cb in self._effect_checkboxes.items() if cb.isChecked()]
+        effects = [name for name, cb in self._effect_checkboxes.items() if cb.isChecked()]
+        selected = self._post_fx_group.checkedButton()
+        if selected and selected.text() != "none":
+            effects.append(selected.text())
+        return effects
 
     def _build_layers(self) -> None:
         """Full rebuild of both VJingLayers (expensive — audio analysis + precompute)."""
@@ -665,6 +692,7 @@ class VJingPlayground(QMainWindow):
         self.statusBar().showMessage(f"Building VJing layers ({len(checked)} effects)…")
         QApplication.processEvents()
 
+        sens = self._get_sensitivity()
         common = dict(
             fps=FPS,
             audio=self._audio,
@@ -678,6 +706,7 @@ class VJingPlayground(QMainWindow):
             simultaneous_effects=simul,
             transitions_enabled=True,
             use_gpu=True,
+            audio_sensitivity=sens,
         )
 
         try:
@@ -700,19 +729,48 @@ class VJingPlayground(QMainWindow):
             self._led_layer = None
             self.statusBar().showMessage(f"VJing error: {e}")
 
-    @staticmethod
-    def _hot_swap_effects(layer: VJingLayer, effects: list[str]) -> None:
+    def _hot_swap_effects(
+        self, layer: VJingLayer, effects: list[str], time_pos: float
+    ) -> None:
         """Update active effects on an existing layer without re-doing audio analysis.
 
-        Only calls _init_* for effects that are newly added and need state.
+        Preserves the order of already-active effects (new ones appended at the end)
+        and adjusts layer._effect_phase_offset so the currently visible effect keeps
+        playing without interruption after the list size changes.
         """
-        old = set(layer.active_effects)
-        layer.active_effects = list(effects)
-        layer.presets["_playground"] = list(effects)
+        old_effects = layer.active_effects
+        old_set = set(old_effects)
+        new_set = set(effects)
+
+        # Keep existing order; append newly added effects at the end
+        kept = [e for e in old_effects if e in new_set]
+        added = [e for e in effects if e not in old_set]
+        ordered = kept + added
+
+        # Adjust phase offset to keep the current primary effect visible
+        old_num, new_num = len(old_effects), len(ordered)
+        if old_num > 0 and new_num > 0:
+            cycle = layer.effect_cycle_duration
+            old_total = cycle * old_num
+            t_old = (time_pos + layer._effect_phase_offset) % old_total
+            old_primary = int(t_old / cycle) % old_num
+            primary_effect = old_effects[old_primary]
+
+            if primary_effect in ordered:
+                new_primary = ordered.index(primary_effect)
+                pos_in_window = t_old % cycle
+                new_total = cycle * new_num
+                target_t = new_primary * cycle + pos_in_window
+                layer._effect_phase_offset = (
+                    target_t - time_pos % new_total + new_total
+                ) % new_total
+
+        layer.active_effects = ordered
+        layer.presets["_playground"] = ordered
 
         # Initialize state for newly added effects that have an _init_<name> method
-        for name in effects:
-            if name not in old and hasattr(layer, f"_init_{name}"):
+        for name in added:
+            if hasattr(layer, f"_init_{name}"):
                 getattr(layer, f"_init_{name}")()
 
     def _on_effect_toggled(self, *_args: object) -> None:
@@ -728,11 +786,13 @@ class VJingPlayground(QMainWindow):
         except ValueError:
             simul = 3
 
+        time_pos = self._frame_idx / FPS
+
         # Hot-swap on any existing layer (fast, no audio re-analysis)
         has_layer = False
         for layer in (self._vjing_layer, self._led_layer):
             if layer is not None:
-                self._hot_swap_effects(layer, checked)
+                self._hot_swap_effects(layer, checked, time_pos)
                 layer.simultaneous_effects = max(1, min(10, simul))
                 has_layer = True
 
@@ -752,6 +812,19 @@ class VJingPlayground(QMainWindow):
                 layer.color_palette = VJingLayer.COLOR_PALETTES.get(
                     palette_name, VJingLayer.COLOR_PALETTES["neon"]
                 )
+
+    def _get_sensitivity(self) -> dict[str, float]:
+        """Return audio_sensitivity dict from the slider value."""
+        val = self._sensitivity_slider.value() / 100.0
+        return {"bass": val, "mid": val, "treble": val}
+
+    def _on_sensitivity_changed(self, value: int) -> None:
+        val = value / 100.0
+        self._sensitivity_label.setText(f"{val:.1f}x")
+        sens = {"bass": val, "mid": val, "treble": val}
+        for layer in (self._vjing_layer, self._led_layer):
+            if layer is not None:
+                layer.audio_sensitivity = sens
 
     def _on_preview_toggled(self, checked: bool) -> None:
         self._preview_label.setVisible(checked)
@@ -849,6 +922,7 @@ class VJingPlayground(QMainWindow):
         except ValueError:
             simul = 3
 
+        sens = self._get_sensitivity()
         common = dict(
             fps=FPS,
             audio=np.zeros(1, dtype=np.float32),
@@ -862,6 +936,7 @@ class VJingPlayground(QMainWindow):
             simultaneous_effects=simul,
             transitions_enabled=True,
             use_gpu=True,
+            audio_sensitivity=sens,
         )
 
         try:
@@ -1018,7 +1093,28 @@ class VJingPlayground(QMainWindow):
             except Exception as e:
                 log.error(f"LED render error frame {self._frame_idx}: {e}")
 
+        self._highlight_active_effects(time_pos)
         self._frame_idx += 1
+
+    def _highlight_active_effects(self, time_pos: float) -> None:
+        """Bold + green the effect names currently visible on screen."""
+        layer = self._vjing_layer or self._led_layer
+        if layer is None:
+            return
+
+        active = set(layer.active_effects)
+        num = len(layer.active_effects)
+        visible: set[str] = set()
+        for i, name in enumerate(layer.active_effects):
+            if layer._calculate_effect_alpha(i, time_pos, num) > 0.0:
+                visible.add(name)
+
+        on = "font-weight: bold; color: #00FF00;"
+        off = ""
+        for name, cb in self._effect_checkboxes.items():
+            cb.setStyleSheet(on if name in visible else off)
+        for name, rb in self._post_fx_radios.items():
+            rb.setStyleSheet(on if name in visible else off)
 
     # ─── Cleanup ───────────────────────────────────────────────────────
 

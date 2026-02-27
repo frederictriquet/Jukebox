@@ -293,13 +293,13 @@ class VJingLayer(BaseVisualLayer):
         "D": ["aurora", "nebula", "starfield", "smoke", "constellation", "feedback", "tunnel"],
         "C": ["kaleidoscope", "halftone"],
         "P": ["strobe", "pulse", "bass_warp", "lightning", "shockwave", "radar", "bloom"],
-        "T": ["fractal", "grid", "spiral", "moire", "hexgrid", "fft_rings", "timestretch"],
-        "H": ["pulse", "fft_bars", "neon"],
+        "T": ["fractal", "grid", "spiral", "moire", "hexgrid", "fft_rings", "timestretch", "attractor"],
+        "H": ["pulse", "fft_bars", "neon", "shutters"],
         "G": ["flow_field", "water", "swarm"],
         "I": ["neon", "bloom", "circuit", "hexgrid"],
         "A": ["wave", "bokeh"],
         "W": ["plasma", "spiral", "metaballs", "nebula", "feedback", "starfield"],
-        "B": ["explosion", "bass_warp", "lightning", "shockwave", "chromatic", "glitch"],
+        "B": ["explosion", "bass_warp", "lightning", "shockwave", "chromatic", "glitch", "shutters"],
         "F": ["particles", "pixelate", "swarm"],
         "R": ["vinyl", "scanlines", "halftone", "pixelate"],
         "L": ["lissajous", "moire", "spiral"],
@@ -479,6 +479,7 @@ class VJingLayer(BaseVisualLayer):
         # Use _global from effect_intensities if provided, otherwise use intensity param
         self.intensity = self.effect_intensities.pop("_global", intensity)
         self._current_intensity = self.intensity  # Set by render() for current effect
+        self._effect_phase_offset: float = 0.0  # adjusted by hot-swap to keep current effect
         self.preset = preset
         self.presets = presets or {}
         self.color_palette_name = color_palette
@@ -1100,7 +1101,7 @@ class VJingLayer(BaseVisualLayer):
 
         # Total cycle = time for all effects to rotate through
         total_cycle = cycle * num_effects
-        t = time_pos % total_cycle
+        t = (time_pos + self._effect_phase_offset) % total_cycle
 
         # Calculate which "slot" is currently the primary (oldest visible effect)
         primary_slot = int(t / cycle) % num_effects
@@ -2511,9 +2512,10 @@ class VJingLayer(BaseVisualLayer):
         self.plasma_scale = max(1, min(4, min(self.width, self.height) // 64))
         self.plasma_width = self.width // self.plasma_scale
         self.plasma_height = self.height // self.plasma_scale
-        # Create coordinate grids
-        y_coords = np.linspace(0, 4 * math.pi, self.plasma_height)
-        x_coords = np.linspace(0, 4 * math.pi, self.plasma_width)
+        # Create coordinate grids — wider range at low resolution so we see more waves
+        span = 4 * math.pi * max(1.0, 256 / min(self.width, self.height))
+        y_coords = np.linspace(0, span, self.plasma_height)
+        x_coords = np.linspace(0, span, self.plasma_width)
         self.plasma_x, self.plasma_y = np.meshgrid(x_coords, y_coords)
 
     @vj_effect("Plasma", "GPU")
@@ -3469,20 +3471,20 @@ class VJingLayer(BaseVisualLayer):
         fft = ctx["fft"]
         intensity = self._current_intensity
         w, h = self.width, self.height
-        s = min(w, h) / 512
         colors = self.color_palette
         n_colors = len(colors)
         n_bins = len(fft)
 
-        # Hex cell size: responsive to resolution
-        hex_r = max(8, int(28 * s))
+        # Hex cell size: responsive to resolution (aim for ~6-8 cells across)
+        hex_r = max(2, int(min(w, h) / 8))
         hex_w = hex_r * 2
         hex_h = math.sqrt(3) * hex_r
 
-        # Accumulate scroll offset driven by energy
+        # Accumulate scroll offset driven by energy (proportional to cell size)
         if not hasattr(self, "_hexgrid_scroll"):
             self._hexgrid_scroll = 0.0
-        self._hexgrid_scroll += (0.5 + energy * 3.0) * s
+        scroll_speed = hex_h / 30  # ~1 cell per 30 frames at rest
+        self._hexgrid_scroll += (0.5 + energy * 3.0) * scroll_speed
         scroll_y = self._hexgrid_scroll % (hex_h * 2)
 
         # Grid outline alpha pulses with bass
@@ -4836,6 +4838,375 @@ class VJingLayer(BaseVisualLayer):
             arr[qy, qx, 3] = alpha
 
         result = Image.fromarray(arr, "RGBA")
+        img.paste(result, (0, 0), result)
+
+    @vj_effect("Shutters", "Rythmiques")
+    def _render_shutters(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Render 4 horizontal bars that slam shut on beats and reopen with decay.
+
+        Bars 1 & 3 slide from right to left, bars 2 & 4 from left to right.
+        Triggered by beat detection, same approach as pulse effect.
+        """
+        if not ctx["is_beat"]:
+            # Find frames since last beat
+            frames_since_beat = frame_idx
+            for b in reversed(self.beats):
+                if b <= frame_idx:
+                    frames_since_beat = frame_idx - b
+                    break
+            # Reopen with exponential decay after the beat
+            level = math.exp(-frames_since_beat / 8) * self._current_intensity
+        else:
+            # On beat: fully closed
+            level = self._current_intensity
+
+        if level < 0.02:
+            return
+
+        draw = ImageDraw.Draw(img)
+        alpha = int(220 * level)
+        bar_h = self.height / 4
+
+        for i in range(4):
+            color = self._get_palette_color(i)
+            fill = (*color, alpha)
+
+            y0 = int(i * bar_h)
+            y1 = int((i + 1) * bar_h)
+            bar_w = int(self.width * level)
+
+            # Odd bars (0, 2): right to left — even bars (1, 3): left to right
+            if i % 2 == 0:
+                x0 = self.width - bar_w
+                x1 = self.width
+            else:
+                x0 = 0
+                x1 = bar_w
+
+            draw.rectangle([x0, y0, x1, y1], fill=fill)
+
+    # ------------------------------------------------------------------
+    # Dwitter transcriptions
+    # ------------------------------------------------------------------
+
+    def _init_emission(self) -> None:
+        self._emission_buf: np.ndarray | None = None
+        self._emission_lut: np.ndarray | None = None
+        self._emission_lut_key: str = ""
+
+    @vj_effect("Emission", "Particules")
+    def _render_emission(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Emission point — transcribed from dwitter.net d/33748 by rodrigo.siqueira.
+
+        5 000 particles radiate from centre in polar coordinates (angle=i rad,
+        radius=9·s·scale). s = (i/9 + t·7) % 138 controls both radius and visual size.
+        A persistent RGB accumulation buffer with exponential decay reproduces the
+        original's trail effect (canvas never cleared after the first frame).
+        Colours cycle through the active palette mapped to sin(t + i²).
+        """
+        energy = ctx["energy"]
+        w, h = self.width, self.height
+
+        # Persistent RGB accumulation buffer — lazily (re)created on size change
+        buf = getattr(self, "_emission_buf", None)
+        if buf is None or buf.shape[:2] != (h, w):
+            self._emission_buf = np.zeros((h, w, 3), dtype=np.float32)
+        buf = self._emission_buf
+        buf *= 0.88 - energy * 0.04  # faster fade when energetic
+
+        # Palette gradient LUT (512 entries, cached until palette changes)
+        if getattr(self, "_emission_lut_key", "") != self.color_palette_name:
+            palette = self.color_palette
+            n_c = len(palette)
+            lut = np.zeros((512, 3), dtype=np.float32)
+            for idx in range(512):
+                tg = idx / 511.0 * n_c
+                c0 = palette[int(tg) % n_c]
+                c1 = palette[(int(tg) + 1) % n_c]
+                f = tg - int(tg)
+                lut[idx] = [c0[ch] * (1.0 - f) + c1[ch] * f for ch in range(3)]
+            self._emission_lut = lut
+            self._emission_lut_key = self.color_palette_name
+
+        # Vectorised particle computation (all i-values are independent)
+        N = 5000
+        i_arr = np.arange(N - 1, -1, -1, dtype=np.float64)
+        s_arr = (i_arr / 9.0 + time_pos * 7.0) % 138.0
+
+        scale = min(w, h) / 1080.0
+        radius = 9.0 * s_arr * scale
+        px = np.clip((w / 2.0 + radius * np.cos(i_arr)).astype(np.int32), 0, w - 1)
+        py = np.clip((h / 2.0 + radius * np.sin(i_arr)).astype(np.int32), 0, h - 1)
+
+        # c = sin(t + i²) ∈ [-1, 1]; negative → black in original → skip
+        c_arr = np.sin(time_pos + i_arr * i_arr)
+        pos = c_arr > 0
+        lut_idx = (c_arr[pos] * 511.0).clip(0, 511).astype(np.int32)
+        colors = self._emission_lut[lut_idx]  # (N_pos, 3) float32
+
+        # Max-blend: bright regions accumulate without clamping
+        np.maximum.at(buf[:, :, 0], (py[pos], px[pos]), colors[:, 0])
+        np.maximum.at(buf[:, :, 1], (py[pos], px[pos]), colors[:, 1])
+        np.maximum.at(buf[:, :, 2], (py[pos], px[pos]), colors[:, 2])
+
+        rgb = np.clip(buf, 0, 255).astype(np.uint8)
+        alpha = np.minimum(
+            np.max(rgb, axis=2), min(255, int(220 * self._current_intensity))
+        )
+        result = Image.fromarray(np.dstack([rgb, alpha]), "RGBA")
+        img.paste(result, (0, 0), result)
+
+    @vj_effect("Sphere", "Géométriques")
+    def _render_sphere(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Multi-axis rotating sphere — transcribed from dwitter.net d/34247 by KilledByAPixel.
+
+        Coloured points on a transparent/black background with smooth palette transitions.
+        Colour mapped to Y position on sphere (horizontal bands, slow time drift).
+        Alpha driven by depth (limb darkening: bright centre, fading at edges).
+        Two rotation axes: X (angle b = t/3, slow) and Y (angle t, fast).
+        Back-face culling keeps only the front hemisphere.
+        """
+        w, h = self.width, self.height
+
+        # Sphere geometry — fully vectorised
+        i_arr = np.arange(9999, -1, -1, dtype=np.float64)
+        Z = i_arr / 3000.0 - 1.0
+        r_sq = np.maximum(1.0 - Z * Z, 0.0)
+        valid = r_sq > 0.0
+        r = np.sqrt(r_sq)
+
+        # Azimuthal angle: i³ − t·2 (float64; precision loss at large i is intentional)
+        a = i_arr ** 3 - time_pos * 2.0
+        X = r * np.cos(a)
+        Y = r * np.sin(a)
+
+        # Rotation 1: X axis, angle b = t/3 (slow)
+        b = time_pos / 3.0
+        sb, cb = math.sin(b), math.cos(b)
+        W = sb * Y + cb * Z
+        Y_rot = Y * cb - Z * sb
+
+        # Rotation 2: Y axis, angle t (fast) + back-face culling
+        st, ct = math.sin(time_pos), math.cos(time_pos)
+        depth = X * ct - W * st          # ∈ (0, 1] for visible front hemisphere
+        visible = valid & (depth > 0.0)
+
+        scale = min(w, h) * (450.0 / 1080.0)
+        sx = (w / 2.0 + scale * (X * st + W * ct))[visible].astype(np.int32)
+        sy = (h / 2.0 + scale * Y_rot[visible]).astype(np.int32)
+        depth_v = depth[visible]
+        Y_rot_v = Y_rot[visible]
+
+        in_bounds = (sx >= 0) & (sx < w) & (sy >= 0) & (sy < h)
+        sx, sy = sx[in_bounds], sy[in_bounds]
+        depth_v = depth_v[in_bounds]
+        Y_rot_v = Y_rot_v[in_bounds]
+
+        # Palette gradient LUT (512 entries, cached)
+        palette_key = self.color_palette_name
+        if getattr(self, "_sphere_lut_key", None) != palette_key:
+            palette = self.color_palette
+            n_c = len(palette)
+            lut = np.zeros((512, 3), dtype=np.uint8)
+            for idx in range(512):
+                tg = idx / 511.0 * n_c
+                c0 = palette[int(tg) % n_c]
+                c1 = palette[(int(tg) + 1) % n_c]
+                f = tg - int(tg)
+                lut[idx] = [int(c0[ch] * (1.0 - f) + c1[ch] * f) for ch in range(3)]
+            self._sphere_lut: np.ndarray = lut
+            self._sphere_lut_key: str = palette_key
+
+        # Colour by Y position (horizontal bands) + slow drift over time
+        color_t = (np.clip((Y_rot_v + 1.0) / 2.0, 0.0, 1.0) + time_pos * 0.04) % 1.0
+        lut_idx = (color_t * 511.0).astype(np.int32)
+        colors = self._sphere_lut[lut_idx]  # (N_vis, 3)
+
+        # Alpha: limb darkening (bright at centre, fade toward silhouette edge)
+        alpha = np.clip(
+            depth_v * 240.0 * self._current_intensity, 30, 240
+        ).astype(np.uint8)
+
+        # Draw 2×2 pixel blocks
+        arr = np.zeros((h, w, 4), dtype=np.uint8)
+        sx1 = np.clip(sx + 1, 0, w - 1)
+        sy1 = np.clip(sy + 1, 0, h - 1)
+        for qx, qy in ((sx, sy), (sx1, sy), (sx, sy1), (sx1, sy1)):
+            arr[qy, qx, :3] = colors
+            arr[qy, qx, 3] = alpha
+
+        result = Image.fromarray(arr, "RGBA")
+        img.paste(result, (0, 0), result)
+
+    @vj_effect("Sea Creature", "Particules")
+    def _render_sea_creature(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Sea creature — transcribed from dwitter.net d/33997 by zibx.
+
+        20 000 fully vectorised particles form an organic marine creature:
+          k = (4 + 3·sin(y·2−t))·cos(i/29)  — oscillating arms / tentacles
+          0.3/k singularity                  — bright spine at arm centres
+          P = d − t                          — differential rotation / torsion
+        Coordinate space 840×420 scaled to canvas. Colours from palette by arm index.
+        """
+        energy = ctx["energy"]
+        w, h = self.width, self.height
+
+        # All iterations are independent → fully vectorised
+        # N scales with canvas area; linspace covers the full creature shape regardless of N
+        N = min(20000, max(w * h // 20, 80))
+        i_arr = np.linspace(19999, 0, N, dtype=np.float64)
+        y = i_arr / 840.0  # ∈ [0, 23.8]
+
+        t = time_pos * (1.0 + energy * 0.15)
+
+        k = (4.0 + np.sin(y * 2.0 - t) * 3.0) * np.cos(i_arr / 29.0)
+        e = y / 8.0 - 11.0
+        d = (k * k + e * e) ** 0.66
+        k_safe = np.where(np.abs(k) > 1e-4, k, np.where(k >= 0, 1e-4, -1e-4))
+        q = (
+            np.sin(k * 2.0)
+            + 0.3 / k_safe
+            + np.sin(y / 25.0) * k * (9.0 + 4.0 * np.sin(e * 9.0 - d * 3.0 + t * 2.0))
+        )
+        P = d - t
+
+        # Map from original 840×420 coordinate space to canvas
+        px = ((q * np.sin(P) + d * 39.0 - 420.0) * w / 840.0).astype(np.int32)
+        py = ((q + 30.0 * np.cos(P) + 210.0) * h / 420.0).astype(np.int32)
+
+        valid = (px >= 0) & (px < w) & (py >= 0) & (py < h)
+        px, py, k_v = px[valid], py[valid], k[valid]
+
+        # Palette gradient LUT keyed by k ∈ [-7, 7]
+        palette_key = self.color_palette_name
+        if getattr(self, "_sea_lut_key", None) != palette_key:
+            palette = self.color_palette
+            n_c = len(palette)
+            lut = np.zeros((512, 3), dtype=np.uint8)
+            for idx in range(512):
+                tg = idx / 511.0 * n_c
+                c0 = palette[int(tg) % n_c]
+                c1 = palette[(int(tg) + 1) % n_c]
+                f = tg - int(tg)
+                lut[idx] = [int(c0[ch] * (1.0 - f) + c1[ch] * f) for ch in range(3)]
+            self._sea_lut: np.ndarray = lut
+            self._sea_lut_key: str = palette_key
+
+        lut_idx = ((k_v + 7.0) / 14.0 * 511.0).clip(0, 511).astype(np.int32)
+        colors = self._sea_lut[lut_idx]  # (N_valid, 3)
+
+        alpha = min(255, int(220 * self._current_intensity))
+        arr = np.zeros((h, w, 4), dtype=np.uint8)
+        arr[py, px, :3] = colors
+        arr[py, px, 3] = alpha
+
+        result = Image.fromarray(arr, "RGBA")
+        img.paste(result, (0, 0), result)
+
+    @vj_effect("Galaxy", "Particules")
+    def _render_galaxy(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Galaxy spiral — transcribed from dwitter.net d/34920.
+
+        2 000 particles placed in polar coordinates:
+          p = i/21 + t              → angle (≈15 full turns across all particles)
+          d = 90000 / ((i+t·60)%999) → sawtooth radial distance, creates spiral arms
+        The modulo near 0 sends particles to infinity (off-screen), producing gaps
+        that read as arms. Alpha = 0.1 per particle; overlapping particles accumulate.
+        Colours cycle through the active palette by particle index.
+        """
+        energy = ctx["energy"]
+        bass = ctx["bass"]
+        w, h = self.width, self.height
+
+        N = 2000
+        i_arr = np.arange(N - 1, -1, -1, dtype=np.float64)
+
+        # Angle: i/21 → ~15 full rotations; audio modulates rotation speed
+        t_anim = time_pos * (1.0 + energy * 0.2)
+        p = i_arr / 21.0 + t_anim
+
+        # Sawtooth distance: creates spiral arms; clamp modulo away from 0
+        mod_val = np.maximum((i_arr + t_anim * 60.0) % 999.0, 0.5)
+        d = 90000.0 / mod_val
+
+        # Scale from original 1920×1080 to canvas
+        scale = min(w, h) / 1080.0
+        d_s = d * scale
+
+        cx, cy = w * 0.5, h * 0.5
+        px = (cx + np.sin(p) * d_s).astype(np.int32)
+        py = (cy + np.cos(p) * d_s).astype(np.int32)
+
+        valid = (px >= 0) & (px < w) & (py >= 0) & (py < h)
+        px_v = px[valid]
+        py_v = py[valid]
+        i_v = i_arr[valid]
+        d_v = d_s[valid]
+
+        # Palette gradient LUT (cached)
+        palette_key = self.color_palette_name
+        if getattr(self, "_galaxy_lut_key", None) != palette_key:
+            palette = self.color_palette
+            n_c = len(palette)
+            lut = np.zeros((512, 3), dtype=np.uint8)
+            for idx in range(512):
+                tg = idx / 511.0 * n_c
+                c0 = palette[int(tg) % n_c]
+                c1 = palette[(int(tg) + 1) % n_c]
+                f = tg - int(tg)
+                lut[idx] = [int(c0[ch] * (1.0 - f) + c1[ch] * f) for ch in range(3)]
+            self._galaxy_lut: np.ndarray = lut
+            self._galaxy_lut_key: str = palette_key
+
+        lut_idx = ((N - 1 - i_v) / (N - 1) * 511.0).astype(np.int32)
+        colors = self._galaxy_lut[lut_idx].astype(np.float32)  # (N_valid, 3)
+
+        # Variable-size particles: s = d_s/9, clamped to [2, 20].
+        # Matches the original JS fillRect(cx, cy, s, s) where s = d/9.
+        # Larger s at greater radii compensates for the low particle count at large canvases.
+        s_arr = np.clip((d_v / 9.0).astype(np.int32), 2, 20)
+        alpha_contrib = 0.1 * self._current_intensity
+        acc = np.zeros((h, w, 4), dtype=np.float32)
+
+        for s in range(2, 21):
+            mask = s_arr == s
+            if not mask.any():
+                continue
+            px_s = px_v[mask]
+            py_s = py_v[mask]
+            col_s = colors[mask]  # (n_s, 3)
+
+            # All s×s offset combinations at once (vectorised)
+            dy, dx = np.meshgrid(np.arange(s), np.arange(s), indexing="ij")
+            dy = dy.flatten()  # s² offsets
+            dx = dx.flatten()
+
+            # (n_s, s²) positions, clipped to canvas
+            qx = np.clip(px_s[:, np.newaxis] + dx[np.newaxis, :], 0, w - 1)  # (n_s, s²)
+            qy = np.clip(py_s[:, np.newaxis] + dy[np.newaxis, :], 0, h - 1)
+
+            qx_flat = qx.flatten()
+            qy_flat = qy.flatten()
+            col_rep = np.repeat(col_s, s * s, axis=0)  # (n_s*s², 3)
+
+            np.add.at(acc[:, :, 0], (qy_flat, qx_flat), col_rep[:, 0] * alpha_contrib)
+            np.add.at(acc[:, :, 1], (qy_flat, qx_flat), col_rep[:, 1] * alpha_contrib)
+            np.add.at(acc[:, :, 2], (qy_flat, qx_flat), col_rep[:, 2] * alpha_contrib)
+            np.add.at(acc[:, :, 3], (qy_flat, qx_flat), alpha_contrib * 255.0)
+
+        rgb = np.clip(acc[:, :, :3], 0, 255).astype(np.uint8)
+        alpha = np.clip(acc[:, :, 3], 0, 255).astype(np.uint8)
+        result = Image.fromarray(np.dstack([rgb, alpha]), "RGBA")
         img.paste(result, (0, 0), result)
 
 

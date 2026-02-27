@@ -31,3 +31,6 @@
 | `mirror` | Symétrie kaléidoscopique configurable (2/4 axes), bords qui bougent au rythme |
 | `vignette` | Assombrissement des bords pulsant avec les basses, spotlight central |
 | `crystals` | Cristaux géométriques qui poussent/cassent sur les transients |
+
+
+crée un effet qui dessine 4 barres horizontales qui font chacune 1/4 de la hauteur de l'écran, au début elles sont toutes invisibles, la 1ere et la 3eme s'étendent de la droite vers la gauche tandis que la 2eme et la 4eme s'étendent de la gauche vers la droite. Ensuite elles se rétractent.
