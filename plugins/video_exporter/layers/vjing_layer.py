@@ -1052,7 +1052,7 @@ class VJingLayer(BaseVisualLayer):
                 self._current_intensity = self._get_intensity(effect_name)
                 effect_method = getattr(self, f"_render_{effect_name}", self._render_wave)
                 effect_method(effect_img, frame_idx, time_pos, ctx)
-                img.paste(effect_img, (0, 0), effect_img)
+                img.alpha_composite(effect_img)  # avoids double-alpha squaring from paste+mask
 
         # Second: apply post-processing effects on the composite image
         for effect_name in post_processors:
@@ -5206,8 +5206,9 @@ class VJingLayer(BaseVisualLayer):
 
         rgb = np.clip(acc[:, :, :3], 0, 255).astype(np.uint8)
         alpha = np.clip(acc[:, :, 3], 0, 255).astype(np.uint8)
+
         result = Image.fromarray(np.dstack([rgb, alpha]), "RGBA")
-        img.paste(result, (0, 0), result)
+        img.alpha_composite(result)  # alpha_composite avoids double-alpha squaring from paste+mask
 
 
 # Build effect registries from @vj_effect decorators
