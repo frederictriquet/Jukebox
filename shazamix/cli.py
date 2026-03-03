@@ -49,7 +49,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
     print(f"Avg fingerprints/track:     {stats['avg_fingerprints_per_track']:.0f}")
     print()
 
-    if stats['indexed_tracks'] > 0:
+    if stats['total_tracks'] > 0:
         progress = stats['indexed_tracks'] / stats['total_tracks'] * 100
         print(f"Indexing progress:          {progress:.1f}%")
 
@@ -274,6 +274,16 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cleanup(args: argparse.Namespace) -> int:
+    """Remove orphaned fingerprint data for tracks no longer in the database."""
+    db = FingerprintDB(args.db)
+    deleted = db.cleanup_orphans()
+    print(f"Deleted {deleted['fingerprint_status']} orphaned status entries")
+    print(f"Deleted {deleted['fingerprints']} orphaned fingerprints")
+    print("Database vacuumed.")
+    return 0
+
+
 def cmd_clear(args: argparse.Namespace) -> int:
     """Clear all fingerprints."""
     if not args.force:
@@ -387,6 +397,10 @@ def main() -> int:
         help="Number of parallel workers (default: 4)",
     )
     analyze_parser.set_defaults(func=cmd_analyze)
+
+    # cleanup command
+    cleanup_parser = subparsers.add_parser("cleanup", help="Remove orphaned fingerprint data")
+    cleanup_parser.set_defaults(func=cmd_cleanup)
 
     # clear command
     clear_parser = subparsers.add_parser("clear", help="Clear all fingerprints")

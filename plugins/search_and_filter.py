@@ -16,6 +16,11 @@ Button state (ON/OFF/INDIFFERENT) is persisted across mode switches via the
 `_genre_states` dict, which is updated by `_on_filter_changed()` and restored
 when a new button set is created (toolbar or drawer).
 
+Advanced filter mode allows arbitrary boolean expressions like
+``(D or H) and not P``. When active, the expression overrides button-based
+filtering. Both modes are saveable as presets (button presets store genre states;
+expression presets store the ``_expr`` key).
+
 Events:
 - Subscribes to: TRACKS_ADDED
 - Emits: GENRE_FILTER_CHANGED
@@ -23,17 +28,143 @@ Events:
 
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import Callable
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QSortFilterProxyModel
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QComboBox,
+    QFrame,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from jukebox.core.event_bus import Events
 
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
+
+
+# ============================================================================
+# Genre expression parser
+# ============================================================================
+
+# A compiled genre filter: takes the set of genre codes for a track, returns bool.
+GenreEval = Callable[[set[str]], bool]
+
+
+class _TokenStream:
+    """Minimal token stream for the recursive-descent expression parser."""
+
+    def __init__(self, tokens: list[str]) -> None:
+        self._tokens = tokens
+        self._pos = 0
+
+    def peek(self) -> str | None:
+        return self._tokens[self._pos] if self._pos < len(self._tokens) else None
+
+    def consume(self, expected: str | None = None) -> str:
+        if self._pos >= len(self._tokens):
+            raise ValueError("Unexpected end of expression")
+        token = self._tokens[self._pos]
+        if expected is not None and token != expected:
+            raise ValueError(f"Expected '{expected}', got '{token}'")
+        self._pos += 1
+        return token
+
+    def is_empty(self) -> bool:
+        return self._pos >= len(self._tokens)
+
+
+def _tokenize_expr(expr: str) -> list[str]:
+    tokens: list[str] = []
+    i = 0
+    s = expr.upper()
+    while i < len(s):
+        if s[i].isspace():
+            i += 1
+        elif s[i] in ("(", ")"):
+            tokens.append(s[i])
+            i += 1
+        elif s[i].isalpha():
+            j = i
+            while j < len(s) and s[j].isalpha():
+                j += 1
+            tokens.append(s[i:j])
+            i = j
+        else:
+            raise ValueError(f"Unexpected character: '{s[i]}'")
+    return tokens
+
+
+def _parse_or(stream: _TokenStream, valid: set[str]) -> GenreEval:
+    left = _parse_and(stream, valid)
+    while stream.peek() == "OR":
+        stream.consume()
+        right = _parse_and(stream, valid)
+        left = (lambda lhs, rhs: lambda g: lhs(g) or rhs(g))(left, right)
+    return left
+
+
+def _parse_and(stream: _TokenStream, valid: set[str]) -> GenreEval:
+    left = _parse_not(stream, valid)
+    while stream.peek() == "AND":
+        stream.consume()
+        right = _parse_not(stream, valid)
+        left = (lambda lhs, rhs: lambda g: lhs(g) and rhs(g))(left, right)
+    return left
+
+
+def _parse_not(stream: _TokenStream, valid: set[str]) -> GenreEval:
+    if stream.peek() == "NOT":
+        stream.consume()
+        operand = _parse_not(stream, valid)
+        return (lambda o: lambda g: not o(g))(operand)
+    return _parse_atom(stream, valid)
+
+
+def _parse_atom(stream: _TokenStream, valid: set[str]) -> GenreEval:
+    token = stream.peek()
+    if token == "(":
+        stream.consume()
+        result = _parse_or(stream, valid)
+        stream.consume(")")
+        return result
+    if token is not None and token not in ("AND", "OR", "NOT", "(", ")", None):
+        stream.consume()
+        if token not in valid:
+            raise ValueError(f"Unknown genre code: '{token}'")
+        return (lambda t: lambda g: t in g)(token)
+    raise ValueError(f"Unexpected token: '{token}'")
+
+
+def compile_genre_expr(expr: str, valid_codes: set[str]) -> GenreEval:
+    """Compile a boolean genre expression string into a callable.
+
+    Syntax: ``CODE``, ``not EXPR``, ``EXPR and EXPR``, ``EXPR or EXPR``,
+    ``( EXPR )``. Codes are case-insensitive. Raises ``ValueError`` on error.
+    """
+    tokens = _tokenize_expr(expr)
+    if not tokens:
+        raise ValueError("Empty expression")
+    stream = _TokenStream(tokens)
+    result = _parse_or(stream, {c.upper() for c in valid_codes})
+    if not stream.is_empty():
+        raise ValueError(f"Unexpected token after expression: '{stream.peek()}'")
+    return result
+
+
+# ============================================================================
+# Proxy model
+# ============================================================================
 
 
 class GenreFilterState(IntEnum):
@@ -48,21 +179,24 @@ class GenreFilterProxyModel(QSortFilterProxyModel):
     """Proxy model that filters tracks by genre and search."""
 
     def __init__(self, parent: Any = None) -> None:
-        """Initialize the proxy model."""
         super().__init__(parent)
         self._on_genres: set[str] = set()
         self._off_genres: set[str] = set()
         self._search_text: str = ""
+        self._expr_fn: GenreEval | None = None
 
     def set_search_text(self, text: str) -> None:
-        """Set the search text filter."""
         self._search_text = text.lower()
         self.invalidateFilter()
 
     def set_genre_filter(self, on_genres: set[str], off_genres: set[str]) -> None:
-        """Set the genre filter."""
         self._on_genres = on_genres
         self._off_genres = off_genres
+        self.invalidateFilter()
+
+    def set_genre_expr(self, expr_fn: GenreEval | None) -> None:
+        """Set a compiled expression filter (overrides ON/OFF buttons when not None)."""
+        self._expr_fn = expr_fn
         self.invalidateFilter()
 
     def filterAcceptsRow(  # noqa: N802
@@ -70,7 +204,6 @@ class GenreFilterProxyModel(QSortFilterProxyModel):
         source_row: int,
         source_parent: QModelIndex | QPersistentModelIndex,
     ) -> bool:
-        """Check if a row passes both search and genre filters."""
         source_model = self.sourceModel()
         if source_model is None:
             return True
@@ -91,24 +224,30 @@ class GenreFilterProxyModel(QSortFilterProxyModel):
                 if word not in haystack:
                     return False
 
-        # Genre filter
-        if not self._on_genres and not self._off_genres:
-            return True
-
+        # Parse track genre codes
         genre_str = track.get("genre", "") or ""
-        track_genres = set()
+        track_genres: set[str] = set()
         for part in genre_str.split("-"):
             code = part.strip()
             if code and not code.startswith("*"):
                 track_genres.add(code)
 
-        # ON filter: track must contain ALL on_genres
+        # Advanced expression filter (overrides ON/OFF when active)
+        if self._expr_fn is not None:
+            return self._expr_fn(track_genres)
+
+        # Button-based ON/OFF filter
+        if not self._on_genres and not self._off_genres:
+            return True
         for g in self._on_genres:
             if g not in track_genres:
                 return False
-
-        # OFF filter: track must NOT contain any off_genres
         return all(g not in track_genres for g in self._off_genres)
+
+
+# ============================================================================
+# Genre filter button
+# ============================================================================
 
 
 class GenreFilterButton(QPushButton):
@@ -127,7 +266,6 @@ class GenreFilterButton(QPushButton):
     }
 
     def __init__(self, code: str, name: str, parent: Any = None) -> None:
-        """Initialize a genre filter button."""
         super().__init__(code, parent)
         self.code = code
         self.genre_name = name
@@ -138,13 +276,32 @@ class GenreFilterButton(QPushButton):
         self.clicked.connect(self._cycle)
 
     def _cycle(self) -> None:
-        """Cycle state: indifferent → on → off → indifferent."""
         self.state = GenreFilterState((self.state + 1) % 3)
         self._apply_style()
 
     def _apply_style(self) -> None:
-        """Apply style for current state."""
         self.setStyleSheet(self._STYLES[self.state])
+
+
+# ============================================================================
+# Plugin
+# ============================================================================
+
+_COMBO_STYLE = (
+    "QComboBox { background-color: #444; color: #ccc; border: 1px solid #666;"
+    " border-radius: 3px; padding: 1px 4px; font-size: 12px; }"
+    "QComboBox::drop-down { border: none; }"
+    "QComboBox QAbstractItemView { background-color: #333; color: #ccc;"
+    " selection-background-color: #555; }"
+)
+_BTN_NEUTRAL = (
+    "QPushButton { background-color: #444; color: #ccc; border: 1px solid #666;"
+    " border-radius: 3px; font-size: 14px; font-weight: bold; }"
+)
+_INPUT_BASE = (
+    "QLineEdit {{ background-color: #333; color: #ccc; border: 1px solid {border};"
+    " border-radius: 3px; padding: 1px 4px; font-family: monospace; font-size: 12px; }}"
+)
 
 
 class SearchAndFilterPlugin:
@@ -159,14 +316,9 @@ class SearchAndFilterPlugin:
       ``get_drawer_genre_buttons_container()``, placed inside the cue_maker
       BottomDrawer. Automatically cleared when the drawer container is destroyed.
 
-    Both sets share ``_genre_states`` (dict[code → GenreFilterState]) to persist
-    button ON/OFF state across mode switches. ``_on_filter_changed()`` always reads
-    from the *active* set (drawer when present, toolbar otherwise) and saves the
-    resulting state back to ``_genre_states``.
-
-    The ``GenreFilterProxyModel`` is installed once in ``register_ui`` and remains
-    active for the lifetime of the plugin. In cue_maker mode it is the sole
-    filtering mechanism (DB FTS5 is not used).
+    Both sets share ``_genre_states`` and the advanced expression ``_advanced_expr``
+    across mode switches. When ``_advanced_active`` is True the proxy uses a
+    compiled ``GenreEval`` instead of the ON/OFF sets.
 
     Active in: jukebox, cue_maker modes
     """
@@ -176,154 +328,568 @@ class SearchAndFilterPlugin:
     description = "Centralized search and genre filter management"
     modes = ["jukebox", "cue_maker"]
 
+    _NO_PRESET = "— none —"
+    _EXPR_KEY = "_expr"  # key used in preset dicts for expression presets
+
     def __init__(self) -> None:
-        """Initialize plugin state."""
         self.context: PluginContextProtocol | None = None
         self.proxy: GenreFilterProxyModel | None = None
-        # Toolbar button set — lives in genre_buttons_area (jukebox/curating modes)
+
+        # Toolbar button set
         self.genre_buttons: list[GenreFilterButton] = []
         self.toolbar_container: QWidget | None = None
-        # Drawer button set — created on demand for cue_maker BottomDrawer
+
+        # Drawer button set (created on demand)
         self._drawer_buttons: list[GenreFilterButton] = []
-        # Persisted state across mode switches: {genre_code: GenreFilterState}
+
+        # Persisted button states across mode switches
         self._genre_states: dict[str, GenreFilterState] = {}
+        self._valid_codes: set[str] = set()
         self._track_list: Any = None
 
+        # Presets: {name: {code: int}} or {name: {"_expr": str}}
+        self._presets: dict[str, dict[str, Any]] = {}
+        self._preset_combo: QComboBox | None = None
+        self._drawer_preset_combo: QComboBox | None = None
+
+        # Advanced expression filter
+        self._advanced_active: bool = False
+        self._advanced_expr: str = ""
+        self._genre_area: QWidget | None = None  # toolbar area for height resizing
+        self._advanced_row: QWidget | None = None  # toolbar advanced row
+        self._drawer_advanced_row: QWidget | None = None
+        self._advanced_input: QLineEdit | None = None
+        self._drawer_advanced_input: QLineEdit | None = None
+        self._advanced_status: QLabel | None = None
+        self._drawer_advanced_status: QLabel | None = None
+        self._advanced_toggle_buttons: list[QPushButton] = []
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
     def initialize(self, context: PluginContextProtocol) -> None:
-        """Initialize plugin with application context."""
         self.context = context
         context.subscribe(Events.TRACKS_ADDED, self._on_tracks_added)
+        self._valid_codes = {c.code.upper() for c in context.config.genre_editor.codes}
+        self._load_presets()
         logging.info("[Search & Filter] Plugin initialized")
 
     def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
-        """Register UI elements (proxy model, search connection, genre buttons below searchbar).
-
-        Genre buttons with "Genres" label are created and added below the searchbar.
-        """
         if not self.context:
             return
 
-        # Create proxy model and install on track list
         self.proxy = GenreFilterProxyModel()
         main_window = ui_builder.main_window
         self._track_list = main_window.track_list
         self._track_list.set_proxy_model(self.proxy)
 
-        # Connect search bar to proxy
         if hasattr(main_window, "search_bar"):
             main_window.search_bar.search_triggered.connect(self._on_search)
 
-        # Create buttons container
         self._create_toolbar_buttons()
 
-        # Add genre buttons to the genre_buttons_area placeholder in main_window
         if hasattr(main_window, "genre_buttons_area") and self.toolbar_container:
             area = main_window.genre_buttons_area
+            self._genre_area = area
             area_layout = QVBoxLayout(area)
             area_layout.setContentsMargins(0, 0, 0, 0)
             area_layout.setSpacing(0)
             area_layout.addWidget(self.toolbar_container)
-            area.setFixedHeight(30)  # Show area now that it has content
+            area.setFixedHeight(30)
             logging.info("[Search & Filter] Added genre buttons to genre_buttons_area")
 
         logging.info("[Search & Filter] Registered with %d genre buttons", len(self.genre_buttons))
 
-    def get_drawer_genre_buttons_container(self) -> QWidget:
-        """Get a SEPARATE container with genre buttons for drawer.
+    def activate(self, mode: str) -> None:
+        if not self.toolbar_container and self.context:
+            self._create_toolbar_buttons()
 
-        Creates a NEW set of buttons tracked in _drawer_buttons.
-        Restores saved state from _genre_states for persistence across mode switches.
-        When the container is destroyed, _drawer_buttons is auto-cleared.
-        """
+        for btn in self.genre_buttons:
+            if btn.code in self._genre_states:
+                btn.state = self._genre_states[btn.code]
+                btn._apply_style()
+
+        if self._advanced_active and self._advanced_expr:
+            self._apply_advanced_expr(self._advanced_expr)
+        else:
+            self._on_filter_changed()
+        logging.info("[Search & Filter] Activated for %s mode", mode)
+
+    def deactivate(self, mode: str) -> None:
+        if self.proxy:
+            self.proxy.set_genre_filter(set(), set())
+            self.proxy.set_genre_expr(None)
+            self.proxy.set_search_text("")
+        logging.info("[Search & Filter] Deactivated from %s mode", mode)
+
+    def shutdown(self) -> None:
+        if self._track_list:
+            self._track_list.remove_proxy_model()
+        self._track_list = None
+        self.proxy = None
+        self.genre_buttons.clear()
+
+    # ------------------------------------------------------------------
+    # Button container builders
+    # ------------------------------------------------------------------
+
+    def _create_toolbar_buttons(self) -> None:
+        """Create the two-row toolbar container (row1: buttons; row2: advanced input)."""
+        if not self.context or self.toolbar_container:
+            return
+
+        sorted_codes = sorted(self.context.config.genre_editor.codes, key=lambda c: c.code)
+
+        self.toolbar_container = QWidget()
+        vbox = QVBoxLayout(self.toolbar_container)
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.setSpacing(0)
+
+        # Row 1 — genre buttons + preset controls + advanced toggle
+        row1 = QWidget()
+        row1.setFixedHeight(30)
+        hbox = QHBoxLayout(row1)
+        hbox.setContentsMargins(0, 0, 0, 0)
+        hbox.setSpacing(6)
+
+        label = QLabel("Genres")
+        label.setStyleSheet("font-weight: bold; font-size: 12px; color: #aaa;")
+        hbox.addWidget(label)
+
+        for code_config in sorted_codes:
+            btn = GenreFilterButton(code_config.code, code_config.name)
+            btn.clicked.connect(self._on_filter_changed)
+            self.genre_buttons.append(btn)
+            hbox.addWidget(btn)
+
+        self._preset_combo = self._build_preset_controls(hbox)
+        self._build_advanced_toggle(hbox)
+        hbox.addStretch()
+        vbox.addWidget(row1)
+
+        # Row 2 — advanced expression input (hidden by default)
+        row2 = self._build_advanced_row(is_toolbar=True)
+        self._advanced_row = row2
+        if not self._advanced_active:
+            row2.hide()
+        vbox.addWidget(row2)
+
+    def get_drawer_genre_buttons_container(self) -> QWidget:
+        """Get a SEPARATE container with genre buttons + advanced filter for the drawer."""
         if not self.context:
             return QWidget()
 
-        config = self.context.config
-        codes = config.genre_editor.codes
-        sorted_codes = sorted(codes, key=lambda c: c.code)
+        sorted_codes = sorted(self.context.config.genre_editor.codes, key=lambda c: c.code)
 
-        # Container with horizontal layout (label + NEW buttons on same line)
         container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        vbox = QVBoxLayout(container)
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.setSpacing(0)
 
-        # Add "Genres" label
+        # Row 1
+        row1 = QWidget()
+        row1.setFixedHeight(30)
+        hbox = QHBoxLayout(row1)
+        hbox.setContentsMargins(0, 0, 0, 0)
+        hbox.setSpacing(6)
+
         label = QLabel("Genres")
         label.setStyleSheet("font-weight: bold; font-size: 12px; color: #aaa;")
-        layout.addWidget(label)
+        hbox.addWidget(label)
 
-        # Create NEW buttons tracked in _drawer_buttons
         self._drawer_buttons = []
         for code_config in sorted_codes:
             btn = GenreFilterButton(code_config.code, code_config.name)
-            # Restore saved state
             if code_config.code in self._genre_states:
                 btn.state = self._genre_states[code_config.code]
                 btn._apply_style()
             btn.clicked.connect(self._on_filter_changed)
             self._drawer_buttons.append(btn)
-            layout.addWidget(btn)
+            hbox.addWidget(btn)
 
-        layout.addStretch()
+        self._drawer_preset_combo = self._build_preset_controls(hbox)
+        self._build_advanced_toggle(hbox)
+        hbox.addStretch()
+        vbox.addWidget(row1)
 
-        # Auto-clear drawer buttons when container is destroyed
+        # Row 2
+        row2 = self._build_advanced_row(is_toolbar=False)
+        self._drawer_advanced_row = row2
+        if not self._advanced_active:
+            row2.hide()
+        vbox.addWidget(row2)
+
         container.destroyed.connect(self._clear_drawer_buttons)
-
         return container
 
-    def _create_toolbar_buttons(self) -> None:
-        """Create genre filter buttons container (displayed below searchbar, not in toolbar)."""
-        if not self.context or self.toolbar_container:
+    # ------------------------------------------------------------------
+    # Preset controls builder
+    # ------------------------------------------------------------------
+
+    def _build_preset_controls(self, layout: QHBoxLayout) -> QComboBox:
+        """Add separator + preset combobox + save/delete buttons to *layout*."""
+        _add_vsep(layout)
+
+        combo = QComboBox()
+        combo.setFixedWidth(130)
+        combo.setStyleSheet(_COMBO_STYLE)
+        self._populate_preset_combo(combo)
+        combo.activated.connect(lambda _idx: self._on_preset_activated(combo))
+        layout.addWidget(combo)
+
+        save_btn = QPushButton("+")
+        save_btn.setFixedSize(22, 26)
+        save_btn.setToolTip("Save current preset")
+        save_btn.setStyleSheet(
+            _BTN_NEUTRAL + "QPushButton:hover { background-color: #2d7a2d; color: white; }"
+        )
+        save_btn.clicked.connect(lambda: self._on_save_preset(combo))
+        layout.addWidget(save_btn)
+
+        del_btn = QPushButton("×")
+        del_btn.setFixedSize(22, 26)
+        del_btn.setToolTip("Delete selected preset")
+        del_btn.setStyleSheet(
+            _BTN_NEUTRAL + "QPushButton:hover { background-color: #7a2d2d; color: white; }"
+        )
+        del_btn.clicked.connect(lambda: self._on_delete_preset(combo))
+        layout.addWidget(del_btn)
+
+        return combo
+
+    # ------------------------------------------------------------------
+    # Advanced filter UI builders
+    # ------------------------------------------------------------------
+
+    def _build_advanced_toggle(self, layout: QHBoxLayout) -> None:
+        """Add separator + checkable 'Advanced' button to *layout*."""
+        _add_vsep(layout)
+
+        btn = QPushButton("Advanced")
+        btn.setCheckable(True)
+        btn.setChecked(self._advanced_active)
+        btn.setFixedHeight(22)
+        btn.setStyleSheet(
+            "QPushButton { background-color: #444; color: #888; border: 1px solid #666;"
+            " border-radius: 3px; font-size: 11px; padding: 0 6px; }"
+            "QPushButton:checked { background-color: #3a4a6a; color: #aac4ff;"
+            " border-color: #5577aa; }"
+            "QPushButton:hover { background-color: #555; }"
+        )
+        btn.toggled.connect(self._on_advanced_toggled)
+        self._advanced_toggle_buttons.append(btn)
+        layout.addWidget(btn)
+
+    def _build_advanced_row(self, *, is_toolbar: bool) -> QWidget:
+        """Create the advanced expression input row widget."""
+        row = QWidget()
+        row.setFixedHeight(28)
+        hbox = QHBoxLayout(row)
+        hbox.setContentsMargins(2, 1, 2, 1)
+        hbox.setSpacing(6)
+
+        lbl = QLabel("Filter:")
+        lbl.setStyleSheet("font-size: 12px; color: #888;")
+        hbox.addWidget(lbl)
+
+        inp = QLineEdit()
+        inp.setPlaceholderText("e.g.  (D or H) and not P")
+        inp.setText(self._advanced_expr)
+        inp.setStyleSheet(_INPUT_BASE.format(border="#666"))
+        inp.textChanged.connect(self._on_advanced_text_changed)
+        hbox.addWidget(inp)
+
+        status = QLabel("")
+        status.setFixedWidth(16)
+        status.setStyleSheet("font-size: 13px;")
+        hbox.addWidget(status)
+
+        if is_toolbar:
+            self._advanced_input = inp
+            self._advanced_status = status
+        else:
+            self._drawer_advanced_input = inp
+            self._drawer_advanced_status = status
+
+        return row
+
+    # ------------------------------------------------------------------
+    # Advanced filter state management
+    # ------------------------------------------------------------------
+
+    def _on_advanced_toggled(self, checked: bool) -> None:
+        """Slot for the Advanced toggle button."""
+        self._set_advanced_mode(checked)
+
+    def _set_advanced_mode(self, active: bool, *, apply: bool = True) -> None:
+        """Master switch for advanced mode — updates all UI and the proxy."""
+        if self._advanced_active == active:
+            return
+        self._advanced_active = active
+
+        self._set_advanced_rows_visible(active)
+        if not active and self.proxy:
+            self.proxy.set_genre_expr(None)
+
+        # Sync all toggle buttons without triggering this slot again
+        for btn in self._advanced_toggle_buttons:
+            try:
+                btn.blockSignals(True)
+                btn.setChecked(active)
+                btn.blockSignals(False)
+            except RuntimeError:
+                pass
+
+        if apply:
+            if active:
+                self._apply_advanced_expr(self._advanced_expr)
+            else:
+                self._on_filter_changed()
+
+    def _activate_advanced_with_expr(self, expr: str) -> None:
+        """Switch to advanced mode, populate the input, and apply *expr*."""
+        self._advanced_expr = expr
+        # Populate inputs before _set_advanced_mode triggers _apply_advanced_expr
+        for inp in (self._advanced_input, self._drawer_advanced_input):
+            if inp is not None:
+                try:
+                    inp.blockSignals(True)
+                    inp.setText(expr)
+                    inp.blockSignals(False)
+                except RuntimeError:
+                    pass
+        self._set_advanced_mode(True)
+
+    def _set_advanced_rows_visible(self, visible: bool) -> None:
+        for row in (self._advanced_row, self._drawer_advanced_row):
+            if row is not None:
+                try:
+                    row.setVisible(visible)
+                except RuntimeError:
+                    pass
+        if self._genre_area is not None:
+            try:
+                self._genre_area.setFixedHeight(60 if visible else 30)
+            except RuntimeError:
+                pass
+
+    def _on_advanced_text_changed(self, text: str) -> None:
+        """Apply expression and sync the other input (toolbar ↔ drawer)."""
+        self._apply_advanced_expr(text)
+        for inp in (self._advanced_input, self._drawer_advanced_input):
+            if inp is None:
+                continue
+            try:
+                if inp.text() != text:
+                    inp.blockSignals(True)
+                    inp.setText(text)
+                    inp.blockSignals(False)
+            except RuntimeError:
+                pass
+
+    def _apply_advanced_expr(self, expr: str) -> None:
+        """Compile *expr* and push it to the proxy; update status indicators."""
+        if not self.context:
+            return
+        text = expr.strip()
+        if not text:
+            self._advanced_expr = ""
+            if self.proxy:
+                self.proxy.set_genre_expr(None)
+                # Fall back to button-based filter
+                self._push_button_filter()
+            self._set_expr_status(None, "")
             return
 
-        config = self.context.config
-        codes = config.genre_editor.codes
-        sorted_codes = sorted(codes, key=lambda c: c.code)
+        try:
+            fn = compile_genre_expr(text, self._valid_codes)
+            self._advanced_expr = text
+            if self.proxy:
+                self.proxy.set_genre_expr(fn)
+            self._set_expr_status(True, "")
+        except ValueError as exc:
+            self._set_expr_status(False, str(exc))
 
-        # Container with horizontal layout (label + buttons on same line)
-        self.toolbar_container = QWidget()
-        layout = QHBoxLayout(self.toolbar_container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+    def _set_expr_status(self, valid: bool | None, tooltip: str) -> None:
+        """Update the border colour and status icon on all advanced inputs."""
+        if valid is None:
+            border, icon = "#666", ""
+        elif valid:
+            border, icon = "#2d7a2d", "✓"
+        else:
+            border, icon = "#7a2d2d", "✗"
 
-        # Add "Genres" label
-        label = QLabel("Genres")
-        label.setStyleSheet("font-weight: bold; font-size: 12px; color: #aaa;")
-        layout.addWidget(label)
+        style = _INPUT_BASE.format(border=border)
+        for inp, lbl in (
+            (self._advanced_input, self._advanced_status),
+            (self._drawer_advanced_input, self._drawer_advanced_status),
+        ):
+            if inp is not None:
+                try:
+                    inp.setStyleSheet(style)
+                except RuntimeError:
+                    pass
+            if lbl is not None:
+                try:
+                    lbl.setText(icon)
+                    lbl.setToolTip(tooltip)
+                except RuntimeError:
+                    pass
 
-        # Genre buttons
-        for code_config in sorted_codes:
-            btn = GenreFilterButton(code_config.code, code_config.name)
-            btn.clicked.connect(self._on_filter_changed)
-            self.genre_buttons.append(btn)
-            layout.addWidget(btn)
-
-        layout.addStretch()
-
-    def _on_search(self, text: str) -> None:
-        """Handle search text change from main search bar."""
-        if self.proxy:
-            self.proxy.set_search_text(text)
-
-    def _on_filter_changed(self) -> None:
-        """Handle genre filter button change."""
+    @staticmethod
+    def _build_genre_sets(buttons: list[GenreFilterButton]) -> tuple[set[str], set[str]]:
+        """Return (on_genres, off_genres) from button states."""
         on_genres: set[str] = set()
         off_genres: set[str] = set()
-
-        # Use drawer buttons when they exist (cue_maker mode), otherwise toolbar buttons
-        active_buttons = self._drawer_buttons if self._drawer_buttons else self.genre_buttons
-
-        for btn in active_buttons:
+        for btn in buttons:
             if btn.state == GenreFilterState.ON:
                 on_genres.add(btn.code)
             elif btn.state == GenreFilterState.OFF:
                 off_genres.add(btn.code)
+        return on_genres, off_genres
 
-        # Save state for persistence across mode switches
+    def _push_button_filter(self) -> None:
+        """Push current button ON/OFF sets to the proxy (without emitting events)."""
+        active = self._drawer_buttons if self._drawer_buttons else self.genre_buttons
+        on_genres, off_genres = self._build_genre_sets(active)
+        if self.proxy:
+            self.proxy.set_genre_filter(on_genres, off_genres)
+
+    # ------------------------------------------------------------------
+    # Preset management
+    # ------------------------------------------------------------------
+
+    def _load_presets(self) -> None:
+        if not self.context:
+            return
+        try:
+            raw = self.context.database.settings.get("search_and_filter", "genre_presets")
+            if raw:
+                self._presets = json.loads(raw)
+        except Exception:
+            self._presets = {}
+
+    def _save_presets_to_db(self) -> None:
+        if not self.context:
+            return
+        try:
+            self.context.database.settings.save(
+                "search_and_filter", "genre_presets", json.dumps(self._presets)
+            )
+        except Exception as exc:
+            logging.warning("[Search & Filter] Failed to save presets: %s", exc)
+
+    def _populate_preset_combo(self, combo: QComboBox) -> None:
+        combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.addItem(self._NO_PRESET)
+            for pname in sorted(self._presets.keys()):
+                combo.addItem(pname)
+            combo.setCurrentIndex(0)
+        finally:
+            combo.blockSignals(False)
+
+    def _sync_preset_combos(self) -> None:
+        for combo in (self._preset_combo, self._drawer_preset_combo):
+            if combo is None:
+                continue
+            try:
+                self._populate_preset_combo(combo)
+            except RuntimeError:
+                pass
+
+    def _on_preset_activated(self, combo: QComboBox) -> None:
+        name = combo.currentText()
+        active_buttons = self._drawer_buttons if self._drawer_buttons else self.genre_buttons
+
+        if name == self._NO_PRESET:
+            self._set_advanced_mode(False, apply=False)
+            self._clear_advanced_inputs()
+            for btn in active_buttons:
+                btn.state = GenreFilterState.INDIFFERENT
+                btn._apply_style()
+            self._on_filter_changed()
+            return
+
+        if not name or name not in self._presets:
+            return
+
+        preset = self._presets[name]
+        if self._EXPR_KEY in preset:
+            for btn in active_buttons:
+                btn.state = GenreFilterState.INDIFFERENT
+                btn._apply_style()
+            self._activate_advanced_with_expr(preset[self._EXPR_KEY])
+        else:
+            self._set_advanced_mode(False, apply=False)
+            self._clear_advanced_inputs()
+            for btn in active_buttons:
+                btn.state = GenreFilterState(
+                    preset.get(btn.code, int(GenreFilterState.INDIFFERENT))
+                )
+                btn._apply_style()
+            self._on_filter_changed()
+
+    def _clear_advanced_inputs(self) -> None:
+        """Reset advanced expression text and status without triggering the filter."""
+        self._advanced_expr = ""
+        for inp in (self._advanced_input, self._drawer_advanced_input):
+            if inp is not None:
+                try:
+                    inp.blockSignals(True)
+                    inp.setText("")
+                    inp.blockSignals(False)
+                except RuntimeError:
+                    pass
+        self._set_expr_status(None, "")
+
+    def _on_save_preset(self, combo: QComboBox) -> None:
+        name, ok = QInputDialog.getText(combo, "New preset", "Preset name:")
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+        if self._advanced_active and self._advanced_expr:
+            self._presets[name] = {self._EXPR_KEY: self._advanced_expr}
+        else:
+            active_buttons = self._drawer_buttons if self._drawer_buttons else self.genre_buttons
+            self._presets[name] = {btn.code: int(btn.state) for btn in active_buttons}
+        self._save_presets_to_db()
+        self._sync_preset_combos()
+        idx = combo.findText(name)
+        if idx >= 0:
+            try:
+                combo.setCurrentIndex(idx)
+            except RuntimeError:
+                pass
+        logging.info("[Search & Filter] Preset '%s' saved", name)
+
+    def _on_delete_preset(self, combo: QComboBox) -> None:
+        name = combo.currentText()
+        if not name or name == self._NO_PRESET or name not in self._presets:
+            return
+        self._presets.pop(name)
+        self._save_presets_to_db()
+        self._sync_preset_combos()
+        logging.info("[Search & Filter] Preset '%s' deleted", name)
+
+    # ------------------------------------------------------------------
+    # Search / filter handlers
+    # ------------------------------------------------------------------
+
+    def _on_search(self, text: str) -> None:
+        if self.proxy:
+            self.proxy.set_search_text(text)
+
+    def _on_filter_changed(self) -> None:
+        """Handle genre button state change: persist state, update proxy, emit event."""
+        active_buttons = self._drawer_buttons if self._drawer_buttons else self.genre_buttons
+        on_genres, off_genres = self._build_genre_sets(active_buttons)
         self._genre_states = {btn.code: btn.state for btn in active_buttons}
 
-        if self.proxy:
+        # When advanced mode is active the expression handles proxy filtering
+        if not self._advanced_active and self.proxy:
             self.proxy.set_genre_filter(on_genres, off_genres)
 
         if self.context:
@@ -333,55 +899,43 @@ class SearchAndFilterPlugin:
                 off_genres=off_genres,
             )
 
-    def _clear_drawer_buttons(self) -> None:
-        """Clear drawer buttons reference (called when drawer container is destroyed)."""
-        self._drawer_buttons = []
-
     def _on_tracks_added(self) -> None:
-        """Re-invalidate filter when tracks change."""
         if self.proxy:
             self.proxy.invalidateFilter()
 
-    def activate(self, mode: str) -> None:
-        """Activate plugin for the given mode.
+    # ------------------------------------------------------------------
+    # Drawer cleanup
+    # ------------------------------------------------------------------
 
-        Restores genre button states from ``_genre_states`` (for toolbar buttons)
-        and re-applies the current filter to the proxy model. In cue_maker mode,
-        drawer buttons are created by the cue_maker plugin calling
-        ``get_drawer_genre_buttons_container()`` — this method only handles the
-        toolbar button set.
-        """
-        # Create buttons if needed
-        if not self.toolbar_container and self.context:
-            self._create_toolbar_buttons()
+    def _clear_drawer_buttons(self) -> None:
+        """Called when the drawer container is destroyed."""
+        self._drawer_buttons = []
+        self._drawer_preset_combo = None
+        self._drawer_advanced_input = None
+        self._drawer_advanced_status = None
+        self._drawer_advanced_row = None
+        # Purge dead toggle button refs
+        self._advanced_toggle_buttons = [b for b in self._advanced_toggle_buttons if _is_alive(b)]
 
-        # Restore saved genre button states on toolbar buttons
-        for btn in self.genre_buttons:
-            if btn.code in self._genre_states:
-                btn.state = self._genre_states[btn.code]
-                btn._apply_style()
 
-        # Re-apply current filter
-        self._on_filter_changed()
-        logging.info("[Search & Filter] Activated for %s mode", mode)
+# ============================================================================
+# Helpers
+# ============================================================================
 
-    def deactivate(self, mode: str) -> None:
-        """Deactivate plugin for the given mode.
 
-        Resets the proxy filter so all tracks remain visible during the mode
-        transition. Genre button states are preserved in ``_genre_states`` and
-        will be restored when the plugin is re-activated.
-        """
-        # Clear filter so all tracks are visible during transition
-        if self.proxy:
-            self.proxy.set_genre_filter(set(), set())
-            self.proxy.set_search_text("")
-        logging.info("[Search & Filter] Deactivated from %s mode", mode)
+def _add_vsep(layout: QHBoxLayout) -> None:
+    """Add a small vertical separator line to *layout*."""
+    sep = QFrame()
+    sep.setFrameShape(QFrame.Shape.VLine)
+    sep.setFixedHeight(20)
+    sep.setStyleSheet("color: #666;")
+    layout.addWidget(sep)
 
-    def shutdown(self) -> None:
-        """Cleanup resources."""
-        if self._track_list:
-            self._track_list.remove_proxy_model()
-        self._track_list = None
-        self.proxy = None
-        self.genre_buttons.clear()
+
+def _is_alive(widget: QWidget) -> bool:
+    """Return True if *widget* has not been destroyed."""
+    try:
+        widget.isVisible()
+        return True
+    except RuntimeError:
+        return False

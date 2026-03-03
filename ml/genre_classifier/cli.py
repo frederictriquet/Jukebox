@@ -180,7 +180,7 @@ def _analyze_track(args: tuple[int, str]) -> tuple[int, str, dict | None, str | 
     Returns:
         Tuple of (track_id, filepath, features_dict or None, error_message or None)
     """
-    from plugins.audio_analyzer import analyze_audio_file
+    from jukebox.utils.audio_features import analyze_audio_file
 
     track_id, filepath = args
     try:
@@ -294,6 +294,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     start_time = time.time()
     success = 0
     errors = 0
+    broken_pool = False
 
     with ProcessPoolExecutor(max_workers=args.workers) as executor:
         # Submit all tasks
@@ -303,34 +304,44 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         }
 
         # Process results as they complete
-        for future in as_completed(futures):
-            track_id, filepath, features, error = future.result()
-            filename = Path(filepath).name
+        try:
+            for future in as_completed(futures):
+                track_id, filepath, features, error = future.result()
+                filename = Path(filepath).name
 
-            if features:
-                # Save to database
-                _save_analysis(db_path, track_id, features)
-                success += 1
-                if args.verbose:
-                    print(f"✓ {filename}")
+                if features:
+                    # Save to database
+                    _save_analysis(db_path, track_id, features)
+                    success += 1
+                    if args.verbose:
+                        print(f"✓ {filename}")
+                else:
+                    errors += 1
+                    if args.verbose:
+                        print(f"✗ {filename}: {error}")
+
+                # Progress update
+                processed = success + errors
+                if processed % 10 == 0 or processed == len(valid_tracks):
+                    elapsed = time.time() - start_time
+                    rate = processed / elapsed if elapsed > 0 else 0
+                    remaining = (len(valid_tracks) - processed) / rate if rate > 0 else 0
+                    print(
+                        f"Progress: {processed}/{len(valid_tracks)} "
+                        f"({success} ok, {errors} errors) "
+                        f"- {rate:.1f} tracks/sec "
+                        f"- ETA: {remaining/60:.1f} min",
+                        end="\r",
+                    )
+        except Exception as exc:
+            from concurrent.futures.process import BrokenProcessPool
+            if isinstance(exc, BrokenProcessPool):
+                broken_pool = True
+                print(f"\n\n⚠️  Worker process killed (out of memory?).", file=sys.stderr)
+                print(f"   Saved {success} tracks so far.", file=sys.stderr)
+                print(f"   Try fewer workers: --workers {max(1, args.workers // 2)}", file=sys.stderr)
             else:
-                errors += 1
-                if args.verbose:
-                    print(f"✗ {filename}: {error}")
-
-            # Progress update
-            processed = success + errors
-            if processed % 10 == 0 or processed == len(valid_tracks):
-                elapsed = time.time() - start_time
-                rate = processed / elapsed if elapsed > 0 else 0
-                remaining = (len(valid_tracks) - processed) / rate if rate > 0 else 0
-                print(
-                    f"Progress: {processed}/{len(valid_tracks)} "
-                    f"({success} ok, {errors} errors) "
-                    f"- {rate:.1f} tracks/sec "
-                    f"- ETA: {remaining/60:.1f} min",
-                    end="\r",
-                )
+                raise
 
     print()  # New line after progress
     elapsed = time.time() - start_time
@@ -345,6 +356,8 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     # Notify via Telegram
     _notify_analyze_done(success=success, errors=errors, elapsed=elapsed)
 
+    if broken_pool:
+        return 1
     return 0 if errors == 0 else 1
 
 

@@ -68,10 +68,21 @@ def test_toolbar_container_layout(qapp) -> None:  # type: ignore
     genre_labels = [lb for lb in labels if lb.text() == "Genres"]
     assert len(genre_labels) == 1, "Should have one 'Genres' label"
 
-    # Container should use QHBoxLayout (same line)
-    from PySide6.QtWidgets import QHBoxLayout
+    # Container uses QVBoxLayout for two rows (buttons + advanced input)
+    # Row 1 (buttons row) should use QHBoxLayout
+    from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout
 
-    assert isinstance(container.layout(), QHBoxLayout), "Should use horizontal layout"
+    assert isinstance(
+        container.layout(), QVBoxLayout
+    ), "Container should use vertical layout for two rows"
+
+    # Verify Row 1 has horizontal layout
+    main_layout = container.layout()
+    if main_layout and main_layout.count() > 0:
+        row1 = main_layout.itemAt(0).widget()
+        assert isinstance(
+            row1.layout(), QHBoxLayout
+        ), "Row 1 (buttons row) should use horizontal layout"
 
 
 def test_toolbar_container_in_genre_buttons_area(qapp) -> None:  # type: ignore

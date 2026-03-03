@@ -41,6 +41,7 @@ class FingerprintDB:
         """Get a database connection."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = _dict_factory
+        conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
     def _ensure_tables(self) -> None:
@@ -289,9 +290,11 @@ class FingerprintDB:
         """
         conn = self._get_connection()
 
-        total_tracks = conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
-        indexed_tracks = conn.execute("SELECT COUNT(*) FROM fingerprint_status").fetchone()[0]
-        total_fingerprints = conn.execute("SELECT COUNT(*) FROM fingerprints").fetchone()[0]
+        total_tracks = conn.execute("SELECT COUNT(*) AS count FROM tracks").fetchone()["count"]
+        indexed_tracks = conn.execute(
+            "SELECT COUNT(*) AS count FROM fingerprint_status"
+        ).fetchone()["count"]
+        total_fingerprints = conn.execute("SELECT COUNT(*) AS count FROM fingerprints").fetchone()["count"]
 
         conn.close()
 
@@ -316,6 +319,26 @@ class FingerprintDB:
         conn.execute("DELETE FROM fingerprint_status WHERE track_id = ?", (track_id,))
         conn.commit()
         conn.close()
+
+    def cleanup_orphans(self) -> dict[str, int]:
+        """Delete fingerprint data for tracks that no longer exist in the tracks table.
+
+        Returns:
+            Dict with counts of deleted rows per table.
+        """
+        conn = self._get_connection()
+        r_status = conn.execute(
+            "DELETE FROM fingerprint_status WHERE track_id NOT IN (SELECT id FROM tracks)"
+        )
+        r_fp = conn.execute(
+            "DELETE FROM fingerprints WHERE track_id NOT IN (SELECT id FROM tracks)"
+        )
+        conn.commit()
+        conn.close()
+        vacuum_conn = sqlite3.connect(self.db_path)
+        vacuum_conn.execute("VACUUM")
+        vacuum_conn.close()
+        return {"fingerprint_status": r_status.rowcount, "fingerprints": r_fp.rowcount}
 
     def clear_all_fingerprints(self) -> None:
         """Delete all fingerprints from the database."""

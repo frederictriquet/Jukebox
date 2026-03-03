@@ -277,8 +277,12 @@ class TestSearchAndFilterPlugin:
 
     def test_initialize_subscribes_to_events(self) -> None:
         """Test initialize subscribes to TRACKS_ADDED event."""
+        from unittest.mock import MagicMock
+
         plugin = SearchAndFilterPlugin()
-        mock_context = Mock()
+        mock_context = MagicMock()
+        # Configure mock for genre_editor.codes as empty list
+        mock_context.config.genre_editor.codes = []
 
         plugin.initialize(mock_context)
 
@@ -286,6 +290,7 @@ class TestSearchAndFilterPlugin:
         mock_context.subscribe.assert_called_once()
         call_args = mock_context.subscribe.call_args
         assert call_args[0][0] == "tracks_added"
+        assert plugin._valid_codes == set()
 
     def test_register_ui_creates_buttons(self, qapp) -> None:  # type: ignore
         """Test register_ui creates filter buttons."""
