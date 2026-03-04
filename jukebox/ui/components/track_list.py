@@ -371,6 +371,36 @@ class TrackListModel(QAbstractTableModel):
         # Delegate to CellRenderer for all display/styling roles
         return self.cell_renderer.get_style(track, index.column(), role)
 
+    def sort(
+        self,
+        column: int,
+        order: Qt.SortOrder = Qt.SortOrder.AscendingOrder,
+    ) -> None:
+        """Sort tracks by column. column == -1 resets to date_added DESC order."""
+        columns = self.cell_renderer.columns
+
+        sort_key_map: dict[str, Any] = {
+            "artist": lambda t: (t.get("artist") or "").lower(),
+            "title": lambda t: (t.get("title") or "").lower(),
+            "filename": lambda t: (t.get("filename") or "").lower(),
+            "genre": lambda t: (t.get("genre") or "").lower(),
+            "duration": lambda t: t.get("duration_seconds") or 0.0,
+            "rating": lambda t: (t.get("genre") or "").lower(),
+        }
+
+        if column == -1 or column >= len(columns) or columns[column] not in sort_key_map:
+            # Reset to date_added DESC (insertion order)
+            key_fn: Any = lambda t: t.get("date_added") or ""
+            reverse = True
+        else:
+            key_fn = sort_key_map[columns[column]]
+            reverse = order == Qt.SortOrder.DescendingOrder
+
+        self.layoutAboutToBeChanged.emit()
+        self.tracks.sort(key=key_fn, reverse=reverse)
+        self.filepath_to_row = {t["filepath"]: i for i, t in enumerate(self.tracks)}
+        self.layoutChanged.emit()
+
     def add_track(
         self,
         filepath: Path,
@@ -378,6 +408,7 @@ class TrackListModel(QAbstractTableModel):
         artist: str | None = None,
         genre: str | None = None,
         duration_seconds: float | None = None,
+        date_added: str | None = None,
     ) -> None:
         """Add a track to the model."""
         # Load waveform and stats info from cache if available
@@ -424,6 +455,7 @@ class TrackListModel(QAbstractTableModel):
             "genre": genre or "",
             "rating": genre or "",  # RatingStyler extracts from genre
             "duration_seconds": duration_seconds,
+            "date_added": date_added,
             "waveform_data": waveform,
             "has_stats": has_stats,  # For StatsStyler
             "duplicate_status": "pending",  # Updated by background worker
@@ -583,6 +615,7 @@ class TrackList(QTableView):
 
     track_selected = Signal(Path)
     add_to_playlist_requested = Signal(Path, int)  # filepath, playlist_id
+    create_playlist_requested = Signal(Path)  # filepath
     files_dropped = Signal(list)  # List of Path objects (files and directories)
 
     def __init__(
@@ -620,6 +653,10 @@ class TrackList(QTableView):
         # Horizontal header configuration
         h_header = self.horizontalHeader()
         h_header.setStretchLastSection(False)  # Manual column sizing
+        # Enable column sorting; clearable = third click resets to date_added order
+        self.setSortingEnabled(True)
+        if hasattr(h_header, "setSortIndicatorClearable"):
+            h_header.setSortIndicatorClearable(True)
 
         # Set column widths from configuration
         columns = COLUMNS_JUKEBOX if mode == AppMode.JUKEBOX.value else COLUMNS_CURATING
@@ -687,6 +724,7 @@ class TrackList(QTableView):
         artist: str | None = None,
         genre: str | None = None,
         duration_seconds: float | None = None,
+        date_added: str | None = None,
     ) -> None:
         """Add a track to the list.
 
@@ -696,8 +734,9 @@ class TrackList(QTableView):
             artist: Track artist (optional)
             genre: Track genre (optional)
             duration_seconds: Track duration in seconds (optional)
+            date_added: ISO timestamp when track was added to DB (optional)
         """
-        self._track_model.add_track(filepath, title, artist, genre, duration_seconds)
+        self._track_model.add_track(filepath, title, artist, genre, duration_seconds, date_added)
 
     def add_tracks(self, filepaths: list[Path]) -> None:
         """Add multiple tracks.
@@ -831,10 +870,16 @@ class TrackList(QTableView):
         menu.addAction(copy_path)
 
         if not file_missing:
-            # Add playlist submenu if playlists exist
+            # Add playlist submenu (always visible)
+            menu.addSeparator()
+            add_menu = menu.addMenu("Add to Playlist")
+            new_list_action = QAction("New list...", self)
+            new_list_action.triggered.connect(
+                lambda checked, fp=filepath: self.create_playlist_requested.emit(fp)
+            )
+            add_menu.addAction(new_list_action)
             if self.playlists:
-                menu.addSeparator()
-                add_menu = menu.addMenu("Add to Playlist")
+                add_menu.addSeparator()
                 for playlist in self.playlists:
                     action = QAction(playlist["name"], self)
                     action.triggered.connect(

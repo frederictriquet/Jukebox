@@ -34,7 +34,7 @@ from collections.abc import Callable
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QSortFilterProxyModel
+from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QSortFilterProxyModel, Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -243,6 +243,13 @@ class GenreFilterProxyModel(QSortFilterProxyModel):
             if g not in track_genres:
                 return False
         return all(g not in track_genres for g in self._off_genres)
+
+    def sort(self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder) -> None:  # noqa: N802
+        """Delegate sorting to the source model to use numeric keys (not DisplayRole strings)."""
+        source = self.sourceModel()
+        if source is not None:
+            source.sort(column, order)
+            self.invalidate()
 
 
 # ============================================================================

@@ -6,6 +6,7 @@ from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QInputDialog,
     QMainWindow,
     QVBoxLayout,
     QWidget,
@@ -155,6 +156,7 @@ class MainWindow(QMainWindow):
 
         # Playlist management
         self.track_list.add_to_playlist_requested.connect(self._on_add_to_playlist)
+        self.track_list.create_playlist_requested.connect(self._on_create_playlist_and_add)
 
     def _register_shortcuts(self) -> None:
         """Register default keyboard shortcuts."""
@@ -231,6 +233,7 @@ class MainWindow(QMainWindow):
                 track["artist"],
                 track["genre"],
                 track["duration_seconds"],
+                track.get("date_added"),
             )
 
         # Restore selection of current playing track
@@ -250,6 +253,7 @@ class MainWindow(QMainWindow):
                 track["artist"],
                 track["genre"],
                 track["duration_seconds"],
+                track.get("date_added"),
             )
 
     def _on_tracks_changed(self) -> None:
@@ -402,6 +406,28 @@ class MainWindow(QMainWindow):
         """Update window title when a library track starts playing."""
         self.setWindowTitle(f"{self.config.ui.window_title} - {Path(filepath).name}")
 
+    def _on_create_playlist_and_add(self, filepath: Path) -> None:
+        """Create a new playlist and add the track to it."""
+        if not self.database.conn:
+            return
+        name, ok = QInputDialog.getText(self, "New Playlist", "Playlist name:")
+        if not ok or not name.strip():
+            return
+        try:
+            cursor = self.database.conn.execute(
+                "INSERT INTO playlists (name) VALUES (?)", (name.strip(),)
+            )
+            playlist_id = cursor.lastrowid
+            self.database.conn.commit()
+        except Exception:
+            logger.exception("Failed to create playlist")
+            return
+        self._on_add_to_playlist(filepath, playlist_id)  # type: ignore[arg-type]
+        # Refresh context menu playlists
+        for plugin in self.plugin_manager.plugins:
+            if hasattr(plugin, "_update_context_menu"):
+                plugin._update_context_menu()
+
     def _on_add_to_playlist(self, filepath: Path, playlist_id: int) -> None:
         """Add a track to a playlist in the database."""
         if not self.database.conn:
@@ -426,6 +452,9 @@ class MainWindow(QMainWindow):
             )
             self.database.conn.commit()
             logger.info("Added track %s to playlist %d", filepath.name, playlist_id)
+            for plugin in self.plugin_manager.plugins:
+                if hasattr(plugin, "_update_context_menu"):
+                    plugin._update_context_menu()
         except Exception:
             logger.exception("Failed to add track to playlist")
 
@@ -522,7 +551,7 @@ class MainWindow(QMainWindow):
         # Load track data from database for each filepath
         for filepath in filepaths:
             track = self.database.conn.execute(
-                "SELECT title, artist, genre, duration_seconds FROM tracks WHERE filepath = ?",
+                "SELECT title, artist, genre, duration_seconds, date_added FROM tracks WHERE filepath = ?",
                 (str(filepath),),
             ).fetchone()
 
@@ -533,6 +562,7 @@ class MainWindow(QMainWindow):
                     track["artist"],
                     track["genre"],
                     track["duration_seconds"],
+                    track["date_added"],
                 )
 
     def _get_current_mode(self) -> str:

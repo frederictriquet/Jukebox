@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QInputDialog,
     QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
@@ -103,11 +105,20 @@ class PlaylistDialog(QDialog):
         """Load playlists."""
         self.playlist_list.clear()
         playlists = self.context.database.conn.execute(
-            "SELECT * FROM playlists ORDER BY name"
+            """
+            SELECT p.*, COUNT(pt.track_id) AS track_count
+            FROM playlists p
+            LEFT JOIN playlist_tracks pt ON p.id = pt.playlist_id
+            GROUP BY p.id
+            ORDER BY p.name
+            """
         ).fetchall()
 
         for playlist in playlists:
-            self.playlist_list.addItem(f"{playlist['name']} ({playlist['id']})")
+            count = playlist["track_count"]
+            item = QListWidgetItem(f"{playlist['name']} ({count} track{'s' if count != 1 else ''})")
+            item.setData(Qt.ItemDataRole.UserRole, playlist["id"])
+            self.playlist_list.addItem(item)
 
     def _create_playlist(self) -> None:
         """Create new playlist."""
@@ -130,7 +141,7 @@ class PlaylistDialog(QDialog):
         if not current:
             return
 
-        playlist_id = int(current.text().split("(")[-1].rstrip(")"))
+        playlist_id = current.data(Qt.ItemDataRole.UserRole)
         tracks = self.context.database.conn.execute(
             """
             SELECT t.*
@@ -161,7 +172,7 @@ class PlaylistDialog(QDialog):
         if not current:
             return
 
-        playlist_id = int(current.text().split("(")[-1].rstrip(")"))
+        playlist_id = current.data(Qt.ItemDataRole.UserRole)
 
         # Load tracks into main track list
         tracks = self.context.database.conn.execute(
@@ -191,7 +202,7 @@ class PlaylistDialog(QDialog):
         if not current:
             return
 
-        playlist_id = int(current.text().split("(")[-1].rstrip(")"))
+        playlist_id = current.data(Qt.ItemDataRole.UserRole)
 
         reply = QMessageBox.question(
             self, "Delete", "Sure?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No

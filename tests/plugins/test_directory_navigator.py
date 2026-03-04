@@ -40,7 +40,7 @@ def test_build_tree_empty_filepaths(qapp) -> None:  # type: ignore
 
     dir_item = root.child(0)
     assert "Directories" in dir_item.text()
-    assert dir_item.data(ROLE_NODE_TYPE) == "root"
+    assert dir_item.data(ROLE_NODE_TYPE) == "all_directories"
 
 
 def test_build_tree_single_level(qapp) -> None:  # type: ignore

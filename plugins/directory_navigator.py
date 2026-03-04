@@ -92,7 +92,7 @@ class DirectoryTreeWidget(QWidget):
 
         # Build directory tree
         dir_node = QStandardItem("Directories")
-        dir_node.setData("root", ROLE_NODE_TYPE)
+        dir_node.setData("all_directories", ROLE_NODE_TYPE)
         dir_node.setData("", ROLE_PATH)
         root.appendRow(dir_node)
 
@@ -328,10 +328,19 @@ class DirectoryNavigatorPlugin:
         path_data = item.data(ROLE_PATH)
 
         if node_type == "root":
-            # Root nodes ("Directories", "Playlists") are not clickable filters
+            # "Playlists" root node — not a filter
             return
 
         db = self.context.database
+
+        if node_type == "all_directories":
+            # Load all tracks from DB — genre/search filters apply on top
+            rows = db.conn.execute(  # type: ignore[attr-defined]
+                "SELECT filepath FROM tracks WHERE mode = 'jukebox' ORDER BY date_added DESC"
+            ).fetchall()
+            filepaths = [Path(row["filepath"]) for row in rows]
+            self.context.emit(Events.LOAD_TRACK_LIST, filepaths=filepaths)
+            return
 
         if node_type == "directory":
             # Filter by directory (recursive: LIKE 'path%')
