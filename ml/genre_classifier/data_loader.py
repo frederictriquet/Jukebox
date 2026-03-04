@@ -161,6 +161,7 @@ def load_training_data(
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
 
     # Build feature columns string
     feature_cols = ", ".join(f"a.{col}" for col in ML_FEATURE_COLUMNS)
@@ -250,6 +251,7 @@ def load_track_features(
         raise FileNotFoundError(f"Database not found: {db_path}")
 
     conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA foreign_keys = ON")
 
     feature_cols = ", ".join(ML_FEATURE_COLUMNS)
     query = f"""
@@ -279,6 +281,7 @@ def get_dataset_stats(db_path: Path | str = DEFAULT_DB_PATH) -> dict:
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
 
     # Total tracks
     total_tracks = conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]

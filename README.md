@@ -1,7 +1,7 @@
 # Jukebox
 
-[![CI](https://github.com/yourusername/jukebox/workflows/CI/badge.svg)](https://github.com/yourusername/jukebox/actions)
-[![codecov](https://codecov.io/gh/yourusername/jukebox/branch/main/graph/badge.svg)](https://codecov.io/gh/yourusername/jukebox)
+[![CI](https://github.com/frederictriquet/jukebox/workflows/CI/badge.svg)](https://github.com/frederictriquet/jukebox/actions)
+[![codecov](https://codecov.io/gh/frederictriquet/jukebox/branch/main/graph/badge.svg)](https://codecov.io/gh/frederictriquet/jukebox)
 [![Python Version](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)

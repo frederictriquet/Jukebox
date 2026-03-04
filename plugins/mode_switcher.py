@@ -156,8 +156,6 @@ class ModeSwitcherPlugin:
                 else:
                     main_window._load_tracks_from_db()
 
-            logging.info(f"Switched to {mode.value} mode")
-
         finally:
             # Re-enable updates
             main_window.setUpdatesEnabled(True)

@@ -199,6 +199,7 @@ def _save_analysis(db_path: Path, track_id: int, features: dict) -> None:
         features: Analysis features dict
     """
     conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA foreign_keys = ON")
 
     columns = list(features.keys())
     placeholders = ", ".join(["?"] * (len(columns) + 1))
@@ -243,6 +244,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
 
     # Get tracks without analysis
     params: list = []

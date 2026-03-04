@@ -62,8 +62,11 @@ class ModeManager(QObject):
         return self._current_mode == AppMode.CURATING
 
     def toggle_mode(self) -> None:
-        """Cycle through all application modes (JUKEBOX → CURATING → CUE_MAKER → JUKEBOX)."""
-        mode_cycle = [AppMode.JUKEBOX, AppMode.CURATING, AppMode.CUE_MAKER]
-        current_index = mode_cycle.index(self._current_mode)
+        """Toggle between JUKEBOX and CURATING modes (CUE_MAKER excluded from cycle)."""
+        mode_cycle = [AppMode.JUKEBOX, AppMode.CURATING]
+        if self._current_mode in mode_cycle:
+            current_index = mode_cycle.index(self._current_mode)
+        else:
+            current_index = -1
         next_index = (current_index + 1) % len(mode_cycle)
         self.set_mode(mode_cycle[next_index])

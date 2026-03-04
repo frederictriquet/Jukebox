@@ -86,7 +86,7 @@ class MainWindow(QMainWindow):
     def _init_ui(self) -> None:
         """Initialize UI."""
         self.setWindowTitle(self.config.ui.window_title)
-        self.resize(self.config.ui.window_width, self.config.ui.window_height)
+        self.showMaximized()
 
         # Central widget
         central = QWidget()
