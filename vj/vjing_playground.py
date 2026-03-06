@@ -16,6 +16,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "plugins"))
 
+import socket
+import struct
 import threading
 
 import numpy as np
@@ -60,8 +62,8 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
 PREVIEW_SIZE = 512
-LED_PANEL_SIZE = 32  # render resolution for LED panel
-LED_PANEL_DISPLAY = 256  # display size (32x32 scaled up with nearest-neighbor)
+LED_PANEL_SIZE = 64  # render resolution for LED panel
+LED_PANEL_DISPLAY = 256  # display size (64x64 scaled up with nearest-neighbor)
 FPS = 30
 DB_PATH = Path.home() / ".jukebox" / "jukebox.db"
 
@@ -312,6 +314,11 @@ class VJingPlayground(QMainWindow):
         self._mic_mode = False
         self._mic_source: MicrophoneSource | None = None
 
+        # ESP32 UDP sender
+        self._esp32_socket: socket.socket | None = None
+        self._esp32_ip: str = ""
+        self._esp32_frame_number: int = 0
+
         # Preview timer
         self._timer = QTimer()
         self._timer.setInterval(1000 // FPS)
@@ -557,6 +564,19 @@ class VJingPlayground(QMainWindow):
         led_container_layout.addWidget(led_group)
         led_container_layout.addLayout(led_layout)
         right_layout.addWidget(led_container)
+
+        # ESP32 UDP sender
+        esp32_row = QHBoxLayout()
+        self._cb_esp32 = QCheckBox("→ ESP32")
+        self._cb_esp32.setChecked(False)
+        self._cb_esp32.toggled.connect(self._on_esp32_toggled)
+        esp32_row.addWidget(self._cb_esp32)
+        self._esp32_ip_edit = QLineEdit()
+        self._esp32_ip_edit.setPlaceholderText("192.168.x.x")
+        self._esp32_ip_edit.textChanged.connect(self._on_esp32_ip_changed)
+        esp32_row.addWidget(self._esp32_ip_edit)
+        esp32_row.addStretch()
+        right_layout.addLayout(esp32_row)
 
         right_layout.addStretch()
 
@@ -838,6 +858,44 @@ class VJingPlayground(QMainWindow):
         if checked and self._led_layer is None and (self._mic_mode or self._audio is not None):
             self._build_layers()
 
+    def _on_esp32_toggled(self, checked: bool) -> None:
+        if checked:
+            ip = self._esp32_ip_edit.text().strip()
+            if not ip:
+                self.statusBar().showMessage("ESP32: entrez une IP")
+                self._cb_esp32.setChecked(False)
+                return
+            self._esp32_ip = ip
+            self._esp32_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self._esp32_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
+            self._esp32_frame_number = 0
+            self.statusBar().showMessage(f"ESP32: envoi activé → {ip}:5005")
+        else:
+            if self._esp32_socket:
+                self._esp32_socket.close()
+                self._esp32_socket = None
+            self._esp32_ip = ""
+            self.statusBar().showMessage("ESP32: envoi désactivé")
+
+    def _on_esp32_ip_changed(self, text: str) -> None:
+        self._esp32_ip = text.strip()
+
+    _ESP32_CHUNK_SIZE = 1024
+
+    def _send_frame_to_esp32(self, led_rgb_image: "Image.Image") -> None:  # noqa: F821
+        if self._esp32_socket is None or not self._esp32_ip:
+            return
+        try:
+            raw = led_rgb_image.tobytes("raw", "RGB")
+            total_chunks = len(raw) // self._ESP32_CHUNK_SIZE
+            for i in range(total_chunks):
+                chunk = raw[i * self._ESP32_CHUNK_SIZE : (i + 1) * self._ESP32_CHUNK_SIZE]
+                header = struct.pack(">IHH", self._esp32_frame_number, i, total_chunks)
+                self._esp32_socket.sendto(header + chunk, (self._esp32_ip, 5005))
+            self._esp32_frame_number += 1
+        except OSError as e:
+            log.warning("ESP32 send error: %s", e)
+
     def _check_all_effects(self) -> None:
         for cb in self._effect_checkboxes.values():
             cb.blockSignals(True)
@@ -1078,6 +1136,8 @@ class VJingPlayground(QMainWindow):
 
                 led_img = self._led_layer.render(self._frame_idx, time_pos)
                 led_rgb = led_img.convert("RGB")
+                if self._cb_esp32.isChecked():
+                    self._send_frame_to_esp32(led_rgb)
                 led_scaled = led_rgb.resize(
                     (LED_PANEL_DISPLAY, LED_PANEL_DISPLAY), PILImage.Resampling.NEAREST
                 )
@@ -1124,6 +1184,9 @@ class VJingPlayground(QMainWindow):
         if self._mic_source:
             self._mic_source.stop()
             self._mic_source = None
+        if self._esp32_socket:
+            self._esp32_socket.close()
+            self._esp32_socket = None
         self._vlc_player.stop()
         self._vlc_player.release()
         self._vlc_instance.release()
