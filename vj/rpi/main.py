@@ -344,7 +344,7 @@ class RpiVJPanel(QMainWindow):
             if name != "none":
                 self._post_fx_radios[name] = rb
 
-        self._post_fx_group.buttonToggled.connect(self._on_effect_toggled)
+        self._post_fx_group.buttonToggled.connect(self._on_post_fx_toggled)
         left_layout.addWidget(post_box)
 
         left_layout.addStretch()
@@ -628,6 +628,12 @@ class RpiVJPanel(QMainWindow):
         for name in added:
             if hasattr(layer, f"_init_{name}"):
                 getattr(layer, f"_init_{name}")()
+
+    def _on_post_fx_toggled(self, *_args: object) -> None:
+        for btn in self._post_fx_group.buttons():
+            btn.setStyleSheet(self._fx_btn_style(checked=btn.isChecked(), active=False))
+        self._last_visible = frozenset()
+        self._on_effect_toggled()
 
     def _on_effect_toggled(self, *_args: object) -> None:
         self._last_visible = frozenset()  # force style refresh on next frame
