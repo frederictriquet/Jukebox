@@ -255,6 +255,7 @@ class RpiVJPanel(QMainWindow):
 
         self._manual_beat = False
         self._mic_mode = True  # False = mode auto sans micro
+        self._last_visible: frozenset[str] = frozenset()
 
         self._timer = QTimer()
         self._timer.setInterval(1000 // FPS)
@@ -772,6 +773,11 @@ class RpiVJPanel(QMainWindow):
                     visible.add(name)
         except Exception:
             return
+
+        frozen = frozenset(visible)
+        if frozen == self._last_visible:
+            return
+        self._last_visible = frozen
 
         for name, cb in self._effect_checkboxes.items():
             cb.setStyleSheet(self._fx_btn_style(checked=cb.isChecked(), active=name in visible))
