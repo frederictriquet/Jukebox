@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=VJ Panel
+Comment=Launch VJ Panel (LED 64x64)
+Exec=lxterminal --command="bash -c 'cd /home/fred/Jukebox && /home/fred/.local/bin/uv run python vj/rpi/main.py; read'"
+Icon=preferences-color
+Terminal=false
