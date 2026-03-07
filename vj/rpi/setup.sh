@@ -36,10 +36,23 @@ sudo apt-get install -y \
     fonts-dejavu-core \
     git
 
-# Sur ARMv7, PySide6 doit venir d'apt
+# Sur ARMv7, PySide6 doit venir d'apt (disponible uniquement sur Debian Bookworm / Ubuntu 23.04+)
 if [ "$ARMV7" = true ]; then
-    echo "  ARMv7 : installation de PySide6 via apt..."
-    sudo apt-get install -y python3-pyside6.qtwidgets python3-pyside6.qtcore python3-pyside6.qtgui
+    echo "  ARMv7 : recherche de python3-pyside6 dans apt..."
+    if apt-cache show python3-pyside6.qtwidgets &>/dev/null; then
+        sudo apt-get install -y python3-pyside6.qtwidgets python3-pyside6.qtcore python3-pyside6.qtgui
+    else
+        echo
+        echo "╔══════════════════════════════════════════════════════════════════╗"
+        echo "║  ERREUR : PySide6 non disponible sur cette plateforme            ║"
+        echo "╠══════════════════════════════════════════════════════════════════╣"
+        echo "║  PySide6 n'a ni wheel ARMv7 sur PyPI ni paquet apt sur cet OS.  ║"
+        echo "║                                                                  ║"
+        echo "║  Solution : installer Raspberry Pi OS 64-bit (aarch64)          ║"
+        echo "║  → https://www.raspberrypi.com/software/                        ║"
+        echo "╚══════════════════════════════════════════════════════════════════╝"
+        exit 1
+    fi
 fi
 
 # ── 2. uv ────────────────────────────────────────────────────────────────────
