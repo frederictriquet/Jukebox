@@ -145,6 +145,15 @@ sudo systemctl enable avahi-daemon
 sudo systemctl start avahi-daemon
 echo "  mDNS actif — ledpanel.local sera résolu automatiquement"
 
+# ── PATH persistant ───────────────────────────────────────────────────────────
+PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
+for RC in "$HOME/.bashrc" "$HOME/.profile"; do
+    if [ -f "$RC" ] && ! grep -qF '.local/bin' "$RC"; then
+        echo "$PATH_LINE" >> "$RC"
+        echo "  PATH mis à jour dans $RC"
+    fi
+done
+
 # ── Résumé ────────────────────────────────────────────────────────────────────
 echo
 echo "=== Setup terminé ==="
@@ -154,5 +163,5 @@ echo "  cd $REPO_ROOT"
 echo "  uv run python vj/rpi/main.py"
 echo "  uv run python vj/rpi/main.py --esp32 ledpanel.local"
 echo
-echo "Lancer au démarrage (optionnel) :"
-echo "  voir vj/rpi/autostart.md"
+echo "⚠️  Si 'uv' est introuvable, recharge ton shell :"
+echo "  source ~/.bashrc"
