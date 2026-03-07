@@ -298,12 +298,12 @@ class RpiVJPanel(QMainWindow):
         effects_grid.setSpacing(4)
 
         self._effect_checkboxes: dict[str, QPushButton] = {}
-        cols = 3
+        cols = 4
         for i, name in enumerate(generator_effects):
             cb = QPushButton(name)
             cb.setCheckable(True)
             cb.setChecked(True)
-            cb.setMinimumHeight(44)
+            cb.setMinimumHeight(90)
             cb.setStyleSheet(self._fx_btn_style(checked=True, active=False))
             cb.toggled.connect(self._on_effect_toggled)
             effects_grid.addWidget(cb, i // cols, i % cols)
