@@ -520,7 +520,8 @@ class RpiVJPanel(QMainWindow):
 
     def _start_mic(self) -> None:
         if not HAS_SOUNDDEVICE:
-            self.statusBar().showMessage("ERROR: sounddevice not installed")
+            self.statusBar().showMessage("ERROR: sounddevice not installed — auto mode")
+            self._switch_to_auto_mode()
             return
 
         self._mic_source = MicrophoneSource(sr=MIC_SR, block_size=MIC_BLOCK_SIZE)
@@ -528,7 +529,8 @@ class RpiVJPanel(QMainWindow):
             self._mic_source.start()
         except Exception as e:
             log.error("Mic : %s", e)
-            self.statusBar().showMessage(f"Mic error: {e}")
+            self.statusBar().showMessage(f"Mic error: {e} — auto mode")
+            self._switch_to_auto_mode()
             return
 
         self._build_live_layer()
@@ -537,6 +539,17 @@ class RpiVJPanel(QMainWindow):
         self.statusBar().showMessage(
             f"Mic active — {len(self._effect_checkboxes)} effects, palette={self._current_palette}"
         )
+
+    def _switch_to_auto_mode(self) -> None:
+        self._mic_mode = False
+        self._btn_mic_mode.setText("Auto (no mic)")
+        self._btn_mic_mode.setStyleSheet(
+            "QPushButton { background: #2a2a2a; color: #888; font-weight: bold; "
+            "font-size: 15px; border: 2px solid #444; border-radius: 6px; }"
+        )
+        self._build_live_layer()
+        self._frame_idx = 0
+        self._timer.start()
 
     # ─── Layer ───────────────────────────────────────────────────────────
 
