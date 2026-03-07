@@ -23,12 +23,18 @@ sudo apt-get install -y \
 
 # ── 2. uv ────────────────────────────────────────────────────────────────────
 echo "[2/5] Installation de uv..."
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 if ! command -v uv &>/dev/null; then
     curl -LsSf https://astral.sh/uv/install.sh | sh
-    # Recharger le PATH pour la suite du script
-    export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+    # Le PATH est déjà mis à jour ci-dessus, on recharge juste le shell env si dispo
+    [ -f "$HOME/.local/bin/env" ] && source "$HOME/.local/bin/env" || true
+    [ -f "$HOME/.cargo/env" ]     && source "$HOME/.cargo/env"     || true
 fi
-echo "  uv $(uv --version)"
+# Vérification explicite avec chemin absolu si command -v échoue encore
+UV_BIN="$(command -v uv 2>/dev/null || echo "$HOME/.local/bin/uv")"
+echo "  uv $("$UV_BIN" --version)"
+# Créer un alias uv → chemin absolu pour la suite du script
+uv() { "$UV_BIN" "$@"; }
 
 # ── 3. Environnement virtuel + dépendances ────────────────────────────────────
 echo "[3/5] Création de l'environnement virtuel..."
