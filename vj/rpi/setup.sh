@@ -4,10 +4,25 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ARCH="$(uname -m)"
 
 echo "=== VJ Panel — Setup Raspberry Pi ==="
 echo "Répertoire projet : $REPO_ROOT"
+echo "Architecture      : $ARCH"
 echo
+
+# ── Avertissement ARMv7 ────────────────────────────────────────────────────────
+if [ "$ARCH" = "armv7l" ]; then
+    echo "⚠️  OS 32-bit détecté (ARMv7)."
+    echo "   PySide6 n'a pas de wheel ARMv7 sur PyPI."
+    echo "   Il sera installé via apt (python3-pyside6)."
+    echo "   Pour une meilleure compatibilité, préférez un OS 64-bit (aarch64)."
+    echo "   → https://www.raspberrypi.com/software/ (Raspberry Pi OS 64-bit)"
+    echo
+    ARMV7=true
+else
+    ARMV7=false
+fi
 
 # ── 1. Packages système ───────────────────────────────────────────────────────
 echo "[1/5] Packages système..."
@@ -21,25 +36,57 @@ sudo apt-get install -y \
     fonts-dejavu-core \
     git
 
+# Sur ARMv7, PySide6 doit venir d'apt
+if [ "$ARMV7" = true ]; then
+    echo "  ARMv7 : installation de PySide6 via apt..."
+    sudo apt-get install -y python3-pyside6.qtwidgets python3-pyside6.qtcore python3-pyside6.qtgui
+fi
+
 # ── 2. uv ────────────────────────────────────────────────────────────────────
 echo "[2/5] Installation de uv..."
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
-if ! command -v uv &>/dev/null; then
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    # Le PATH est déjà mis à jour ci-dessus, on recharge juste le shell env si dispo
-    [ -f "$HOME/.local/bin/env" ] && source "$HOME/.local/bin/env" || true
-    [ -f "$HOME/.cargo/env" ]     && source "$HOME/.cargo/env"     || true
+
+_find_uv() {
+    command -v uv 2>/dev/null \
+        || [ -x "$HOME/.local/bin/uv" ] && echo "$HOME/.local/bin/uv" \
+        || [ -x "$HOME/.cargo/bin/uv" ] && echo "$HOME/.cargo/bin/uv" \
+        || true
+}
+
+if [ -z "$(_find_uv)" ]; then
+    echo "  uv absent — installation via curl..."
+    if curl -LsSf https://astral.sh/uv/install.sh | sh; then
+        export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+    else
+        echo "  curl échoué — fallback pip3..."
+        pip3 install --user uv
+    fi
 fi
-# Vérification explicite avec chemin absolu si command -v échoue encore
-UV_BIN="$(command -v uv 2>/dev/null || echo "$HOME/.local/bin/uv")"
+
+UV_BIN="$(_find_uv)"
+if [ -z "$UV_BIN" ]; then
+    echo "ERREUR : impossible de trouver uv après installation."
+    echo "Essayez manuellement : pip3 install --user uv"
+    exit 1
+fi
+
 echo "  uv $("$UV_BIN" --version)"
-# Créer un alias uv → chemin absolu pour la suite du script
 uv() { "$UV_BIN" "$@"; }
+export -f uv
 
 # ── 3. Environnement virtuel + dépendances ────────────────────────────────────
 echo "[3/5] Création de l'environnement virtuel..."
 cd "$REPO_ROOT"
-uv sync --extra video
+if [ "$ARMV7" = true ]; then
+    # PySide6 vient d'apt → on autorise les packages système dans le venv
+    uv sync --extra video --python-preference system \
+        --no-build-isolation \
+        --link-mode=copy \
+        2>/dev/null || \
+    uv sync --extra video --system-site-packages
+else
+    uv sync --extra video
+fi
 
 # ── 4. Test imports critiques ─────────────────────────────────────────────────
 echo "[4/5] Vérification des imports..."
