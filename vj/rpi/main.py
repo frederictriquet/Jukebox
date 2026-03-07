@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import random
 import socket
 import struct
 import sys
@@ -36,7 +37,6 @@ from PySide6.QtGui import QColor, QImage, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
-    QCheckBox,
     QComboBox,
     QGridLayout,
     QGroupBox,
@@ -44,8 +44,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QPushButton,
-    QRadioButton,
-    QScrollArea,
     QSlider,
     QSplitter,
     QVBoxLayout,
@@ -255,6 +253,7 @@ class RpiVJPanel(QMainWindow):
         self._current_palette = "neon"
 
         self._manual_beat = False
+        self._mic_mode = True  # False = mode auto sans micro
 
         self._timer = QTimer()
         self._timer.setInterval(1000 // FPS)
@@ -286,30 +285,29 @@ class RpiVJPanel(QMainWindow):
         post_fx = VJingLayer.POST_PROCESSING_EFFECTS
         final_fx = VJingLayer.FINAL_PASS_EFFECTS
         special_fx = post_fx | final_fx
-        generator_effects = [e for e in all_effects if e not in special_fx]
+        generator_effects = sorted(e for e in all_effects if e not in special_fx)
         post_effects = [e for e in all_effects if e in post_fx]
         final_effects = [e for e in all_effects if e in final_fx]
 
         effects_box = QGroupBox("Generator Effects")
         effects_outer = QVBoxLayout(effects_box)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        effects_widget = QWidget()
-        effects_grid = QGridLayout(effects_widget)
+        effects_grid = QGridLayout()
         effects_grid.setSpacing(4)
 
-        self._effect_checkboxes: dict[str, QCheckBox] = {}
+        self._effect_checkboxes: dict[str, QPushButton] = {}
         cols = 3
         for i, name in enumerate(generator_effects):
-            cb = QCheckBox(name)
+            cb = QPushButton(name)
+            cb.setCheckable(True)
             cb.setChecked(True)
+            cb.setMinimumHeight(44)
+            cb.setStyleSheet(self._fx_btn_style(checked=True, active=False))
             cb.toggled.connect(self._on_effect_toggled)
             effects_grid.addWidget(cb, i // cols, i % cols)
             self._effect_checkboxes[name] = cb
 
-        scroll.setWidget(effects_widget)
-        effects_outer.addWidget(scroll)
+        effects_outer.addLayout(effects_grid)
 
         btn_row = QHBoxLayout()
         btn_all = QPushButton("All")
@@ -323,64 +321,32 @@ class RpiVJPanel(QMainWindow):
 
         # Post-Processing
         post_box = QGroupBox("Post-Processing")
-        post_layout = QHBoxLayout(post_box)
-        post_layout.setContentsMargins(4, 4, 4, 4)
-        post_layout.setSpacing(8)
+        post_grid = QGridLayout(post_box)
+        post_grid.setContentsMargins(4, 4, 4, 4)
+        post_grid.setSpacing(8)
 
         self._post_fx_group = QButtonGroup(self)
         self._post_fx_group.setExclusive(True)
-        self._post_fx_radios: dict[str, QRadioButton] = {}
+        self._post_fx_radios: dict[str, QPushButton] = {}
 
-        none_radio = QRadioButton("none")
-        none_radio.setChecked(True)
-        self._post_fx_group.addButton(none_radio)
-        post_layout.addWidget(none_radio)
-
-        for name in post_effects + final_effects:
-            rb = QRadioButton(name)
+        all_post = ["none"] + post_effects + final_effects
+        post_cols = (len(all_post) + 1) // 2
+        for i, name in enumerate(all_post):
+            rb = QPushButton(name)
+            rb.setCheckable(True)
+            rb.setChecked(name == "none")
+            rb.setMinimumHeight(44)
+            rb.setStyleSheet(self._fx_btn_style(checked=(name == "none"), active=False))
+            rb.toggled.connect(lambda checked, b=rb: b.setStyleSheet(
+                self._fx_btn_style(checked=checked, active=False)
+            ))
             self._post_fx_group.addButton(rb)
-            post_layout.addWidget(rb)
-            self._post_fx_radios[name] = rb
+            post_grid.addWidget(rb, i // post_cols, i % post_cols)
+            if name != "none":
+                self._post_fx_radios[name] = rb
 
         self._post_fx_group.buttonToggled.connect(self._on_effect_toggled)
-        post_layout.addStretch()
         left_layout.addWidget(post_box)
-
-        # Palette
-        palette_row = QHBoxLayout()
-        palette_row.addWidget(QLabel("Palette:"))
-        self._palette_combo = QComboBox()
-        self._palette_combo.addItems(sorted(VJingLayer.COLOR_PALETTES.keys()))
-        self._palette_combo.setCurrentText("neon")
-        self._palette_combo.currentTextChanged.connect(self._on_palette_changed)
-        palette_row.addWidget(self._palette_combo)
-        left_layout.addLayout(palette_row)
-
-        # Simultaneous
-        simul_row = QHBoxLayout()
-        simul_row.addWidget(QLabel("Simultaneous:"))
-        self._simul_combo = QComboBox()
-        for n in range(1, 11):
-            self._simul_combo.addItem(str(n))
-        self._simul_combo.setCurrentText("1")
-        self._simul_combo.currentTextChanged.connect(self._on_effect_toggled)
-        simul_row.addWidget(self._simul_combo)
-        left_layout.addLayout(simul_row)
-
-        # Sensitivity
-        sens_row = QHBoxLayout()
-        sens_row.addWidget(QLabel("Sensitivity:"))
-        self._sensitivity_slider = QSlider(Qt.Orientation.Horizontal)
-        self._sensitivity_slider.setRange(50, 300)
-        self._sensitivity_slider.setValue(100)
-        self._sensitivity_slider.setTickInterval(50)
-        self._sensitivity_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self._sensitivity_slider.valueChanged.connect(self._on_sensitivity_changed)
-        sens_row.addWidget(self._sensitivity_slider)
-        self._sensitivity_label = QLabel("1.0x")
-        self._sensitivity_label.setFixedWidth(35)
-        sens_row.addWidget(self._sensitivity_label)
-        left_layout.addLayout(sens_row)
 
         left_layout.addStretch()
 
@@ -402,6 +368,62 @@ class RpiVJPanel(QMainWindow):
         self._esp32_status = QLabel(f"ESP32: {self._esp32_host}")
         self._esp32_status.setStyleSheet("color: #888;")
         right_layout.addWidget(self._esp32_status)
+
+        # Palette
+        palette_row = QHBoxLayout()
+        palette_lbl = QLabel("Palette:")
+        palette_lbl.setStyleSheet("font-size: 28px;")
+        palette_row.addWidget(palette_lbl)
+        self._palette_combo = QComboBox()
+        self._palette_combo.addItems(sorted(VJingLayer.COLOR_PALETTES.keys()))
+        self._palette_combo.setCurrentText("neon")
+        self._palette_combo.setStyleSheet("font-size: 28px; min-height: 48px;")
+        self._palette_combo.currentTextChanged.connect(self._on_palette_changed)
+        palette_row.addWidget(self._palette_combo)
+        right_layout.addLayout(palette_row)
+
+        # Simultaneous
+        simul_row = QHBoxLayout()
+        simul_lbl = QLabel("Simultaneous:")
+        simul_lbl.setStyleSheet("font-size: 28px;")
+        simul_row.addWidget(simul_lbl)
+        self._simul_combo = QComboBox()
+        for n in range(1, 11):
+            self._simul_combo.addItem(str(n))
+        self._simul_combo.setCurrentText("1")
+        self._simul_combo.setStyleSheet("font-size: 28px; min-height: 48px;")
+        self._simul_combo.currentTextChanged.connect(self._on_effect_toggled)
+        simul_row.addWidget(self._simul_combo)
+        right_layout.addLayout(simul_row)
+
+        # Sensitivity
+        sens_row = QHBoxLayout()
+        sens_lbl = QLabel("Sensitivity:")
+        sens_lbl.setStyleSheet("font-size: 28px;")
+        sens_row.addWidget(sens_lbl)
+        self._sensitivity_slider = QSlider(Qt.Orientation.Horizontal)
+        self._sensitivity_slider.setRange(50, 300)
+        self._sensitivity_slider.setValue(100)
+        self._sensitivity_slider.setTickInterval(50)
+        self._sensitivity_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self._sensitivity_slider.setStyleSheet("min-height: 48px;")
+        self._sensitivity_slider.valueChanged.connect(self._on_sensitivity_changed)
+        sens_row.addWidget(self._sensitivity_slider)
+        self._sensitivity_label = QLabel("1.0x")
+        self._sensitivity_label.setStyleSheet("font-size: 28px;")
+        self._sensitivity_label.setFixedWidth(70)
+        sens_row.addWidget(self._sensitivity_label)
+        right_layout.addLayout(sens_row)
+
+        # Mode mic / auto
+        self._btn_mic_mode = QPushButton("Mic ON")
+        self._btn_mic_mode.setFixedHeight(48)
+        self._btn_mic_mode.setStyleSheet(
+            "QPushButton { background: #1a4a1a; color: #4f4; font-weight: bold; "
+            "font-size: 15px; border: 2px solid #2a6a2a; border-radius: 6px; }"
+        )
+        self._btn_mic_mode.clicked.connect(self._toggle_mic_mode)
+        right_layout.addWidget(self._btn_mic_mode)
 
         # Zone de tap beat (tactile)
         self._beat_btn = QPushButton("TAP BEAT")
@@ -431,6 +453,51 @@ class RpiVJPanel(QMainWindow):
         splitter.setSizes([560, LED_DISPLAY + 40])
 
         self.statusBar().showMessage("Démarrage du microphone…")
+
+    # ─── Styles boutons effets ────────────────────────────────────────────
+
+    @staticmethod
+    def _fx_btn_style(checked: bool, active: bool) -> str:
+        if active:
+            return ("font-size: 44px; font-weight: bold; color: #00FF00; "
+                    "background: #1a3a1a; border: 2px solid #00FF00; border-radius: 4px;")
+        if checked:
+            return ("font-size: 44px; color: #ccc; "
+                    "background: #3a3a3a; border: 2px solid #666; border-radius: 4px;")
+        return ("font-size: 44px; color: #555; "
+                "background: #1e1e1e; border: 2px solid #333; border-radius: 4px;")
+
+    # ─── Mode mic / auto ─────────────────────────────────────────────────
+
+    def _toggle_mic_mode(self) -> None:
+        self._mic_mode = not self._mic_mode
+        if self._mic_mode:
+            self._btn_mic_mode.setText("Mic ON")
+            self._btn_mic_mode.setStyleSheet(
+                "QPushButton { background: #1a4a1a; color: #4f4; font-weight: bold; "
+                "font-size: 15px; border: 2px solid #2a6a2a; border-radius: 6px; }"
+            )
+            self._start_mic()
+        else:
+            self._btn_mic_mode.setText("Auto (no mic)")
+            self._btn_mic_mode.setStyleSheet(
+                "QPushButton { background: #2a2a2a; color: #888; font-weight: bold; "
+                "font-size: 15px; border: 2px solid #444; border-radius: 6px; }"
+            )
+            if self._mic_source:
+                self._mic_source.stop()
+                self._mic_source = None
+
+    def _make_auto_ctx(self) -> dict:
+        """Contexte audio synthétique pour le mode sans micro."""
+        return {
+            "energy": 0.5,
+            "bass": 0.4,
+            "mid": 0.5,
+            "treble": 0.3,
+            "fft": np.full(32, 0.4),
+            "is_beat": False,
+        }
 
     # ─── Mic ─────────────────────────────────────────────────────────────
 
@@ -469,6 +536,7 @@ class RpiVJPanel(QMainWindow):
 
     def _build_live_layer(self) -> None:
         checked = self._get_checked_effects()
+        random.shuffle(checked)
         if not checked:
             self._led_layer = None
             self.statusBar().showMessage("Aucun effet sélectionné")
@@ -578,6 +646,7 @@ class RpiVJPanel(QMainWindow):
         for cb in self._effect_checkboxes.values():
             cb.blockSignals(True)
             cb.setChecked(True)
+            cb.setStyleSheet(self._fx_btn_style(checked=True, active=False))
             cb.blockSignals(False)
         self._on_effect_toggled()
 
@@ -585,6 +654,7 @@ class RpiVJPanel(QMainWindow):
         for cb in self._effect_checkboxes.values():
             cb.blockSignals(True)
             cb.setChecked(False)
+            cb.setStyleSheet(self._fx_btn_style(checked=False, active=False))
             cb.blockSignals(False)
         self._on_effect_toggled()
 
@@ -625,14 +695,18 @@ class RpiVJPanel(QMainWindow):
         if self._frame_idx >= total:
             self._frame_idx = total - 1
 
-        if self._mic_source and self._mic_source.is_active:
+        if self._mic_mode and self._mic_source and self._mic_source.is_active:
             ctx = self._mic_source.get_audio_features(self._frame_idx)
-            if self._manual_beat:
-                ctx["is_beat"] = True
-                ctx["energy"] = max(ctx["energy"], 0.85)
-                ctx["bass"] = max(ctx["bass"], 0.85)
-                self._manual_beat = False
-            self._led_layer.live_ctx = ctx
+        else:
+            ctx = self._make_auto_ctx()
+
+        if self._manual_beat:
+            ctx["is_beat"] = True
+            ctx["energy"] = max(ctx["energy"], 0.85)
+            ctx["bass"] = max(ctx["bass"], 0.85)
+            self._manual_beat = False
+
+        self._led_layer.live_ctx = ctx
 
         time_pos = self._frame_idx / FPS
 
@@ -671,12 +745,11 @@ class RpiVJPanel(QMainWindow):
             if self._led_layer._calculate_effect_alpha(i, time_pos, num) > 0.0:
                 visible.add(name)
 
-        on = "font-weight: bold; color: #00FF00;"
-        off = ""
         for name, cb in self._effect_checkboxes.items():
-            cb.setStyleSheet(on if name in visible else off)
+            cb.setStyleSheet(self._fx_btn_style(checked=cb.isChecked(), active=name in visible))
+
         for name, rb in self._post_fx_radios.items():
-            rb.setStyleSheet(on if name in visible else off)
+            rb.setStyleSheet(self._fx_btn_style(checked=rb.isChecked(), active=name in visible))
 
     # ─── Nettoyage ───────────────────────────────────────────────────────
 
