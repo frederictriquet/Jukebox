@@ -316,7 +316,7 @@ class VJingPlayground(QMainWindow):
 
         # ESP32 UDP sender
         self._esp32_socket: socket.socket | None = None
-        self._esp32_ip: str = ""
+        self._esp32_ip: str = "ledpanel.local"
         self._esp32_frame_number: int = 0
 
         # Preview timer
@@ -572,7 +572,7 @@ class VJingPlayground(QMainWindow):
         self._cb_esp32.toggled.connect(self._on_esp32_toggled)
         esp32_row.addWidget(self._cb_esp32)
         self._esp32_ip_edit = QLineEdit()
-        self._esp32_ip_edit.setPlaceholderText("192.168.x.x")
+        self._esp32_ip_edit.setText("ledpanel.local")
         self._esp32_ip_edit.textChanged.connect(self._on_esp32_ip_changed)
         esp32_row.addWidget(self._esp32_ip_edit)
         esp32_row.addStretch()
