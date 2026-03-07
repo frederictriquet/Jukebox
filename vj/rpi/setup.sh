@@ -59,10 +59,13 @@ echo "[2/5] Installation de uv..."
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
 _find_uv() {
-    command -v uv 2>/dev/null \
-        || [ -x "$HOME/.local/bin/uv" ] && echo "$HOME/.local/bin/uv" \
-        || [ -x "$HOME/.cargo/bin/uv" ] && echo "$HOME/.cargo/bin/uv" \
-        || true
+    if command -v uv &>/dev/null; then
+        command -v uv
+    elif [ -x "$HOME/.local/bin/uv" ]; then
+        echo "$HOME/.local/bin/uv"
+    elif [ -x "$HOME/.cargo/bin/uv" ]; then
+        echo "$HOME/.cargo/bin/uv"
+    fi
 }
 
 if [ -z "$(_find_uv)" ]; then
