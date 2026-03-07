@@ -426,7 +426,7 @@ class RpiVJPanel(QMainWindow):
 
         # Zone de tap beat (tactile)
         self._beat_btn = QPushButton("TAP BEAT")
-        self._beat_btn.setFixedHeight(80)
+        self._beat_btn.setFixedHeight(240)
         self._beat_btn.setStyleSheet("""
             QPushButton {
                 background: #2a2a2a;
