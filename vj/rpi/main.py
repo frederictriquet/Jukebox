@@ -113,7 +113,7 @@ class MicrophoneSource:
 
     def start(self) -> None:
         if not HAS_SOUNDDEVICE:
-            raise RuntimeError("sounddevice non installé (uv sync --extra video)")
+            raise RuntimeError("sounddevice not installed (uv sync --extra video)")
         self._stream = sd.InputStream(
             samplerate=self.sr,
             channels=1,
@@ -304,6 +304,9 @@ class RpiVJPanel(QMainWindow):
             cb.setChecked(True)
             cb.setMinimumHeight(44)
             cb.setStyleSheet(self._fx_btn_style(checked=True, active=False))
+            cb.toggled.connect(lambda checked, b=cb: b.setStyleSheet(
+                self._fx_btn_style(checked=checked, active=False)
+            ))
             cb.toggled.connect(self._on_effect_toggled)
             effects_grid.addWidget(cb, i // cols, i % cols)
             self._effect_checkboxes[name] = cb
@@ -517,7 +520,7 @@ class RpiVJPanel(QMainWindow):
 
     def _start_mic(self) -> None:
         if not HAS_SOUNDDEVICE:
-            self.statusBar().showMessage("ERREUR : sounddevice non installé")
+            self.statusBar().showMessage("ERROR: sounddevice not installed")
             return
 
         self._mic_source = MicrophoneSource(sr=MIC_SR, block_size=MIC_BLOCK_SIZE)
@@ -639,7 +642,7 @@ class RpiVJPanel(QMainWindow):
             self._build_live_layer()
 
         self.statusBar().showMessage(
-            f"{len(checked)} effets, palette={self._current_palette}"
+            f"{len(checked)} effects, palette={self._current_palette}"
         )
 
     def _on_palette_changed(self, palette_name: str) -> None:
@@ -767,8 +770,8 @@ class RpiVJPanel(QMainWindow):
 
     def _confirm_quit(self) -> None:
         dlg = QMessageBox(self)
-        dlg.setWindowTitle("Quitter")
-        dlg.setText("Quitter l'application ?")
+        dlg.setWindowTitle("Quit")
+        dlg.setText("Quit the application?")
         dlg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         dlg.setDefaultButton(QMessageBox.StandardButton.No)
         dlg.setStyleSheet("font-size: 28px;")
