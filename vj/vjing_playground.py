@@ -309,6 +309,7 @@ class VJingPlayground(QMainWindow):
         # Genre button states
         self._genre_states: dict[str, int] = {}
         self._slider_dragging = False
+        self._last_visible: frozenset[str] = frozenset()
 
         # Microphone live mode
         self._mic_mode = False
@@ -794,6 +795,7 @@ class VJingPlayground(QMainWindow):
                 getattr(layer, f"_init_{name}")()
 
     def _on_effect_toggled(self, *_args: object) -> None:
+        self._last_visible = frozenset()  # force style refresh on next frame
         checked = self._get_checked_effects()
         if not checked:
             self._vjing_layer = None
@@ -1162,12 +1164,17 @@ class VJingPlayground(QMainWindow):
         if layer is None:
             return
 
-        active = set(layer.active_effects)
-        num = len(layer.active_effects)
+        active_effects = list(layer.active_effects)
+        num = len(active_effects)
         visible: set[str] = set()
-        for i, name in enumerate(layer.active_effects):
+        for i, name in enumerate(active_effects):
             if layer._calculate_effect_alpha(i, time_pos, num) > 0.0:
                 visible.add(name)
+
+        frozen = frozenset(visible)
+        if frozen == self._last_visible:
+            return
+        self._last_visible = frozen
 
         on = "font-weight: bold; color: #00FF00;"
         off = ""

@@ -630,6 +630,7 @@ class RpiVJPanel(QMainWindow):
                 getattr(layer, f"_init_{name}")()
 
     def _on_effect_toggled(self, *_args: object) -> None:
+        self._last_visible = frozenset()  # force style refresh on next frame
         checked = self._get_checked_effects()
         if not checked:
             self._led_layer = None
