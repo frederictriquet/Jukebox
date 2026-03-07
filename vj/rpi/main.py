@@ -35,6 +35,7 @@ except ImportError:
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QImage, QPalette, QPixmap
 from PySide6.QtWidgets import (
+    QMessageBox,
     QApplication,
     QButtonGroup,
     QComboBox,
@@ -448,11 +449,24 @@ class RpiVJPanel(QMainWindow):
 
         right_layout.addStretch()
 
+        quit_row = QHBoxLayout()
+        quit_row.addStretch()
+        btn_quit = QPushButton("Quit")
+        btn_quit.setFixedHeight(48)
+        btn_quit.setStyleSheet(
+            "QPushButton { background: #3a1a1a; color: #f88; font-size: 24px; "
+            "font-weight: bold; border: 2px solid #6a2a2a; border-radius: 6px; padding: 0 20px; }"
+            "QPushButton:pressed { background: #a22; color: white; }"
+        )
+        btn_quit.clicked.connect(self._confirm_quit)
+        quit_row.addWidget(btn_quit)
+        right_layout.addLayout(quit_row)
+
         splitter.addWidget(left)
         splitter.addWidget(right)
         splitter.setSizes([560, LED_DISPLAY + 40])
 
-        self.statusBar().showMessage("Démarrage du microphone…")
+        self.statusBar().showMessage("Starting microphone…")
 
     # ─── Styles boutons effets ────────────────────────────────────────────
 
@@ -511,14 +525,14 @@ class RpiVJPanel(QMainWindow):
             self._mic_source.start()
         except Exception as e:
             log.error("Mic : %s", e)
-            self.statusBar().showMessage(f"Mic erreur : {e}")
+            self.statusBar().showMessage(f"Mic error: {e}")
             return
 
         self._build_live_layer()
         self._frame_idx = 0
         self._timer.start()
         self.statusBar().showMessage(
-            f"Micro actif — {len(self._effect_checkboxes)} effets, palette={self._current_palette}"
+            f"Mic active — {len(self._effect_checkboxes)} effects, palette={self._current_palette}"
         )
 
     # ─── Layer ───────────────────────────────────────────────────────────
@@ -539,7 +553,7 @@ class RpiVJPanel(QMainWindow):
         random.shuffle(checked)
         if not checked:
             self._led_layer = None
-            self.statusBar().showMessage("Aucun effet sélectionné")
+            self.statusBar().showMessage("No effect selected")
             return
 
         try:
@@ -568,7 +582,7 @@ class RpiVJPanel(QMainWindow):
         except Exception as e:
             log.error("LiveVJingLayer : %s", e)
             self._led_layer = None
-            self.statusBar().showMessage(f"Erreur layer : {e}")
+            self.statusBar().showMessage(f"Layer error: {e}")
 
     def _hot_swap_effects(self, effects: list[str], time_pos: float) -> None:
         if self._led_layer is None:
@@ -608,7 +622,7 @@ class RpiVJPanel(QMainWindow):
         checked = self._get_checked_effects()
         if not checked:
             self._led_layer = None
-            self.statusBar().showMessage("Aucun effet sélectionné")
+            self.statusBar().showMessage("No effect selected")
             return
 
         try:
@@ -750,6 +764,16 @@ class RpiVJPanel(QMainWindow):
 
         for name, rb in self._post_fx_radios.items():
             rb.setStyleSheet(self._fx_btn_style(checked=rb.isChecked(), active=name in visible))
+
+    def _confirm_quit(self) -> None:
+        dlg = QMessageBox(self)
+        dlg.setWindowTitle("Quitter")
+        dlg.setText("Quitter l'application ?")
+        dlg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        dlg.setDefaultButton(QMessageBox.StandardButton.No)
+        dlg.setStyleSheet("font-size: 28px;")
+        if dlg.exec() == QMessageBox.StandardButton.Yes:
+            self.close()
 
     # ─── Nettoyage ───────────────────────────────────────────────────────
 
