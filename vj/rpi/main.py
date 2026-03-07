@@ -304,9 +304,6 @@ class RpiVJPanel(QMainWindow):
             cb.setChecked(True)
             cb.setMinimumHeight(44)
             cb.setStyleSheet(self._fx_btn_style(checked=True, active=False))
-            cb.toggled.connect(lambda checked, b=cb: b.setStyleSheet(
-                self._fx_btn_style(checked=checked, active=False)
-            ))
             cb.toggled.connect(self._on_effect_toggled)
             effects_grid.addWidget(cb, i // cols, i % cols)
             self._effect_checkboxes[name] = cb
@@ -341,9 +338,6 @@ class RpiVJPanel(QMainWindow):
             rb.setChecked(name == "none")
             rb.setMinimumHeight(44)
             rb.setStyleSheet(self._fx_btn_style(checked=(name == "none"), active=False))
-            rb.toggled.connect(lambda checked, b=rb: b.setStyleSheet(
-                self._fx_btn_style(checked=checked, active=False)
-            ))
             self._post_fx_group.addButton(rb)
             post_grid.addWidget(rb, i // post_cols, i % post_cols)
             if name != "none":
@@ -769,11 +763,15 @@ class RpiVJPanel(QMainWindow):
     def _highlight_active_effects(self, time_pos: float) -> None:
         if self._led_layer is None:
             return
-        num = len(self._led_layer.active_effects)
-        visible: set[str] = set()
-        for i, name in enumerate(self._led_layer.active_effects):
-            if self._led_layer._calculate_effect_alpha(i, time_pos, num) > 0.0:
-                visible.add(name)
+        try:
+            active_effects = list(self._led_layer.active_effects)
+            num = len(active_effects)
+            visible: set[str] = set()
+            for i, name in enumerate(active_effects):
+                if self._led_layer._calculate_effect_alpha(i, time_pos, num) > 0.0:
+                    visible.add(name)
+        except Exception:
+            return
 
         for name, cb in self._effect_checkboxes.items():
             cb.setStyleSheet(self._fx_btn_style(checked=cb.isChecked(), active=name in visible))
