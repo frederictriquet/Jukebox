@@ -31,8 +31,7 @@ sudo apt-get install -y \
     python3 python3-pip python3-venv \
     libportaudio2 portaudio19-dev \
     libasound2-dev \
-    libgl1-mesa-glx libgles2-mesa \
-    qt6-base-dev libqt6gui6 \
+    libgl1 \
     fonts-dejavu-core \
     git
 
