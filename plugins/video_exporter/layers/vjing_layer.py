@@ -522,6 +522,29 @@ class VJingLayer(BaseVisualLayer):
             f"[VJingLayer] Active effects ({len(self.active_effects)}): {self.active_effects}"
         )
 
+        # Cache effect partitioning (generators / post / final) — recomputed only when
+        # active_effects changes, not on every render() call.
+        self._cached_active_effects: list[str] = []
+        self._cached_generators: list[str] = []
+        self._cached_post_processors: list[str] = []
+        self._cached_final_pass: list[str] = []
+
+        # Pre-allocated ctx dict — updated in-place each frame, no allocation at 30fps.
+        self._render_ctx: dict = {
+            "energy": 0.0, "bass": 0.0, "mid": 0.0,
+            "treble": 0.0, "fft": np.zeros(32), "is_beat": False,
+        }
+
+        # beats as set for O(1) lookup (beats list kept for reversed iteration in effects)
+        self._beats_set: set[int] = set()
+
+        # Pre-allocated numpy scratch arrays for compositing (width×height×4, float32)
+        # Sized lazily in _precompute() once dimensions are known.
+        self._comp_eff_f: np.ndarray | None = None  # effect image float32
+        self._comp_img_f: np.ndarray | None = None  # base image float32
+        self._comp_alpha: np.ndarray | None = None  # alpha channel (h, w, 1) float32
+        self._comp_result: np.ndarray | None = None  # result uint8
+
         # Initialize LFOs for parameter modulation
         self._init_lfos()
 
@@ -892,6 +915,16 @@ class VJingLayer(BaseVisualLayer):
         if "swarm" in self.active_effects:
             self._init_swarm()
 
+        # Pre-allocate compositing scratch arrays now that width/height are known
+        h, w = self.height, self.width
+        self._comp_eff_f = np.empty((h, w, 4), dtype=np.float32)
+        self._comp_img_f = np.empty((h, w, 4), dtype=np.float32)
+        self._comp_alpha = np.empty((h, w, 1), dtype=np.float32)
+        self._comp_result = np.empty((h, w, 4), dtype=np.uint8)
+
+        # Shared scatter-draw scratch array reused by sphere/sea_creature/galaxy/attractor
+        self._scatter_arr = np.zeros((h, w, 4), dtype=np.uint8)
+
         # Initialize GPU renderer if enabled
         if self._pending_gpu_init:
             self._init_gpu_renderer()
@@ -912,6 +945,7 @@ class VJingLayer(BaseVisualLayer):
                 if e == max(self.bass_energy[start:end]):
                     self.beats.append(i)
                     last_beat = i
+        self._beats_set = set(self.beats)
 
     def _compute_fft_data(self) -> None:
         """Pre-compute FFT data for each frame."""
@@ -1014,7 +1048,7 @@ class VJingLayer(BaseVisualLayer):
         mid = self.mid_energy[safe_idx]
         treble = self.treble_energy[safe_idx]
         fft = self.fft_data[safe_idx] if safe_idx < len(self.fft_data) else np.zeros(32)
-        is_beat = frame_idx in self.beats
+        is_beat = frame_idx in self._beats_set
 
         # Apply audio sensitivity multipliers (clamp to 0-1 range)
         bass_sens = min(1.0, bass * self.audio_sensitivity["bass"])
@@ -1023,21 +1057,29 @@ class VJingLayer(BaseVisualLayer):
         # Energy is average of bands, recalculate with sensitivity
         energy_sens = min(1.0, (bass_sens + mid_sens + treble_sens) / 3)
 
-        # Context dict for effects
-        ctx = {
-            "energy": energy_sens,
-            "bass": bass_sens,
-            "mid": mid_sens,
-            "treble": treble_sens,
-            "fft": fft,
-            "is_beat": is_beat,
-        }
+        # Update pre-allocated ctx dict in-place (no allocation at 30fps)
+        ctx = self._render_ctx
+        ctx["energy"] = energy_sens
+        ctx["bass"] = bass_sens
+        ctx["mid"] = mid_sens
+        ctx["treble"] = treble_sens
+        ctx["fft"] = fft
+        ctx["is_beat"] = is_beat
 
-        # Separate effects into three passes
-        all_special = self.POST_PROCESSING_EFFECTS | self.FINAL_PASS_EFFECTS
-        generators = [e for e in self.active_effects if e not in all_special]
-        post_processors = [e for e in self.active_effects if e in self.POST_PROCESSING_EFFECTS]
-        final_pass = [e for e in self.active_effects if e in self.FINAL_PASS_EFFECTS]
+        # Separate effects into three passes — recompute only when active_effects changes
+        if self.active_effects is not self._cached_active_effects:
+            all_special = self.POST_PROCESSING_EFFECTS | self.FINAL_PASS_EFFECTS
+            self._cached_generators = [e for e in self.active_effects if e not in all_special]
+            self._cached_post_processors = [
+                e for e in self.active_effects if e in self.POST_PROCESSING_EFFECTS
+            ]
+            self._cached_final_pass = [
+                e for e in self.active_effects if e in self.FINAL_PASS_EFFECTS
+            ]
+            self._cached_active_effects = self.active_effects
+        generators = self._cached_generators
+        post_processors = self._cached_post_processors
+        final_pass = self._cached_final_pass
 
         # If only final-pass effects are active (e.g. bloom preview), add a default generator
         if not generators and not post_processors and final_pass:
@@ -1175,34 +1217,34 @@ class VJingLayer(BaseVisualLayer):
             effect_method = getattr(self, f"_render_{effect_name}", self._render_wave)
             effect_method(effect_img, frame_idx, time_pos, ctx)
 
-            # Apply alpha to effect image
+            # Composite onto main image using pre-allocated scratch arrays
+            eff_f = self._comp_eff_f
+            img_f = self._comp_img_f
+            a_ch = self._comp_alpha
+            out = self._comp_result
+
+            np.copyto(eff_f, np.asarray(effect_img), casting="unsafe")
+            np.copyto(img_f, np.asarray(img), casting="unsafe")
+
+            # Modulate effect alpha by transition alpha
             if alpha < 0.99:
-                # Reduce alpha of entire effect image
-                effect_data = np.array(effect_img)
-                effect_data[:, :, 3] = (effect_data[:, :, 3] * alpha).astype(np.uint8)
-                effect_img = Image.fromarray(effect_data, "RGBA")
+                eff_f[:, :, 3] *= alpha
 
-            # Composite onto main image using alpha_composite (not paste)
-            # paste with mask doesn't handle transparent backgrounds correctly
-            img_data = np.array(img)
-            effect_data = np.array(effect_img)
+            # Pre-multiplied alpha composite: result = eff + img * (1 - eff_alpha/255)
+            np.divide(eff_f[:, :, 3:4], 255.0, out=a_ch)
+            inv_a = 1.0 - a_ch  # temporary but scalar-op on existing array is fine
+            np.multiply(eff_f[:, :, :3], a_ch, out=eff_f[:, :, :3])
+            np.multiply(img_f[:, :, :3], inv_a, out=img_f[:, :, :3])
+            np.add(eff_f[:, :, :3], img_f[:, :, :3], out=img_f[:, :, :3])
+            np.clip(img_f[:, :, :3], 0, 255, out=img_f[:, :, :3])
 
-            # Manual alpha compositing: result = effect + img * (1 - effect_alpha)
-            effect_alpha = effect_data[:, :, 3:4].astype(np.float32) / 255.0
-            result = (
-                effect_data[:, :, :3].astype(np.float32) * effect_alpha
-                + img_data[:, :, :3].astype(np.float32) * (1 - effect_alpha)
-            ).astype(np.uint8)
-            result_alpha = np.clip(
-                effect_data[:, :, 3].astype(np.float32)
-                + img_data[:, :, 3].astype(np.float32) * (1 - effect_alpha[:, :, 0]),
-                0,
-                255,
-            ).astype(np.uint8)
+            # Result alpha: eff_a + img_a * (1 - eff_a/255)
+            np.multiply(img_f[:, :, 3:4], inv_a, out=img_f[:, :, 3:4])
+            np.add(eff_f[:, :, 3:4], img_f[:, :, 3:4], out=img_f[:, :, 3:4])
+            np.clip(img_f[:, :, 3:4], 0, 255, out=img_f[:, :, 3:4])
 
-            # Update img in place
-            combined = np.dstack([result, result_alpha])
-            img.paste(Image.fromarray(combined, "RGBA"))
+            out[:] = img_f.astype(np.uint8)
+            img.paste(Image.fromarray(out, "RGBA"))
 
     # ========================================================================
     # RHYTHM-SYNCHRONIZED EFFECTS
@@ -1655,11 +1697,10 @@ class VJingLayer(BaseVisualLayer):
         colors = self.color_palette
         n_colors = len(colors)
 
-        points = []
-        for t in np.linspace(0, 1.2 * math.pi, n_pts):
-            x = center[0] + amplitude_x * math.cos(a * t + delta)
-            y = center[1] + amplitude_y * math.sin(b * t + delta)
-            points.append((x, y))
+        ts = np.linspace(0, 1.2 * math.pi, n_pts)
+        xs = center[0] + amplitude_x * np.cos(a * ts + delta)
+        ys = center[1] + amplitude_y * np.sin(b * ts + delta)
+        points = list(zip(xs.tolist(), ys.tolist()))
 
         # Draw segment by segment with interpolated color
         for i in range(len(points) - 1):
@@ -1766,14 +1807,12 @@ class VJingLayer(BaseVisualLayer):
         n_points = max(40, int(200 * s))
         rotations = 4 + energy * 2 + self.lfo_fast.value(time_pos) * 0.5
 
-        for i in range(n_points):
-            progress = i / n_points
-            angle = progress * rotations * 2 * math.pi + time_pos * rotation_speed
-            radius = progress * max_radius * scale_mod
-
-            x = center[0] + radius * math.cos(angle)
-            y = center[1] + radius * math.sin(angle)
-            points.append((x, y))
+        progress = np.arange(n_points) / n_points
+        angles = progress * rotations * 2 * math.pi + time_pos * rotation_speed
+        radii = progress * max_radius * scale_mod
+        xs = center[0] + radii * np.cos(angles)
+        ys = center[1] + radii * np.sin(angles)
+        points = list(zip(xs.tolist(), ys.tolist()))
 
         # Draw with gradient color from palette, shifted by LFO
         line_w = max(1, int(2 * s))
@@ -2164,15 +2203,17 @@ class VJingLayer(BaseVisualLayer):
         n_waves = 5
         step = max(1, int(5 * s))
         line_w = max(1, int(3 * s))
+        xs_arr = np.arange(0, self.width, step, dtype=np.float32)
         for i in range(n_waves):
-            points = []
             phase = time_pos * 2 + i * 0.5
             amplitude = 30 * s * (1 + energy) * self.intensity
 
-            for x in range(0, self.width, step):
-                y = self.height // 2 + math.sin(x * 0.02 + phase) * amplitude
-                y += math.sin(x * 0.01 - time_pos) * amplitude * 0.5
-                points.append((x, int(y)))
+            ys_arr = (
+                self.height // 2
+                + np.sin(xs_arr * 0.02 + phase) * amplitude
+                + np.sin(xs_arr * 0.01 - time_pos) * amplitude * 0.5
+            )
+            points = list(zip(xs_arr.tolist(), ys_arr.astype(int).tolist()))
 
             if len(points) >= 2:
                 # Increased alpha from 100 to 200, reduced division factor
@@ -2230,24 +2271,18 @@ class VJingLayer(BaseVisualLayer):
 
         n_grooves = 15
         dot_r = max(1, int(1 * s))
+        alpha = int(150 * self._current_intensity)
+        arc_length = math.pi * (0.8 + energy * 0.4)
+        n_points = max(8, int(30 * s))
+        j_frac = np.arange(n_points, dtype=np.float32) / n_points
         for i in range(n_grooves):
             radius = max_radius * (i + 1) / n_grooves
-            # Increased alpha from 60 to 150
-            alpha = int(150 * self._current_intensity)
-
-            # Draw partial arc that rotates
             start_angle = rotation + i * 0.2
-            arc_length = math.pi * (0.8 + energy * 0.4)
-
-            # Draw arc as points
-            n_points = max(8, int(30 * s))
-            for j in range(n_points):
-                angle = start_angle + (j / n_points) * arc_length
-                x = center[0] + radius * math.cos(angle)
-                y = center[1] + radius * math.sin(angle)
-
-                # Slight color variation
-                gray = 180 + int(20 * math.sin(angle * 5))
+            angles = start_angle + j_frac * arc_length
+            xs = center[0] + radius * np.cos(angles)
+            ys = center[1] + radius * np.sin(angles)
+            grays = (180 + 20 * np.sin(angles * 5)).astype(int)
+            for x, y, gray in zip(xs.tolist(), ys.tolist(), grays.tolist()):
                 draw.ellipse(
                     [x - dot_r, y - dot_r, x + dot_r, y + dot_r],
                     fill=(gray, gray, gray, alpha),
@@ -2276,6 +2311,14 @@ class VJingLayer(BaseVisualLayer):
 
         # Color palette for fractal (fire-like gradient)
         self.fractal_palette = self._create_fractal_palette()
+
+        # Pre-allocate scratch arrays for Julia iteration loop
+        self._fractal_iters = np.zeros(
+            (self.fractal_height, self.fractal_width), dtype=np.int32
+        )
+        self._fractal_mask = np.ones(
+            (self.fractal_height, self.fractal_width), dtype=bool
+        )
 
     def _create_fractal_palette(self) -> NDArray:
         """Create a color palette for fractal coloring based on current palette.
@@ -2357,10 +2400,12 @@ class VJingLayer(BaseVisualLayer):
         z = x_rot + 1j * y_rot
         c = complex(c_real, c_imag)
 
-        # Compute Julia set with vectorized operations
+        # Compute Julia set with vectorized operations (pre-allocated scratch)
         max_iter = 50
-        iterations = np.zeros(z.shape, dtype=np.int32)
-        mask = np.ones(z.shape, dtype=bool)
+        iterations = self._fractal_iters
+        mask = self._fractal_mask
+        iterations[:] = 0
+        mask[:] = True
 
         for i in range(max_iter):
             z[mask] = z[mask] ** 2 + c
@@ -2562,34 +2607,18 @@ class VJingLayer(BaseVisualLayer):
         # Normalize to 0-1
         plasma = (plasma + 1.0) / 2.0
 
-        # Create RGB from palette colors
+        # Create RGB from palette colors via vectorised LUT interpolation
         colors = self.color_palette
         n_colors = len(colors)
+        pal_arr = np.array(colors, dtype=np.float32)  # (n_colors, 3)
 
-        # Map plasma value to palette position with time-based cycling
         palette_pos = (plasma * n_colors + t) % n_colors
-        idx1 = palette_pos.astype(int) % n_colors
+        idx1 = palette_pos.astype(np.int32) % n_colors
         idx2 = (idx1 + 1) % n_colors
-        blend = palette_pos - palette_pos.astype(int)
+        blend = (palette_pos - np.floor(palette_pos))[..., np.newaxis]  # (..., 1)
 
-        # Vectorized color interpolation
-        r = np.zeros_like(plasma, dtype=np.uint8)
-        g = np.zeros_like(plasma, dtype=np.uint8)
-        b = np.zeros_like(plasma, dtype=np.uint8)
-
-        for i in range(n_colors):
-            mask1 = idx1 == i
-            mask2 = idx2 == i
-            c = colors[i]
-            r[mask1] += (c[0] * (1 - blend[mask1])).astype(np.uint8)
-            g[mask1] += (c[1] * (1 - blend[mask1])).astype(np.uint8)
-            b[mask1] += (c[2] * (1 - blend[mask1])).astype(np.uint8)
-            r[mask2] += (c[0] * blend[mask2]).astype(np.uint8)
-            g[mask2] += (c[1] * blend[mask2]).astype(np.uint8)
-            b[mask2] += (c[2] * blend[mask2]).astype(np.uint8)
-
-        # Stack to RGB
-        rgb = np.stack([r, g, b], axis=-1)
+        # Direct gather + lerp — no per-color-index loop
+        rgb = (pal_arr[idx1] * (1.0 - blend) + pal_arr[idx2] * blend).astype(np.uint8)
 
         # Create image and upscale
         plasma_small = Image.fromarray(rgb, mode="RGB")
@@ -2661,38 +2690,22 @@ class VJingLayer(BaseVisualLayer):
         depth_fade = np.clip(self.wormhole_r * 1.5, 0.1, 1.0)
         combined = (combined + 1) / 2 * depth_fade
 
-        # Use palette colors
+        # Use palette colors via vectorised LUT interpolation
         colors = self.color_palette
         n_colors = len(colors)
+        pal_arr = np.array(colors, dtype=np.float32)
 
-        # Map combined value to palette position with time-based cycling
         palette_pos = (combined * n_colors + t * 0.5) % n_colors
-        idx1 = palette_pos.astype(int) % n_colors
+        idx1 = palette_pos.astype(np.int32) % n_colors
         idx2 = (idx1 + 1) % n_colors
-        blend = palette_pos - palette_pos.astype(int)
+        blend = (palette_pos - np.floor(palette_pos))[..., np.newaxis]
 
-        # Vectorized color interpolation
-        r = np.zeros_like(combined, dtype=np.uint8)
-        g = np.zeros_like(combined, dtype=np.uint8)
-        b = np.zeros_like(combined, dtype=np.uint8)
-
-        for i in range(n_colors):
-            mask1 = idx1 == i
-            mask2 = idx2 == i
-            c = colors[i]
-            r[mask1] += (c[0] * (1 - blend[mask1])).astype(np.uint8)
-            g[mask1] += (c[1] * (1 - blend[mask1])).astype(np.uint8)
-            b[mask1] += (c[2] * (1 - blend[mask1])).astype(np.uint8)
-            r[mask2] += (c[0] * blend[mask2]).astype(np.uint8)
-            g[mask2] += (c[1] * blend[mask2]).astype(np.uint8)
-            b[mask2] += (c[2] * blend[mask2]).astype(np.uint8)
+        rgb_f = pal_arr[idx1] * (1.0 - blend) + pal_arr[idx2] * blend
 
         if is_beat:
-            r = np.clip(r.astype(np.int16) + 80, 0, 255).astype(np.uint8)
-            g = np.clip(g.astype(np.int16) + 60, 0, 255).astype(np.uint8)
-            b = np.clip(b.astype(np.int16) + 60, 0, 255).astype(np.uint8)
+            rgb_f = np.clip(rgb_f + np.array([80, 60, 60], dtype=np.float32), 0, 255)
 
-        rgb = np.stack([r, g, b], axis=-1)
+        rgb = rgb_f.astype(np.uint8)
         wormhole_small = Image.fromarray(rgb, mode="RGB")
         wormhole_full = wormhole_small.resize((self.width, self.height), Image.Resampling.BILINEAR)
 
@@ -2709,27 +2722,20 @@ class VJingLayer(BaseVisualLayer):
     # ========================================================================
 
     def _init_starfield(self) -> None:
-        """Initialize starfield with 3D star positions."""
+        """Initialize starfield with 3D star positions as numpy arrays."""
         self.num_stars = 300
-        self.stars: list[dict[str, float]] = []
-        for _ in range(self.num_stars):
-            self._spawn_star()
+        n = self.num_stars
+        nc = len(self.color_palette)
+        self._star_x = (self._rng.random(n) - 0.5) * 2
+        self._star_y = (self._rng.random(n) - 0.5) * 2
+        self._star_z = self._rng.random(n) * 2 + 0.5
+        self._star_bright = self._rng.random(n) * 0.5 + 0.5
+        self._star_color = self._rng.integers(0, nc, n)
+        self.stars: list[dict[str, float]] = []  # kept for API compat
 
     def _spawn_star(self, z: float | None = None) -> None:
-        """Spawn a new star at random position.
-
-        Args:
-            z: Optional z depth (if None, random deep position).
-        """
-        self.stars.append(
-            {
-                "x": (self._rng.random() - 0.5) * 2,  # -1 to 1
-                "y": (self._rng.random() - 0.5) * 2,  # -1 to 1
-                "z": z if z is not None else self._rng.random() * 2 + 0.5,  # depth
-                "brightness": self._rng.random() * 0.5 + 0.5,
-                "color_idx": self._rng.randint(0, len(self.color_palette) - 1),
-            }
-        )
+        """Spawn a single star (legacy helper, unused in vectorised render)."""
+        pass
 
     @vj_effect("Starfield", "Particules")
     def _render_starfield(
@@ -2753,81 +2759,78 @@ class VJingLayer(BaseVisualLayer):
         s = min(self.width, self.height) / 512  # scale factor
 
         cx, cy = self.width // 2, self.height // 2
-
-        # Get palette colors
         colors = self.color_palette
         n_colors = len(colors)
 
         # Speed based on energy
         speed = 0.02 + energy * 0.04
 
-        new_stars = []
-        for star in self.stars:
-            # Move star towards camera
-            star["z"] -= speed
+        # Move all stars toward camera in-place
+        self._star_z -= speed
 
-            # Reset if passed camera
-            if star["z"] <= 0.01:
-                self._spawn_star(z=2.0 + self._rng.random())
-                continue
+        # Replace dead stars (z <= 0.01) in batch
+        dead = self._star_z <= 0.01
+        n_dead = dead.sum()
+        if n_dead > 0:
+            self._star_x[dead] = (self._rng.random(n_dead) - 0.5) * 2
+            self._star_y[dead] = (self._rng.random(n_dead) - 0.5) * 2
+            self._star_z[dead] = 2.0 + self._rng.random(n_dead)
+            self._star_bright[dead] = self._rng.random(n_dead) * 0.5 + 0.5
+            self._star_color[dead] = self._rng.integers(0, n_colors, n_dead)
 
-            # Project to 2D (perspective)
-            px = int(cx + (star["x"] / star["z"]) * cx)
-            py = int(cy + (star["y"] / star["z"]) * cy)
+        alive = ~dead
+        sx = self._star_x[alive]
+        sy = self._star_y[alive]
+        sz = self._star_z[alive]
+        sbright = self._star_bright[alive]
+        scol = self._star_color[alive]
 
-            # Check bounds
-            if 0 <= px < self.width and 0 <= py < self.height:
-                # Size based on depth (closer = bigger), scaled to viewport
-                size = max(1, int(3 * s / star["z"]))
+        # Project to 2D
+        inv_z = 1.0 / sz
+        px_f = cx + (sx * inv_z) * cx
+        py_f = cy + (sy * inv_z) * cy
 
-                # Depth-based brightness: quadratic falloff (far=dim, close=bright)
-                max_depth = 3.0
-                depth_ratio = min(star["z"], max_depth) / max_depth
-                depth_brightness = (1.0 - depth_ratio) ** 2
-                base_brightness = depth_brightness * star["brightness"]
-                if is_beat:
-                    base_brightness = min(1.0, base_brightness + 0.4 * depth_brightness)
+        # Compute per-star brightness
+        max_depth = 3.0
+        depth_ratio = np.minimum(sz, max_depth) / max_depth
+        depth_brightness = (1.0 - depth_ratio) ** 2
+        base_brightness = depth_brightness * sbright
+        if is_beat:
+            base_brightness = np.minimum(1.0, base_brightness + 0.4 * depth_brightness)
 
-                # Get color from palette based on star index
-                color_idx = star.get("color_idx", 0) % n_colors
-                base_color = colors[color_idx]
+        # On-screen mask
+        on_screen = (px_f >= 0) & (px_f < self.width) & (py_f >= 0) & (py_f < self.height)
 
-                # Blend toward white when closer (brighter stars wash out to white)
-                white_blend = base_brightness * 0.5
-                r = int(base_color[0] * (1 - white_blend) + 255 * white_blend * base_brightness)
-                g = int(base_color[1] * (1 - white_blend) + 255 * white_blend * base_brightness)
-                b = int(base_color[2] * (1 - white_blend) + 255 * white_blend * base_brightness)
-                r = max(0, min(255, r))
-                g = max(0, min(255, g))
-                b = max(0, min(255, b))
-                alpha = int(min(255, base_brightness * 255) * self._current_intensity)
-
-                # Draw star
-                if size <= 1:
-                    draw.point((px, py), fill=(r, g, b, alpha))
-                else:
-                    draw.ellipse(
-                        [px - size, py - size, px + size, py + size],
-                        fill=(r, g, b, alpha),
-                    )
-
-                # Motion trail for fast stars (close ones)
-                if star["z"] < 0.5 and bass > 0.5:
-                    trail_x = int(cx + (star["x"] / (star["z"] + speed * 3)) * cx)
-                    trail_y = int(cy + (star["y"] / (star["z"] + speed * 3)) * cy)
-                    draw.line(
-                        [(px, py), (trail_x, trail_y)],
-                        fill=(r, g, b, alpha // 2),
-                        width=max(1, size - 1),
-                    )
-
-            new_stars.append(star)
-
-        self.stars = new_stars
-
-        # Spawn new stars to maintain count
-        while len(self.stars) < self.num_stars:
-            self._spawn_star(z=2.0 + self._rng.random())
+        # Draw each visible star
+        pal_arr = np.array(colors, dtype=np.float32)
+        intensity = self._current_intensity
+        for i in np.where(on_screen)[0]:
+            bb = float(base_brightness[i])
+            px_i, py_i = int(px_f[i]), int(py_f[i])
+            sz_i = float(sz[i])
+            size = max(1, int(3 * s / sz_i))
+            white_blend = bb * 0.5
+            bc = pal_arr[int(scol[i]) % n_colors]
+            r = int(np.clip(bc[0] * (1 - white_blend) + 255 * white_blend * bb, 0, 255))
+            g = int(np.clip(bc[1] * (1 - white_blend) + 255 * white_blend * bb, 0, 255))
+            b = int(np.clip(bc[2] * (1 - white_blend) + 255 * white_blend * bb, 0, 255))
+            alpha = int(min(255, bb * 255) * intensity)
+            if size <= 1:
+                draw.point((px_i, py_i), fill=(r, g, b, alpha))
+            else:
+                draw.ellipse(
+                    [px_i - size, py_i - size, px_i + size, py_i + size],
+                    fill=(r, g, b, alpha),
+                )
+            # Motion trail for fast stars
+            if sz_i < 0.5 and bass > 0.5:
+                trail_x = int(cx + (sx[i] / (sz_i + speed * 3)) * cx)
+                trail_y = int(cy + (sy[i] / (sz_i + speed * 3)) * cy)
+                draw.line(
+                    [(px_i, py_i), (trail_x, trail_y)],
+                    fill=(r, g, b, alpha // 2),
+                    width=max(1, size - 1),
+                )
 
     # ========================================================================
     # LIGHTNING EFFECT
@@ -2977,20 +2980,18 @@ class VJingLayer(BaseVisualLayer):
     # ========================================================================
 
     def _init_voronoi(self) -> None:
-        """Initialize Voronoi diagram points."""
+        """Initialize Voronoi diagram points as numpy arrays."""
         s = min(self.width, self.height) / 512
-        self.voronoi_num_points = 20
-        self.voronoi_points: list[dict[str, Any]] = []
-        for i in range(self.voronoi_num_points):
-            self.voronoi_points.append(
-                {
-                    "x": self._rng.random() * self.width,
-                    "y": self._rng.random() * self.height,
-                    "vx": (self._rng.random() - 0.5) * 2 * s,
-                    "vy": (self._rng.random() - 0.5) * 2 * s,
-                    "color": self._get_palette_color(i),
-                }
-            )
+        n = 20
+        self.voronoi_num_points = n
+        self._vor_x = self._rng.random(n) * self.width
+        self._vor_y = self._rng.random(n) * self.height
+        self._vor_vx = (self._rng.random(n) - 0.5) * 2 * s
+        self._vor_vy = (self._rng.random(n) - 0.5) * 2 * s
+        self._vor_colors = np.array(
+            [self._get_palette_color(i) for i in range(n)], dtype=np.uint8
+        )  # (n, 3)
+        self.voronoi_points: list[dict[str, Any]] = []  # kept for API compat
 
     @vj_effect("Voronoi", "GPU")
     def _render_voronoi(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
@@ -3017,22 +3018,23 @@ class VJingLayer(BaseVisualLayer):
         is_beat = ctx["is_beat"]
         s = min(self.width, self.height) / 512
 
-        # Update point positions
+        # Update point positions — vectorised
         speed_mult = 1 + energy * 3
-        for point in self.voronoi_points:
-            point["x"] += point["vx"] * speed_mult
-            point["y"] += point["vy"] * speed_mult
+        self._vor_x += self._vor_vx * speed_mult
+        self._vor_y += self._vor_vy * speed_mult
 
-            if point["x"] < 0 or point["x"] >= self.width:
-                point["vx"] *= -1
-                point["x"] = max(0, min(self.width - 1, point["x"]))
-            if point["y"] < 0 or point["y"] >= self.height:
-                point["vy"] *= -1
-                point["y"] = max(0, min(self.height - 1, point["y"]))
+        # Bounce off walls
+        oob_x = (self._vor_x < 0) | (self._vor_x >= self.width)
+        oob_y = (self._vor_y < 0) | (self._vor_y >= self.height)
+        self._vor_vx[oob_x] *= -1
+        self._vor_vy[oob_y] *= -1
+        self._vor_x = np.clip(self._vor_x, 0, self.width - 1)
+        self._vor_y = np.clip(self._vor_y, 0, self.height - 1)
 
-            if is_beat:
-                point["vx"] += (self._rng.random() - 0.5) * bass * 4 * s
-                point["vy"] += (self._rng.random() - 0.5) * bass * 4 * s
+        if is_beat:
+            n = self.voronoi_num_points
+            self._vor_vx += (self._rng.random(n) - 0.5) * bass * 4 * s
+            self._vor_vy += (self._rng.random(n) - 0.5) * bass * 4 * s
 
         # Render at lower resolution for performance (adaptive for small viewports)
         scale = max(1, min(4, min(self.width, self.height) // 16))
@@ -3043,27 +3045,20 @@ class VJingLayer(BaseVisualLayer):
         x_coords = x_coords * scale
         y_coords = y_coords * scale
 
-        min_dist = np.full((small_h, small_w), np.inf)
-        nearest = np.zeros((small_h, small_w), dtype=np.int32)
+        # Vectorised nearest-point assignment: broadcast (n_pts, h, w)
+        pts_x = self._vor_x[:, np.newaxis, np.newaxis]
+        pts_y = self._vor_y[:, np.newaxis, np.newaxis]
+        dist_all = (x_coords - pts_x) ** 2 + (y_coords - pts_y) ** 2  # (n, h, w)
+        nearest = dist_all.argmin(axis=0).astype(np.int32)  # (h, w)
 
-        for i, point in enumerate(self.voronoi_points):
-            dist = np.sqrt((x_coords - point["x"]) ** 2 + (y_coords - point["y"]) ** 2)
-            mask = dist < min_dist
-            min_dist[mask] = dist[mask]
-            nearest[mask] = i
+        # Colour via LUT (no per-point loop)
+        rgb = self._vor_colors[nearest]  # (h, w, 3)
 
-        rgb = np.zeros((small_h, small_w, 3), dtype=np.uint8)
-        for i, point in enumerate(self.voronoi_points):
-            mask = nearest == i
-            for c in range(3):
-                rgb[mask, c] = point["color"][c]
-
+        # Edge darkening
         edge_x = np.abs(np.diff(nearest.astype(np.float32), axis=1, prepend=nearest[:, :1]))
         edge_y = np.abs(np.diff(nearest.astype(np.float32), axis=0, prepend=nearest[:1, :]))
-        edges = np.clip((edge_x + edge_y) * 50, 0, 100).astype(np.uint8)
-
-        for c in range(3):
-            rgb[:, :, c] = np.clip(rgb[:, :, c].astype(np.int16) - edges, 0, 255).astype(np.uint8)
+        edges = np.clip((edge_x + edge_y) * 50, 0, 100).astype(np.uint8)[..., np.newaxis]
+        rgb = np.clip(rgb.astype(np.int16) - edges, 0, 255).astype(np.uint8)
 
         voronoi_small = Image.fromarray(rgb, mode="RGB")
         voronoi_full = voronoi_small.resize((self.width, self.height), Image.Resampling.NEAREST)
@@ -3081,20 +3076,16 @@ class VJingLayer(BaseVisualLayer):
     # ========================================================================
 
     def _init_metaballs(self) -> None:
-        """Initialize metaballs with positions and velocities."""
+        """Initialize metaballs with positions and velocities as numpy arrays."""
         s = min(self.width, self.height) / 512
-        self.metaball_count = 6
-        self.metaballs: list[dict[str, float]] = []
-        for _ in range(self.metaball_count):
-            self.metaballs.append(
-                {
-                    "x": self._rng.random() * self.width,
-                    "y": self._rng.random() * self.height,
-                    "vx": (self._rng.random() - 0.5) * 4 * s,
-                    "vy": (self._rng.random() - 0.5) * 4 * s,
-                    "radius": (self._rng.random() * 80 + 60) * s,
-                }
-            )
+        n = 6
+        self.metaball_count = n
+        self._mb_x = self._rng.random(n) * self.width
+        self._mb_y = self._rng.random(n) * self.height
+        self._mb_vx = (self._rng.random(n) - 0.5) * 4 * s
+        self._mb_vy = (self._rng.random(n) - 0.5) * 4 * s
+        self._mb_radius = self._rng.random(n) * 80 * s + 60 * s
+        self.metaballs: list[dict[str, float]] = []  # kept for API compat
         # Compute grid: at least 128x128 for smooth gradients, higher for large viewports
         self.metaball_w = max(128, self.width // 4)
         self.metaball_h = max(128, self.height // 4)
@@ -3130,69 +3121,48 @@ class VJingLayer(BaseVisualLayer):
         is_beat = ctx["is_beat"]
         s = min(self.width, self.height) / 512
 
-        # Update metaball positions (viewport space)
+        # Update metaball positions — vectorised
         speed_mult = 1 + energy * 2
-        for ball in self.metaballs:
-            ball["x"] += ball["vx"] * speed_mult
-            ball["y"] += ball["vy"] * speed_mult
+        self._mb_x += self._mb_vx * speed_mult
+        self._mb_y += self._mb_vy * speed_mult
+        oob_x = (self._mb_x < 0) | (self._mb_x >= self.width)
+        oob_y = (self._mb_y < 0) | (self._mb_y >= self.height)
+        self._mb_vx[oob_x] *= -1
+        self._mb_vy[oob_y] *= -1
+        self._mb_x = np.clip(self._mb_x, 0, self.width - 1)
+        self._mb_y = np.clip(self._mb_y, 0, self.height - 1)
+        if is_beat:
+            n = self.metaball_count
+            self._mb_vx += (self._rng.random(n) - 0.5) * bass * 6 * s
+            self._mb_vy += (self._rng.random(n) - 0.5) * bass * 6 * s
 
-            if ball["x"] < 0 or ball["x"] >= self.width:
-                ball["vx"] *= -1
-                ball["x"] = max(0, min(self.width - 1, ball["x"]))
-            if ball["y"] < 0 or ball["y"] >= self.height:
-                ball["vy"] *= -1
-                ball["y"] = max(0, min(self.height - 1, ball["y"]))
-
-            if is_beat:
-                ball["vx"] += (self._rng.random() - 0.5) * bass * 6 * s
-                ball["vy"] += (self._rng.random() - 0.5) * bass * 6 * s
-
-        # Compute metaball field on the (>=128 x >=128) grid
-        field = np.zeros((self.metaball_h, self.metaball_w), dtype=np.float32)
-
-        for ball in self.metaballs:
-            radius = ball["radius"] * (1 + bass * 0.5)
-            dx = self.metaball_x - ball["x"]
-            dy = self.metaball_y - ball["y"]
-            dist_sq = dx * dx + dy * dy + 1
-            field += (radius * radius) / dist_sq
+        # Compute metaball field — vectorised over all balls simultaneously
+        radii = self._mb_radius * (1 + bass * 0.5)
+        # (n, h, w) distance squared arrays
+        dx_all = self.metaball_x[np.newaxis, :, :] - self._mb_x[:, np.newaxis, np.newaxis]
+        dy_all = self.metaball_y[np.newaxis, :, :] - self._mb_y[:, np.newaxis, np.newaxis]
+        dist_sq = dx_all ** 2 + dy_all ** 2 + 1
+        field = ((radii ** 2)[:, np.newaxis, np.newaxis] / dist_sq).sum(axis=0)
 
         threshold = 1.0
         inside = field > threshold
         glow = np.clip((field - threshold * 0.5) / threshold, 0, 1)
 
-        # Use palette colors
+        # Use palette colors via vectorised LUT interpolation
         colors = self.color_palette
         n_colors = len(colors)
+        pal_arr = np.array(colors, dtype=np.float32)
 
-        # Map glow value to palette position with time-based cycling
         palette_pos = (glow * n_colors + time_pos * 0.5) % n_colors
-        idx1 = palette_pos.astype(int) % n_colors
+        idx1 = palette_pos.astype(np.int32) % n_colors
         idx2 = (idx1 + 1) % n_colors
-        blend = palette_pos - palette_pos.astype(int)
+        blend = (palette_pos - np.floor(palette_pos))[..., np.newaxis]
 
-        # Vectorized color interpolation
-        r = np.zeros_like(glow, dtype=np.uint8)
-        g = np.zeros_like(glow, dtype=np.uint8)
-        b = np.zeros_like(glow, dtype=np.uint8)
-
-        for i in range(n_colors):
-            mask1 = idx1 == i
-            mask2 = idx2 == i
-            c = colors[i]
-            r[mask1] += (c[0] * (1 - blend[mask1])).astype(np.uint8)
-            g[mask1] += (c[1] * (1 - blend[mask1])).astype(np.uint8)
-            b[mask1] += (c[2] * (1 - blend[mask1])).astype(np.uint8)
-            r[mask2] += (c[0] * blend[mask2]).astype(np.uint8)
-            g[mask2] += (c[1] * blend[mask2]).astype(np.uint8)
-            b[mask2] += (c[2] * blend[mask2]).astype(np.uint8)
+        rgb_f = pal_arr[idx1] * (1.0 - blend) + pal_arr[idx2] * blend
 
         # Brighten inside areas
-        r[inside] = np.clip(r[inside].astype(np.int16) + 80, 0, 255).astype(np.uint8)
-        g[inside] = np.clip(g[inside].astype(np.int16) + 80, 0, 255).astype(np.uint8)
-        b[inside] = np.clip(b[inside].astype(np.int16) + 80, 0, 255).astype(np.uint8)
-
-        rgb = np.stack([r, g, b], axis=-1)
+        rgb_f[inside] = np.clip(rgb_f[inside] + 80, 0, 255)
+        rgb = rgb_f.astype(np.uint8)
         alpha_arr = (glow * 200 * self._current_intensity).astype(np.uint8)
         rgba = np.dstack([rgb, alpha_arr])
 
@@ -3372,12 +3342,18 @@ class VJingLayer(BaseVisualLayer):
         ds = max(1, min(w, h) // 128)
         sw, sh = max(16, w // max(1, ds)), max(16, h // max(1, ds))
 
-        # Precompute coordinate grids once
-        ys, xs = np.mgrid[0:sh, 0 : w // ds].astype(np.float32)
-
-        result_r = np.zeros((sh, sw), dtype=np.float32)
-        result_g = np.zeros((sh, sw), dtype=np.float32)
-        result_b = np.zeros((sh, sw), dtype=np.float32)
+        # Precompute coordinate grids (lazy, constant once w/h is set)
+        if not hasattr(self, "_nebula_xs") or self._nebula_xs.shape != (sh, sw):
+            self._nebula_ys, self._nebula_xs = np.mgrid[0:sh, 0:sw].astype(np.float32)
+            self._nebula_r = np.empty((sh, sw), dtype=np.float32)
+            self._nebula_g = np.empty((sh, sw), dtype=np.float32)
+            self._nebula_b = np.empty((sh, sw), dtype=np.float32)
+            self._nebula_noise = np.empty((sh, sw), dtype=np.float32)
+        xs, ys = self._nebula_xs, self._nebula_ys
+        result_r, result_g, result_b = self._nebula_r, self._nebula_g, self._nebula_b
+        result_r[:] = 0.0
+        result_g[:] = 0.0
+        result_b[:] = 0.0
 
         for scale, speed, color_idx_base, weight in layers_cfg:
             sc = scale * ds
@@ -3388,7 +3364,8 @@ class VJingLayer(BaseVisualLayer):
             c2 = np.array(colors[ci2], dtype=np.float32)
 
             # Vectorized pseudo-FBM: sum of rotated sinusoids (4 octaves)
-            noise = np.zeros((sh, sw), dtype=np.float32)
+            noise = self._nebula_noise
+            noise[:] = 0.0
             amp = 1.0
             freq = 1.0
             for octave in range(4):
@@ -4309,23 +4286,19 @@ class VJingLayer(BaseVisualLayer):
     # =========================================================================
 
     def _init_swarm(self) -> None:
-        """Initialize boid swarm."""
+        """Initialize boid swarm as numpy arrays (O(n²) separation → vectorised)."""
         s = min(self.width, self.height) / 512
-        self.swarm_boids: list[dict[str, float]] = []
         self.swarm_count = 120
-
-        for i in range(self.swarm_count):
-            angle = self._rng.random() * math.pi * 2
-            speed = self._rng.uniform(1.0, 3.0) * s
-            self.swarm_boids.append(
-                {
-                    "x": self._rng.random() * self.width,
-                    "y": self._rng.random() * self.height,
-                    "vx": math.cos(angle) * speed,
-                    "vy": math.sin(angle) * speed,
-                    "color_idx": i,
-                }
-            )
+        n = self.swarm_count
+        angles = self._rng.random(n) * math.pi * 2
+        speeds = self._rng.uniform(1.0, 3.0, n) * s
+        self._swarm_x = self._rng.random(n) * self.width
+        self._swarm_y = self._rng.random(n) * self.height
+        self._swarm_vx = np.cos(angles) * speeds
+        self._swarm_vy = np.sin(angles) * speeds
+        self._swarm_color_idx = np.arange(n, dtype=np.int32)
+        # Keep legacy list for backward compat (shallow wrapper)
+        self.swarm_boids: list[dict[str, float]] = []  # unused in render
 
     @vj_effect("Swarm", "Particules")
     def _render_swarm(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
@@ -4355,86 +4328,92 @@ class VJingLayer(BaseVisualLayer):
             center_pull = 0.03 + bass * 0.04
 
         cx, cy = w / 2.0, h / 2.0
-        n = len(self.swarm_boids)
+        n = self.swarm_count
+        bx = self._swarm_x
+        by = self._swarm_y
+        bvx = self._swarm_vx
+        bvy = self._swarm_vy
 
-        # Compute average position and velocity for alignment/cohesion
-        avg_x = sum(b["x"] for b in self.swarm_boids) / n
-        avg_y = sum(b["y"] for b in self.swarm_boids) / n
-        avg_vx = sum(b["vx"] for b in self.swarm_boids) / n
-        avg_vy = sum(b["vy"] for b in self.swarm_boids) / n
+        # --- Vectorised boid physics ---
+        avg_x, avg_y = bx.mean(), by.mean()
+        avg_vx, avg_vy = bvx.mean(), bvy.mean()
 
-        for boid in self.swarm_boids:
-            bx, by = boid["x"], boid["y"]
+        # Cohesion
+        bvx += (avg_x - bx) * cohesion_strength
+        bvy += (avg_y - by) * cohesion_strength
 
-            # Cohesion: steer toward flock center
-            boid["vx"] += (avg_x - bx) * cohesion_strength
-            boid["vy"] += (avg_y - by) * cohesion_strength
+        # Alignment
+        bvx += (avg_vx - bvx) * alignment_strength
+        bvy += (avg_vy - bvy) * alignment_strength
 
-            # Alignment: match average velocity
-            boid["vx"] += (avg_vx - boid["vx"]) * alignment_strength
-            boid["vy"] += (avg_vy - boid["vy"]) * alignment_strength
+        # Separation (vectorised O(n) per boid → O(n²) overall but pure numpy)
+        sep_dist_sq = separation_dist * separation_dist
+        dx_mat = bx[:, np.newaxis] - bx[np.newaxis, :]   # (n, n)
+        dy_mat = by[:, np.newaxis] - by[np.newaxis, :]
+        d2_mat = dx_mat ** 2 + dy_mat ** 2
+        np.fill_diagonal(d2_mat, sep_dist_sq + 1)  # exclude self
+        close = (d2_mat > 0) & (d2_mat < sep_dist_sq)
+        d_mat = np.where(close, np.sqrt(np.maximum(d2_mat, 1e-9)), 1.0)
+        sep_x = (np.where(close, dx_mat / d_mat, 0.0)).sum(axis=1)
+        sep_y = (np.where(close, dy_mat / d_mat, 0.0)).sum(axis=1)
+        bvx += sep_x * 0.15
+        bvy += sep_y * 0.15
 
-            # Separation: avoid nearby boids
-            sep_x, sep_y = 0.0, 0.0
-            for other in self.swarm_boids:
-                if other is boid:
-                    continue
-                dx = bx - other["x"]
-                dy = by - other["y"]
-                dist_sq = dx * dx + dy * dy
-                if 0 < dist_sq < separation_dist * separation_dist:
-                    dist = math.sqrt(dist_sq)
-                    sep_x += dx / dist
-                    sep_y += dy / dist
-            boid["vx"] += sep_x * 0.15
-            boid["vy"] += sep_y * 0.15
+        # Beat contraction
+        if center_pull > 0:
+            bvx += (cx - bx) * center_pull
+            bvy += (cy - by) * center_pull
 
-            # Beat contraction toward center
-            if center_pull > 0:
-                boid["vx"] += (cx - bx) * center_pull
-                boid["vy"] += (cy - by) * center_pull
+        # Clamp speed
+        speeds = np.sqrt(bvx ** 2 + bvy ** 2)
+        too_fast = speeds > max_speed
+        bvx = np.where(too_fast, bvx / np.where(speeds > 0, speeds, 1.0) * max_speed, bvx)
+        bvy = np.where(too_fast, bvy / np.where(speeds > 0, speeds, 1.0) * max_speed, bvy)
 
-            # Clamp speed
-            speed = math.sqrt(boid["vx"] ** 2 + boid["vy"] ** 2)
-            if speed > max_speed:
-                boid["vx"] = boid["vx"] / speed * max_speed
-                boid["vy"] = boid["vy"] / speed * max_speed
+        # Update positions with wrap
+        self._swarm_x = (bx + bvx) % w
+        self._swarm_y = (by + bvy) % h
+        self._swarm_vx = bvx
+        self._swarm_vy = bvy
 
-            # Update position with wrap
-            boid["x"] = (boid["x"] + boid["vx"]) % w
-            boid["y"] = (boid["y"] + boid["vy"]) % h
-
-        # Draw connections between close boids
+        # --- Draw connections between close boids ---
         link_dist = (40 + energy * 20) * s
         link_dist_sq = link_dist * link_dist
         line_w = max(1, int(1.0 * s))
-        for i in range(n):
-            bi = self.swarm_boids[i]
-            for j in range(i + 1, n):
-                bj = self.swarm_boids[j]
-                dx = bi["x"] - bj["x"]
-                dy = bi["y"] - bj["y"]
-                dist_sq = dx * dx + dy * dy
-                if dist_sq < link_dist_sq and dist_sq > 0:
-                    fade = 1.0 - math.sqrt(dist_sq) / link_dist
-                    line_alpha = int(fade * 60 * intensity)
-                    if line_alpha > 3:
-                        color = self._get_palette_color(bi["color_idx"])
-                        draw.line(
-                            [(int(bi["x"]), int(bi["y"])), (int(bj["x"]), int(bj["y"]))],
-                            fill=(*color, line_alpha),
-                            width=line_w,
-                        )
+        # Reuse d2_mat (computed above but with diag patched; recompute cleanly)
+        dx2 = self._swarm_x[:, np.newaxis] - self._swarm_x[np.newaxis, :]
+        dy2 = self._swarm_y[:, np.newaxis] - self._swarm_y[np.newaxis, :]
+        d2_link = dx2 ** 2 + dy2 ** 2
+        # Only upper triangle to avoid drawing each pair twice
+        i_idx, j_idx = np.where(
+            np.triu((d2_link < link_dist_sq) & (d2_link > 0), k=1)
+        )
+        if len(i_idx) > 0:
+            dists = np.sqrt(d2_link[i_idx, j_idx])
+            fades = 1.0 - dists / link_dist
+            alphas = (fades * 60 * intensity).astype(int)
+            xs = self._swarm_x.astype(int)
+            ys = self._swarm_y.astype(int)
+            for ii, jj, la in zip(i_idx, j_idx, alphas):
+                if la > 3:
+                    color = self._get_palette_color(int(self._swarm_color_idx[ii]))
+                    draw.line(
+                        [(xs[ii], ys[ii]), (xs[jj], ys[jj])],
+                        fill=(*color, la),
+                        width=line_w,
+                    )
 
-        # Draw boids
+        # --- Draw boids ---
         boid_r = max(1, int(2.5 * s))
-        for boid in self.swarm_boids:
-            color = self._get_palette_color(boid["color_idx"])
-            alpha = int(200 * intensity)
-            x, y = int(boid["x"]), int(boid["y"])
+        boid_alpha = int(200 * intensity)
+        xs = self._swarm_x.astype(int)
+        ys = self._swarm_y.astype(int)
+        for i in range(n):
+            color = self._get_palette_color(int(self._swarm_color_idx[i]))
+            x, y = xs[i], ys[i]
             draw.ellipse(
                 [x - boid_r, y - boid_r, x + boid_r, y + boid_r],
-                fill=(*color, alpha),
+                fill=(*color, boid_alpha),
             )
 
     # =========================================================================
@@ -4589,36 +4568,34 @@ class VJingLayer(BaseVisualLayer):
         cell_h = self.height / rows
         intensity = self._current_intensity
 
-        # Build displaced grid points
-        points: list[list[tuple[float, float]]] = []
-        for row in range(rows + 1):
-            row_points: list[tuple[float, float]] = []
-            for col in range(cols + 1):
-                x = col * cell_w
-                y = row * cell_h
-                dx = 0.0
-                dy = 0.0
+        # Build displaced grid points — fully vectorised over (rows+1)×(cols+1) nodes
+        col_idx = np.arange(cols + 1, dtype=np.float32)
+        row_idx = np.arange(rows + 1, dtype=np.float32)
+        # gx[r, c], gy[r, c] — base grid coords
+        gx = col_idx[np.newaxis, :] * cell_w          # (rows+1, cols+1)
+        gy = row_idx[:, np.newaxis] * cell_h           # (rows+1, cols+1)
 
-                # Base slow undulation
-                dx += math.sin(y * 0.01 + time_pos * 1.5) * 8 * s * energy
-                dy += math.cos(x * 0.01 + time_pos * 1.2) * 8 * s * energy
+        # Base slow undulation
+        dx = np.sin(gy * 0.01 + time_pos * 1.5) * (8 * s * energy)
+        dy = np.cos(gx * 0.01 + time_pos * 1.2) * (8 * s * energy)
 
-                # Beat-triggered ripples
-                for t0, cx, cy in self.grid_ripples:
-                    age = time_pos - t0
-                    dist = math.sqrt((x - cx) ** 2 + (y - cy) ** 2)
-                    wave_front = age * 300 * s
-                    # Displacement strongest near the wave front
-                    spread = 60 * s
-                    amplitude = math.exp(-((dist - wave_front) ** 2) / (2 * spread**2))
-                    decay = math.exp(-age * 1.5)
-                    disp = amplitude * decay * 25 * s * bass * intensity
-                    if dist > 0:
-                        dx += (x - cx) / dist * disp
-                        dy += (y - cy) / dist * disp
+        # Beat-triggered ripples — vectorised over all grid points for each ripple
+        spread = 60 * s
+        for t0, rcx, rcy in self.grid_ripples:
+            age = time_pos - t0
+            dist2 = (gx - rcx) ** 2 + (gy - rcy) ** 2
+            dist = np.sqrt(dist2)
+            wave_front = age * 300 * s
+            amplitude = np.exp(-((dist - wave_front) ** 2) / (2 * spread ** 2))
+            decay = math.exp(-age * 1.5)
+            disp = amplitude * decay * 25 * s * bass * intensity
+            safe_dist = np.where(dist > 0, dist, 1.0)
+            dx += (gx - rcx) / safe_dist * disp * (dist > 0)
+            dy += (gy - rcy) / safe_dist * disp * (dist > 0)
 
-                row_points.append((x + dx, y + dy))
-            points.append(row_points)
+        px_grid = (gx + dx).tolist()  # list of (rows+1) lists of (cols+1) floats
+        py_grid = (gy + dy).tolist()
+        points = [list(zip(px_grid[r], py_grid[r])) for r in range(rows + 1)]
 
         # Draw grid lines
         line_w = max(1, int(1.5 * s))
@@ -4829,7 +4806,8 @@ class VJingLayer(BaseVisualLayer):
         colors = self._attractor_lut[color_idx]  # (N, 3)
 
         # Scatter-assign to RGBA array — 2×2 pixels to match original fillRect(…,2,2)
-        arr = np.zeros((h, w, 4), dtype=np.uint8)
+        arr = self._scatter_arr
+        arr[:] = 0
         alpha = min(255, int(210 * self._current_intensity))
         px1 = np.clip(px + 1, 0, w - 1)
         py1 = np.clip(py + 1, 0, h - 1)
@@ -5033,8 +5011,9 @@ class VJingLayer(BaseVisualLayer):
             depth_v * 240.0 * self._current_intensity, 30, 240
         ).astype(np.uint8)
 
-        # Draw 2×2 pixel blocks
-        arr = np.zeros((h, w, 4), dtype=np.uint8)
+        # Draw 2×2 pixel blocks (reuse shared scatter scratch)
+        arr = self._scatter_arr
+        arr[:] = 0
         sx1 = np.clip(sx + 1, 0, w - 1)
         sy1 = np.clip(sy + 1, 0, h - 1)
         for qx, qy in ((sx, sy), (sx1, sy), (sx, sy1), (sx1, sy1)):
@@ -5104,7 +5083,8 @@ class VJingLayer(BaseVisualLayer):
         colors = self._sea_lut[lut_idx]  # (N_valid, 3)
 
         alpha = min(255, int(220 * self._current_intensity))
-        arr = np.zeros((h, w, 4), dtype=np.uint8)
+        arr = self._scatter_arr
+        arr[:] = 0
         arr[py, px, :3] = colors
         arr[py, px, 3] = alpha
 
@@ -5176,7 +5156,10 @@ class VJingLayer(BaseVisualLayer):
         # Larger s at greater radii compensates for the low particle count at large canvases.
         s_arr = np.clip((d_v / 9.0).astype(np.int32), 2, 20)
         alpha_contrib = 0.1 * self._current_intensity
-        acc = np.zeros((h, w, 4), dtype=np.float32)
+        if not hasattr(self, "_galaxy_acc") or self._galaxy_acc.shape[:2] != (h, w):
+            self._galaxy_acc = np.zeros((h, w, 4), dtype=np.float32)
+        acc = self._galaxy_acc
+        acc[:] = 0.0
 
         for s in range(2, 21):
             mask = s_arr == s

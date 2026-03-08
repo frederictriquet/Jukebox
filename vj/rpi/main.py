@@ -70,7 +70,7 @@ LED_DISPLAY = 256
 FPS = 30
 MIC_SR = 22050
 MIC_BLOCK_SIZE = 2048
-MIC_DURATION = 3600  # buffer 1h en mode live
+MIC_DURATION = 60    # buffer 60s — réduit la mémoire de ~24Mo à ~0.5Mo
 
 ESP32_PORT = 5005
 ESP32_CHUNK_SIZE = 1024
@@ -104,7 +104,14 @@ class MicrophoneSource:
     def __init__(self, sr: int = MIC_SR, block_size: int = MIC_BLOCK_SIZE) -> None:
         self.sr = sr
         self.block_size = block_size
-        self._buffer = np.zeros(block_size * 4, dtype=np.float32)
+
+        # Buffer circulaire de taille exactement n_fft (les samples les plus récents
+        # sont toujours accessibles, sans np.roll ni allocation à chaque callback).
+        n_fft = block_size * 2
+        self._n_fft = n_fft
+        self._buffer = np.zeros(n_fft, dtype=np.float32)
+        self._buf_head: int = 0          # prochain emplacement d'écriture
+        self._chunk_out = np.empty(n_fft, dtype=np.float32)  # buffer de lecture pré-alloué
         self._lock = threading.Lock()
         self._stream: sd.InputStream | None = None
 
@@ -112,16 +119,25 @@ class MicrophoneSource:
         self._bass_history: deque[float] = deque(maxlen=30)
         self._running_max: float = 1e-6
 
-        n_fft = block_size * 2
+        # Slices de fréquences (ranges contiguës → pas de copie par masque booléen)
         freqs = np.fft.rfftfreq(n_fft, 1.0 / sr)
-        self._n_fft = n_fft
-        self._bass_mask = (freqs >= 20) & (freqs < 250)
-        self._mid_mask = (freqs >= 250) & (freqs < 4000)
-        self._treble_mask = freqs >= 4000
-
-        self._n_bands = 32
         n_bins = len(freqs)
+        self._bass_sl = slice(int(np.searchsorted(freqs, 20)),  int(np.searchsorted(freqs, 250)))
+        self._mid_sl  = slice(int(np.searchsorted(freqs, 250)), int(np.searchsorted(freqs, 4000)))
+        self._treble_sl = slice(int(np.searchsorted(freqs, 4000)), None)
+
+        # Bords de bandes pré-calculés pour np.add.reduceat (vectorisé)
+        self._n_bands = 32
         self._band_edges = np.linspace(0, n_bins, self._n_bands + 1, dtype=int)
+        self._band_counts = np.diff(self._band_edges).astype(np.float32)
+        self._band_counts = np.maximum(self._band_counts, 1)  # évite division par zéro
+
+        # Contexte audio pré-alloué (évite dict allocation à 30fps)
+        self._ctx: dict = {
+            "energy": 0.0, "bass": 0.0, "mid": 0.0,
+            "treble": 0.0, "fft": np.zeros(self._n_bands, dtype=np.float32),
+            "is_beat": False,
+        }
 
     def start(self) -> None:
         if not HAS_SOUNDDEVICE:
@@ -150,75 +166,102 @@ class MicrophoneSource:
     def _callback(
         self, indata: np.ndarray, frames: int, _time_info: object, status: object
     ) -> None:
+        """Callback audio — écrit dans le buffer circulaire sans allocation."""
         if status:
             log.debug("[Mic] status: %s", status)
+        n = min(frames, len(indata))
+        buf_size = len(self._buffer)
+        head = self._buf_head
+        end = head + n
         with self._lock:
-            n = min(frames, len(indata))
-            self._buffer = np.roll(self._buffer, -n)
-            self._buffer[-n:] = indata[:n, 0]
+            if end <= buf_size:
+                self._buffer[head:end] = indata[:n, 0]
+            else:
+                first = buf_size - head
+                self._buffer[head:] = indata[:first, 0]
+                self._buffer[:end - buf_size] = indata[first:n, 0]
+            self._buf_head = end % buf_size
+
+    def _read_chunk(self) -> None:
+        """Copie le buffer circulaire dans _chunk_out (ordre chronologique)."""
+        with self._lock:
+            head = self._buf_head
+            buf_size = len(self._buffer)
+            if head == 0:
+                np.copyto(self._chunk_out, self._buffer)
+            else:
+                self._chunk_out[:buf_size - head] = self._buffer[head:]
+                self._chunk_out[buf_size - head:] = self._buffer[:head]
 
     def get_audio_features(self, frame_idx: int) -> dict:
-        with self._lock:
-            chunk = self._buffer.copy()
+        self._read_chunk()
 
-        fft_full = np.abs(np.fft.rfft(chunk, n=self._n_fft))
+        fft_full = np.abs(np.fft.rfft(self._chunk_out))
 
-        bass_e = float(np.sqrt(np.mean(fft_full[self._bass_mask] ** 2)))
-        mid_e = float(np.sqrt(np.mean(fft_full[self._mid_mask] ** 2)))
-        treble_e = float(np.sqrt(np.mean(fft_full[self._treble_mask] ** 2)))
+        # RMS par bande via np.dot (évite ** 2 + mean séparés)
+        def _rms(sl: slice) -> float:
+            v = fft_full[sl]
+            return float(np.sqrt(np.dot(v, v) / max(len(v), 1)))
+
+        bass_e = _rms(self._bass_sl)
+        mid_e  = _rms(self._mid_sl)
+        treble_e = _rms(self._treble_sl)
 
         peak = max(bass_e, mid_e, treble_e)
         self._running_max = max(peak * 1.2, self._running_max * 0.998)
         norm = max(self._running_max, 1e-6)
-        bass_n = min(1.0, bass_e / norm)
-        mid_n = min(1.0, mid_e / norm)
+        bass_n   = min(1.0, bass_e   / norm)
+        mid_n    = min(1.0, mid_e    / norm)
         treble_n = min(1.0, treble_e / norm)
         energy = (bass_n + mid_n + treble_n) / 3.0
 
-        bands = np.zeros(self._n_bands)
-        for i in range(self._n_bands):
-            s, e = self._band_edges[i], self._band_edges[i + 1]
-            if s < e:
-                bands[i] = np.mean(fft_full[s:e])
+        # 32 bandes vectorisées (np.add.reduceat = une seule passe C)
+        bands: np.ndarray = self._ctx["fft"]
+        np.add.reduceat(fft_full, self._band_edges[:-1], out=bands)
+        bands /= self._band_counts
         max_band = float(np.max(bands))
         if max_band > 0:
             bands /= max_band
 
         self._bass_history.append(bass_n)
-        avg_bass = float(np.mean(self._bass_history))
-        min_interval = 7
+        avg_bass = sum(self._bass_history) / len(self._bass_history)
         is_beat = bass_n > max(0.5, avg_bass * 1.5) and (
             frame_idx - self._last_beat_frame
-        ) >= min_interval
+        ) >= 7
         if is_beat:
             self._last_beat_frame = frame_idx
 
-        return {
-            "energy": energy,
-            "bass": bass_n,
-            "mid": mid_n,
-            "treble": treble_n,
-            "fft": bands,
-            "is_beat": is_beat,
-        }
+        # Mise à jour du dict pré-alloué (pas de nouvelle allocation)
+        self._ctx["energy"]  = energy
+        self._ctx["bass"]    = bass_n
+        self._ctx["mid"]     = mid_n
+        self._ctx["treble"]  = treble_n
+        self._ctx["is_beat"] = is_beat
+        return self._ctx
 
 
 # ─── Layer live (micro) ───────────────────────────────────────────────────────
 
 
 class LiveVJingLayer(VJingLayer):
-    """VJingLayer sans analyse audio : reçoit les features frame par frame."""
+    """VJingLayer sans analyse audio : reçoit les features frame par frame.
+
+    fft_data est un array 2D numpy (n × 32) au lieu d'une liste de tableaux :
+    même API d'accès (fft_data[i]), mais ~10× moins de mémoire et pas d'overhead GC.
+    """
 
     live_ctx: dict | None = None
 
     def _precompute(self) -> None:
         n = self.total_frames
-        self.energy = np.zeros(n)
-        self.bass_energy = np.zeros(n)
-        self.mid_energy = np.zeros(n)
-        self.treble_energy = np.zeros(n)
-        self.fft_data: list[np.ndarray] = [np.zeros(32) for _ in range(n)]
+        self.energy       = np.zeros(n, dtype=np.float32)
+        self.bass_energy  = np.zeros(n, dtype=np.float32)
+        self.mid_energy   = np.zeros(n, dtype=np.float32)
+        self.treble_energy = np.zeros(n, dtype=np.float32)
+        # Array 2D continu au lieu d'une liste de 108 000 objets numpy
+        self.fft_data: np.ndarray = np.zeros((n, 32), dtype=np.float32)  # type: ignore[assignment]
         self.beats: list[int] = []
+        self._beats_set: set[int] = set()
         self._has_frequency_bands = True
 
         for name in self.active_effects:
@@ -226,22 +269,35 @@ class LiveVJingLayer(VJingLayer):
             if init_fn:
                 init_fn()
 
+        # Scratch arrays partagés par les effets (sphere/sea_creature/galaxy/attractor/compositing)
+        h, w = self.height, self.width
+        self._scatter_arr = np.zeros((h, w, 4), dtype=np.uint8)
+        self._comp_eff_f  = np.empty((h, w, 4), dtype=np.float32)
+        self._comp_img_f  = np.empty((h, w, 4), dtype=np.float32)
+        self._comp_alpha  = np.empty((h, w, 1), dtype=np.float32)
+        self._comp_result = np.empty((h, w, 4), dtype=np.uint8)
+        self._galaxy_acc  = np.zeros((h, w, 4), dtype=np.float32)
+
         if self._pending_gpu_init:
             self._init_gpu_renderer()
 
     def render(self, frame_idx: int, time_pos: float) -> "Image.Image":  # type: ignore[name-defined] # noqa: F821
         if self.live_ctx is not None:
-            safe = min(frame_idx, self.total_frames - 1)
+            # Wrapping : frame_idx tourne dans [0, total_frames) indéfiniment
+            safe = frame_idx % self.total_frames
             ctx = self.live_ctx
-            self.energy[safe] = ctx["energy"]
-            self.bass_energy[safe] = ctx["bass"]
-            self.mid_energy[safe] = ctx["mid"]
+            self.energy[safe]       = ctx["energy"]
+            self.bass_energy[safe]  = ctx["bass"]
+            self.mid_energy[safe]   = ctx["mid"]
             self.treble_energy[safe] = ctx["treble"]
-            self.fft_data[safe] = ctx["fft"]
+            self.fft_data[safe]     = ctx["fft"]
             if ctx["is_beat"] and (not self.beats or self.beats[-1] != frame_idx):
                 self.beats.append(frame_idx)
+                self._beats_set.add(frame_idx)
                 if len(self.beats) > 300:
+                    evicted = self.beats[:-300]
                     self.beats = self.beats[-300:]
+                    self._beats_set -= set(evicted)
         return super().render(frame_idx, time_pos)
 
 
@@ -256,6 +312,8 @@ class VUMeterWidget(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._value: float = 0.0
+        self._cached_brush: QBrush | None = None
+        self._cached_brush_w: int = 0
         self.setFixedHeight(20)
 
     def setValue(self, value: float) -> None:
@@ -276,12 +334,15 @@ class VUMeterWidget(QWidget):
         p.fillRect(0, 0, w, h, QColor(26, 26, 26))
 
         if fill_w > 0:
-            grad = QLinearGradient(0, 0, w, 0)
-            grad.setColorAt(0.00, QColor(0, 170, 0))
-            grad.setColorAt(0.60, QColor(170, 170, 0))
-            grad.setColorAt(0.85, QColor(255, 100, 0))
-            grad.setColorAt(1.00, QColor(255, 0, 0))
-            p.fillRect(0, 0, fill_w, h, QBrush(grad))
+            if w != self._cached_brush_w:
+                grad = QLinearGradient(0, 0, w, 0)
+                grad.setColorAt(0.00, QColor(0, 170, 0))
+                grad.setColorAt(0.60, QColor(170, 170, 0))
+                grad.setColorAt(0.85, QColor(255, 100, 0))
+                grad.setColorAt(1.00, QColor(255, 0, 0))
+                self._cached_brush = QBrush(grad)
+                self._cached_brush_w = w
+            p.fillRect(0, 0, fill_w, h, self._cached_brush)
 
         p.setPen(QColor(51, 51, 51))
         p.drawRect(0, 0, w - 1, h - 1)
@@ -304,6 +365,12 @@ class RpiVJPanel(QMainWindow):
         self._esp32_socket: socket.socket | None = None
         self._esp32_frame_number: int = 0
         self._esp32_enabled: bool = False
+        # Buffers ESP32 pré-alloués (évite 12 concaténations bytes par frame)
+        _hdr = 8  # struct ">IHH" = I(4) + H(2) + H(2)
+        self._esp32_bufs = [bytearray(_hdr + ESP32_CHUNK_SIZE) for _ in range(ESP32_TOTAL_CHUNKS)]
+        for _i, _buf in enumerate(self._esp32_bufs):
+            struct.pack_into(">H", _buf, 4, _i)                 # chunk index (fixe)
+            struct.pack_into(">H", _buf, 6, ESP32_TOTAL_CHUNKS)  # total chunks (fixe)
 
         self._led_layer: LiveVJingLayer | None = None
         self._mic_source: MicrophoneSource | None = None
@@ -313,6 +380,22 @@ class RpiVJPanel(QMainWindow):
         self._manual_beat = False
         self._mic_mode = True  # False = mode auto sans micro
         self._last_visible: frozenset[str] = frozenset()
+        self._esp32_status_pending: str | None = None  # mis à jour depuis thread de fond
+
+        # Facteur d'upscale pour la preview (LED_DISPLAY / LED_SIZE = 4)
+        self._upscale = LED_DISPLAY // LED_SIZE
+        # Indices pré-calculés pour l'upscale sans allocation intermédiaire
+        self._upscale_idx = np.arange(LED_SIZE, dtype=np.intp).repeat(self._upscale)
+        # Buffer display stable partagé entre numpy et QImage (évite .tobytes() à 30fps)
+        self._qimg_buf = bytearray(LED_DISPLAY * LED_DISPLAY * 3)
+        self._display_np = np.frombuffer(self._qimg_buf, dtype=np.uint8).reshape(
+            LED_DISPLAY, LED_DISPLAY, 3
+        )
+        # Contexte auto pré-alloué (évite dict allocation à 30fps)
+        self._auto_ctx: dict = {
+            "energy": 0.5, "bass": 0.4, "mid": 0.5,
+            "treble": 0.3, "fft": _AUTO_CTX_FFT, "is_beat": False,
+        }
 
         self._timer = QTimer()
         self._timer.setInterval(1000 // FPS)
@@ -582,15 +665,9 @@ class RpiVJPanel(QMainWindow):
                 self._mic_source = None
 
     def _make_auto_ctx(self) -> dict:
-        """Contexte audio synthétique pour le mode sans micro."""
-        return {
-            "energy": 0.5,
-            "bass": 0.4,
-            "mid": 0.5,
-            "treble": 0.3,
-            "fft": _AUTO_CTX_FFT,
-            "is_beat": False,
-        }
+        """Retourne le contexte audio synthétique pré-alloué (pas de nouvelle allocation)."""
+        self._auto_ctx["is_beat"] = False
+        return self._auto_ctx
 
     # ─── Mic ─────────────────────────────────────────────────────────────
 
@@ -781,7 +858,8 @@ class RpiVJPanel(QMainWindow):
         log.info("[ESP32] Socket UDP ouvert → %s:%d", self._esp32_host, ESP32_PORT)
 
     def _resolve_esp32_host(self) -> None:
-        """Résout le hostname ESP32 en arrière-plan (évite de bloquer le thread Qt)."""
+        """Résout le hostname ESP32 en arrière-plan.
+        Met à jour l'UI via _esp32_status_pending (lu dans _update_frame, thread Qt)."""
         self._esp32_status.setText(f"ESP32: {self._esp32_host} (resolving…)")
         self._esp32_ip = None
 
@@ -790,10 +868,10 @@ class RpiVJPanel(QMainWindow):
                 ip = socket.gethostbyname(self._esp32_host)
                 self._esp32_ip = ip
                 log.info("[ESP32] Résolu : %s → %s", self._esp32_host, ip)
-                self._esp32_status.setText(f"ESP32: {ip}:{ESP32_PORT}")
+                self._esp32_status_pending = f"ESP32: {ip}:{ESP32_PORT}"
             except OSError as e:
                 log.warning("[ESP32] Résolution échouée : %s", e)
-                self._esp32_status.setText(f"ESP32: {self._esp32_host} (unreachable)")
+                self._esp32_status_pending = f"ESP32: {self._esp32_host} (unreachable)"
 
         threading.Thread(target=_resolve, daemon=True).start()
 
@@ -813,15 +891,21 @@ class RpiVJPanel(QMainWindow):
                 "font-size: 15px; border: 2px solid #444; border-radius: 6px; padding: 0 10px; }"
             )
 
-    def _send_frame_to_esp32(self, led_rgb_image: object) -> None:
+    def _send_frame_to_esp32(self, arr64: np.ndarray) -> None:
+        """Envoie le frame 64×64 RGB en 12 chunks UDP.
+
+        arr64 : array numpy uint8 (64, 64, 3) — pas de copie supplémentaire.
+        """
         if self._esp32_socket is None or not self._esp32_enabled or self._esp32_ip is None:
             return
         try:
-            raw = led_rgb_image.tobytes("raw", "RGB")  # type: ignore[union-attr]
-            for i in range(ESP32_TOTAL_CHUNKS):
-                chunk = raw[i * ESP32_CHUNK_SIZE : (i + 1) * ESP32_CHUNK_SIZE]
-                header = struct.pack(">IHH", self._esp32_frame_number, i, ESP32_TOTAL_CHUNKS)
-                self._esp32_socket.sendto(header + chunk, (self._esp32_ip, ESP32_PORT))
+            raw = arr64.tobytes()
+            dest = (self._esp32_ip, ESP32_PORT)
+            fn = self._esp32_frame_number
+            for i, buf in enumerate(self._esp32_bufs):
+                struct.pack_into(">I", buf, 0, fn)
+                buf[8:] = raw[i * ESP32_CHUNK_SIZE : (i + 1) * ESP32_CHUNK_SIZE]
+                self._esp32_socket.sendto(buf, dest)
             self._esp32_frame_number += 1
         except OSError as e:
             log.warning("[ESP32] Erreur envoi : %s", e)
@@ -829,12 +913,13 @@ class RpiVJPanel(QMainWindow):
     # ─── Rendu ───────────────────────────────────────────────────────────
 
     def _update_frame(self) -> None:
+        # Mise à jour status ESP32 depuis thread de fond (thread-safe)
+        if self._esp32_status_pending is not None:
+            self._esp32_status.setText(self._esp32_status_pending)
+            self._esp32_status_pending = None
+
         if self._led_layer is None:
             return
-
-        total = self._led_layer.total_frames
-        if self._frame_idx >= total:
-            self._frame_idx = total - 1
 
         if self._mic_mode and self._mic_source and self._mic_source.is_active:
             ctx = self._mic_source.get_audio_features(self._frame_idx)
@@ -856,31 +941,28 @@ class RpiVJPanel(QMainWindow):
             led_img = self._led_layer.render(self._frame_idx, time_pos)
             led_rgb = led_img.convert("RGB")
 
-            self._send_frame_to_esp32(led_rgb)
+            # Upscale numpy (4× NEAREST) — indices pré-calculés, sans allocation intermédiaire
+            arr64 = np.asarray(led_rgb, dtype=np.uint8)           # view, pas de copie
+            idx = self._upscale_idx
+            np.take(arr64[idx], idx, axis=1, out=self._display_np)
 
-            led_scaled = led_rgb.resize(
-                (LED_DISPLAY, LED_DISPLAY), PILImage.Resampling.NEAREST
-            )
-            data = led_scaled.tobytes("raw", "RGB")
-            qimg = QImage(
-                data,
-                LED_DISPLAY,
-                LED_DISPLAY,
-                3 * LED_DISPLAY,
-                QImage.Format.Format_RGB888,
-            )
-            self._led_label.setPixmap(QPixmap.fromImage(qimg))
+            self._send_frame_to_esp32(arr64)  # passe le numpy array 64×64
+
+            self._led_label.setPixmap(QPixmap.fromImage(
+                QImage(self._qimg_buf, LED_DISPLAY, LED_DISPLAY, 3 * LED_DISPLAY, QImage.Format.Format_RGB888)
+            ))
         except Exception as e:
             log.error("[Render] frame %d : %s", self._frame_idx, e)
 
         self._highlight_active_effects(time_pos)
-        self._frame_idx += 1
+        # Wrapping au lieu de pinning : les effets continuent de progresser indéfiniment
+        self._frame_idx = (self._frame_idx + 1) % (self._led_layer.total_frames if self._led_layer else 1)
 
     def _highlight_active_effects(self, time_pos: float) -> None:
         if self._led_layer is None:
             return
         try:
-            active_effects = list(self._led_layer.active_effects)
+            active_effects = self._led_layer.active_effects
             num = len(active_effects)
             visible: set[str] = set()
             for i, name in enumerate(active_effects):
