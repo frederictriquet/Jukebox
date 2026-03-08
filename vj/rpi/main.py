@@ -16,6 +16,7 @@ import socket
 import struct
 import sys
 import threading
+from collections import deque
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -32,8 +33,16 @@ except ImportError:
     sd = None  # type: ignore[assignment]
     HAS_SOUNDDEVICE = False
 
+try:
+    from PIL import Image as PILImage
+
+    HAS_PIL = True
+except ImportError:
+    PILImage = None  # type: ignore[assignment,misc]
+    HAS_PIL = False
+
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QImage, QPalette, QPixmap
+from PySide6.QtGui import QBrush, QColor, QImage, QLinearGradient, QPainter, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QMessageBox,
     QApplication,
@@ -65,6 +74,9 @@ MIC_DURATION = 3600  # buffer 1h en mode live
 
 ESP32_PORT = 5005
 ESP32_CHUNK_SIZE = 1024
+ESP32_TOTAL_CHUNKS = LED_SIZE * LED_SIZE * 3 // ESP32_CHUNK_SIZE  # always 12
+
+_AUTO_CTX_FFT = np.full(32, 0.4, dtype=np.float32)
 
 
 # ─── Découverte des effets ────────────────────────────────────────────────────
@@ -97,7 +109,7 @@ class MicrophoneSource:
         self._stream: sd.InputStream | None = None
 
         self._last_beat_frame = -100
-        self._bass_history: list[float] = []
+        self._bass_history: deque[float] = deque(maxlen=30)
         self._running_max: float = 1e-6
 
         n_fft = block_size * 2
@@ -173,8 +185,6 @@ class MicrophoneSource:
             bands /= max_band
 
         self._bass_history.append(bass_n)
-        if len(self._bass_history) > 30:
-            self._bass_history.pop(0)
         avg_bass = float(np.mean(self._bass_history))
         min_interval = 7
         is_beat = bass_n > max(0.5, avg_bass * 1.5) and (
@@ -230,7 +240,52 @@ class LiveVJingLayer(VJingLayer):
             self.fft_data[safe] = ctx["fft"]
             if ctx["is_beat"] and (not self.beats or self.beats[-1] != frame_idx):
                 self.beats.append(frame_idx)
+                if len(self.beats) > 300:
+                    self.beats = self.beats[-300:]
         return super().render(frame_idx, time_pos)
+
+
+# ─── VU Meter ────────────────────────────────────────────────────────────────
+
+
+class VUMeterWidget(QWidget):
+    """Barre de volume avec dégradé fixe vert→rouge sur toute la largeur.
+    Seule la portion jusqu'à la valeur courante est dessinée, donc le rouge
+    n'apparaît qu'en cas de saturation."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._value: float = 0.0
+        self.setFixedHeight(20)
+
+    def setValue(self, value: float) -> None:
+        """Valeur entre 0.0 et 1.0."""
+        value = max(0.0, min(1.0, value))
+        if abs(value - self._value) > 0.004:
+            self._value = value
+            self.update()
+
+    def paintEvent(self, _event: object) -> None:  # noqa: N802
+        w, h = self.width(), self.height()
+        fill_w = max(0, int(w * self._value))
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+
+        # Fond sombre
+        p.fillRect(0, 0, w, h, QColor(26, 26, 26))
+
+        if fill_w > 0:
+            grad = QLinearGradient(0, 0, w, 0)
+            grad.setColorAt(0.00, QColor(0, 170, 0))
+            grad.setColorAt(0.60, QColor(170, 170, 0))
+            grad.setColorAt(0.85, QColor(255, 100, 0))
+            grad.setColorAt(1.00, QColor(255, 0, 0))
+            p.fillRect(0, 0, fill_w, h, QBrush(grad))
+
+        p.setPen(QColor(51, 51, 51))
+        p.drawRect(0, 0, w - 1, h - 1)
+        p.end()
 
 
 # ─── Fenêtre principale ───────────────────────────────────────────────────────
@@ -245,8 +300,10 @@ class RpiVJPanel(QMainWindow):
         self.setMinimumSize(900, 700)
 
         self._esp32_host = esp32_host
+        self._esp32_ip: str | None = None  # resolved once in background thread
         self._esp32_socket: socket.socket | None = None
         self._esp32_frame_number: int = 0
+        self._esp32_enabled: bool = False
 
         self._led_layer: LiveVJingLayer | None = None
         self._mic_source: MicrophoneSource | None = None
@@ -364,9 +421,30 @@ class RpiVJPanel(QMainWindow):
         self._led_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         right_layout.addWidget(self._led_label)
 
+        esp32_row = QHBoxLayout()
         self._esp32_status = QLabel(f"ESP32: {self._esp32_host}")
         self._esp32_status.setStyleSheet("color: #888;")
-        right_layout.addWidget(self._esp32_status)
+        esp32_row.addWidget(self._esp32_status)
+        esp32_row.addStretch()
+        self._btn_esp32 = QPushButton("Send OFF")
+        self._btn_esp32.setFixedHeight(36)
+        self._btn_esp32.setStyleSheet(
+            "QPushButton { background: #2a2a2a; color: #888; font-weight: bold; "
+            "font-size: 15px; border: 2px solid #444; border-radius: 6px; padding: 0 10px; }"
+        )
+        self._btn_esp32.clicked.connect(self._toggle_esp32)
+        esp32_row.addWidget(self._btn_esp32)
+        right_layout.addLayout(esp32_row)
+
+        # Volume gauge
+        vol_row = QHBoxLayout()
+        vol_lbl = QLabel("Vol:")
+        vol_lbl.setStyleSheet("font-size: 20px; color: #aaa;")
+        vol_lbl.setFixedWidth(44)
+        vol_row.addWidget(vol_lbl)
+        self._volume_bar = VUMeterWidget()
+        vol_row.addWidget(self._volume_bar)
+        right_layout.addLayout(vol_row)
 
         # Palette
         palette_row = QHBoxLayout()
@@ -479,23 +557,26 @@ class RpiVJPanel(QMainWindow):
         return ("font-size: 44px; color: #555; "
                 "background: #1e1e1e; border: 2px solid #333; border-radius: 4px;")
 
+    _STYLE_MIC_ON = (
+        "QPushButton { background: #1a4a1a; color: #4f4; font-weight: bold; "
+        "font-size: 15px; border: 2px solid #2a6a2a; border-radius: 6px; }"
+    )
+    _STYLE_MIC_OFF = (
+        "QPushButton { background: #2a2a2a; color: #888; font-weight: bold; "
+        "font-size: 15px; border: 2px solid #444; border-radius: 6px; }"
+    )
+
     # ─── Mode mic / auto ─────────────────────────────────────────────────
 
     def _toggle_mic_mode(self) -> None:
         self._mic_mode = not self._mic_mode
         if self._mic_mode:
             self._btn_mic_mode.setText("Mic ON")
-            self._btn_mic_mode.setStyleSheet(
-                "QPushButton { background: #1a4a1a; color: #4f4; font-weight: bold; "
-                "font-size: 15px; border: 2px solid #2a6a2a; border-radius: 6px; }"
-            )
+            self._btn_mic_mode.setStyleSheet(self._STYLE_MIC_ON)
             self._start_mic()
         else:
             self._btn_mic_mode.setText("Auto (no mic)")
-            self._btn_mic_mode.setStyleSheet(
-                "QPushButton { background: #2a2a2a; color: #888; font-weight: bold; "
-                "font-size: 15px; border: 2px solid #444; border-radius: 6px; }"
-            )
+            self._btn_mic_mode.setStyleSheet(self._STYLE_MIC_OFF)
             if self._mic_source:
                 self._mic_source.stop()
                 self._mic_source = None
@@ -507,7 +588,7 @@ class RpiVJPanel(QMainWindow):
             "bass": 0.4,
             "mid": 0.5,
             "treble": 0.3,
-            "fft": np.full(32, 0.4),
+            "fft": _AUTO_CTX_FFT,
             "is_beat": False,
         }
 
@@ -538,10 +619,7 @@ class RpiVJPanel(QMainWindow):
     def _switch_to_auto_mode(self) -> None:
         self._mic_mode = False
         self._btn_mic_mode.setText("Auto (no mic)")
-        self._btn_mic_mode.setStyleSheet(
-            "QPushButton { background: #2a2a2a; color: #888; font-weight: bold; "
-            "font-size: 15px; border: 2px solid #444; border-radius: 6px; }"
-        )
+        self._btn_mic_mode.setStyleSheet(self._STYLE_MIC_OFF)
         self._build_live_layer()
         self._frame_idx = 0
         self._timer.start()
@@ -632,7 +710,6 @@ class RpiVJPanel(QMainWindow):
     def _on_post_fx_toggled(self, *_args: object) -> None:
         for btn in self._post_fx_group.buttons():
             btn.setStyleSheet(self._fx_btn_style(checked=btn.isChecked(), active=False))
-        self._last_visible = frozenset()
         self._on_effect_toggled()
 
     def _on_effect_toggled(self, *_args: object) -> None:
@@ -700,19 +777,51 @@ class RpiVJPanel(QMainWindow):
     def _open_esp32_socket(self) -> None:
         self._esp32_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._esp32_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
+        self._esp32_socket.setblocking(False)
         log.info("[ESP32] Socket UDP ouvert → %s:%d", self._esp32_host, ESP32_PORT)
-        self._esp32_status.setText(f"ESP32: {self._esp32_host}:{ESP32_PORT}")
+
+    def _resolve_esp32_host(self) -> None:
+        """Résout le hostname ESP32 en arrière-plan (évite de bloquer le thread Qt)."""
+        self._esp32_status.setText(f"ESP32: {self._esp32_host} (resolving…)")
+        self._esp32_ip = None
+
+        def _resolve() -> None:
+            try:
+                ip = socket.gethostbyname(self._esp32_host)
+                self._esp32_ip = ip
+                log.info("[ESP32] Résolu : %s → %s", self._esp32_host, ip)
+                self._esp32_status.setText(f"ESP32: {ip}:{ESP32_PORT}")
+            except OSError as e:
+                log.warning("[ESP32] Résolution échouée : %s", e)
+                self._esp32_status.setText(f"ESP32: {self._esp32_host} (unreachable)")
+
+        threading.Thread(target=_resolve, daemon=True).start()
+
+    def _toggle_esp32(self) -> None:
+        self._esp32_enabled = not self._esp32_enabled
+        if self._esp32_enabled:
+            self._btn_esp32.setText("Send ON")
+            self._btn_esp32.setStyleSheet(
+                "QPushButton { background: #1a4a1a; color: #4f4; font-weight: bold; "
+                "font-size: 15px; border: 2px solid #2a6a2a; border-radius: 6px; padding: 0 10px; }"
+            )
+            self._resolve_esp32_host()
+        else:
+            self._btn_esp32.setText("Send OFF")
+            self._btn_esp32.setStyleSheet(
+                "QPushButton { background: #2a2a2a; color: #888; font-weight: bold; "
+                "font-size: 15px; border: 2px solid #444; border-radius: 6px; padding: 0 10px; }"
+            )
 
     def _send_frame_to_esp32(self, led_rgb_image: object) -> None:
-        if self._esp32_socket is None:
+        if self._esp32_socket is None or not self._esp32_enabled or self._esp32_ip is None:
             return
         try:
             raw = led_rgb_image.tobytes("raw", "RGB")  # type: ignore[union-attr]
-            total_chunks = len(raw) // ESP32_CHUNK_SIZE
-            for i in range(total_chunks):
+            for i in range(ESP32_TOTAL_CHUNKS):
                 chunk = raw[i * ESP32_CHUNK_SIZE : (i + 1) * ESP32_CHUNK_SIZE]
-                header = struct.pack(">IHH", self._esp32_frame_number, i, total_chunks)
-                self._esp32_socket.sendto(header + chunk, (self._esp32_host, ESP32_PORT))
+                header = struct.pack(">IHH", self._esp32_frame_number, i, ESP32_TOTAL_CHUNKS)
+                self._esp32_socket.sendto(header + chunk, (self._esp32_ip, ESP32_PORT))
             self._esp32_frame_number += 1
         except OSError as e:
             log.warning("[ESP32] Erreur envoi : %s", e)
@@ -739,12 +848,11 @@ class RpiVJPanel(QMainWindow):
             self._manual_beat = False
 
         self._led_layer.live_ctx = ctx
+        self._volume_bar.setValue(ctx["energy"])
 
         time_pos = self._frame_idx / FPS
 
         try:
-            from PIL import Image as PILImage
-
             led_img = self._led_layer.render(self._frame_idx, time_pos)
             led_rgb = led_img.convert("RGB")
 

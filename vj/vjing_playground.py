@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections import deque
 from pathlib import Path
 
 # Add project root to path so we can import jukebox/plugins modules
@@ -120,7 +121,7 @@ class MicrophoneSource:
 
         # Beat detection state
         self._last_beat_frame = -100
-        self._bass_history: list[float] = []
+        self._bass_history: deque[float] = deque(maxlen=30)
 
         # Auto-gain: running max with slow decay for normalization
         self._running_max: float = 1e-6
@@ -206,8 +207,6 @@ class MicrophoneSource:
 
         # Beat detection: bass spike above recent average
         self._bass_history.append(bass_n)
-        if len(self._bass_history) > 30:
-            self._bass_history.pop(0)
         avg_bass = float(np.mean(self._bass_history))
         min_interval = 7  # ~4 beats/sec at 30 fps
         is_beat = bass_n > max(0.5, avg_bass * 1.5) and (
