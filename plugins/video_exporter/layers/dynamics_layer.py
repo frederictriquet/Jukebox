@@ -57,17 +57,12 @@ class DynamicsLayer(BaseVisualLayer):
         self.energy_envelope = []
         self.bass_energy_envelope = []
 
-        # Apply low-pass filter for bass energy
-        try:
-            from scipy import signal
-
-            nyquist = self.sr / 2
-            bass_cutoff = 150 / nyquist
-            b, a = signal.butter(4, bass_cutoff, btype="low")
-            bass_audio = signal.filtfilt(b, a, self.audio)
-        except ImportError:
-            # Fallback: use full audio for bass
-            bass_audio = self.audio
+        # Low-pass via FFT — thread-safe; scipy filtfilt SIGBUS on macOS ARM QThread
+        fft = np.fft.rfft(self.audio)
+        freqs = np.fft.rfftfreq(len(self.audio), 1.0 / self.sr)
+        fft_bass = fft.copy()
+        fft_bass[freqs > 150.0] = 0.0
+        bass_audio = np.fft.irfft(fft_bass, n=len(self.audio)).astype(np.float32)
 
         for frame_idx in range(self.total_frames):
             start = int(frame_idx * samples_per_frame)

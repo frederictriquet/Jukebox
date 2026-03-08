@@ -100,7 +100,9 @@ class VideoExportWorker(QThread):
             self.error.emit(f"Failed to load audio: {e}")
             return
 
+        logging.info("[Video Export Worker] Audio loaded OK (%d samples, sr=%d)", len(audio), sr)
         self.status.emit("Initializing layers...")
+        logging.info("[Video Export Worker] Initializing frame renderer...")
 
         # Initialize frame renderer with enabled layers
         try:

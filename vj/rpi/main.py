@@ -269,14 +269,7 @@ class LiveVJingLayer(VJingLayer):
             if init_fn:
                 init_fn()
 
-        # Scratch arrays partagés par les effets (sphere/sea_creature/galaxy/attractor/compositing)
         h, w = self.height, self.width
-        self._scatter_arr = np.zeros((h, w, 4), dtype=np.uint8)
-        self._comp_eff_f  = np.empty((h, w, 4), dtype=np.float32)
-        self._comp_img_f  = np.empty((h, w, 4), dtype=np.float32)
-        self._comp_alpha  = np.empty((h, w, 1), dtype=np.float32)
-        self._comp_result = np.empty((h, w, 4), dtype=np.uint8)
-        self._galaxy_acc  = np.zeros((h, w, 4), dtype=np.float32)
 
         if self._pending_gpu_init:
             self._init_gpu_renderer()
@@ -384,13 +377,10 @@ class RpiVJPanel(QMainWindow):
 
         # Facteur d'upscale pour la preview (LED_DISPLAY / LED_SIZE = 4)
         self._upscale = LED_DISPLAY // LED_SIZE
-        # Indices pré-calculés pour l'upscale sans allocation intermédiaire
+        # Indices pré-calculés pour l'upscale (nearest-neighbor 4×) sans allocation intermédiaire
         self._upscale_idx = np.arange(LED_SIZE, dtype=np.intp).repeat(self._upscale)
-        # Buffer display stable partagé entre numpy et QImage (évite .tobytes() à 30fps)
-        self._qimg_buf = bytearray(LED_DISPLAY * LED_DISPLAY * 3)
-        self._display_np = np.frombuffer(self._qimg_buf, dtype=np.uint8).reshape(
-            LED_DISPLAY, LED_DISPLAY, 3
-        )
+        # Buffer display pré-alloué (np.empty = writable garanti, contrairement à frombuffer)
+        self._display_arr = np.empty((LED_DISPLAY, LED_DISPLAY, 3), dtype=np.uint8)
         # Contexte auto pré-alloué (évite dict allocation à 30fps)
         self._auto_ctx: dict = {
             "energy": 0.5, "bass": 0.4, "mid": 0.5,
@@ -790,7 +780,11 @@ class RpiVJPanel(QMainWindow):
         self._on_effect_toggled()
 
     def _on_effect_toggled(self, *_args: object) -> None:
-        self._last_visible = frozenset()  # force style refresh on next frame
+        self._last_visible = frozenset()  # force style refresh sur le prochain frame
+        # Feedback visuel immédiat : met à jour checked/unchecked sans attendre le timer
+        for name, cb in self._effect_checkboxes.items():
+            cb.setStyleSheet(self._fx_btn_style(checked=cb.isChecked(), active=False))
+
         checked = self._get_checked_effects()
         if not checked:
             self._led_layer = None
@@ -941,15 +935,15 @@ class RpiVJPanel(QMainWindow):
             led_img = self._led_layer.render(self._frame_idx, time_pos)
             led_rgb = led_img.convert("RGB")
 
-            # Upscale numpy (4× NEAREST) — indices pré-calculés, sans allocation intermédiaire
+            # Upscale numpy 4× NEAREST — indices pré-calculés, écrit dans _display_arr (writable)
             arr64 = np.asarray(led_rgb, dtype=np.uint8)           # view, pas de copie
             idx = self._upscale_idx
-            np.take(arr64[idx], idx, axis=1, out=self._display_np)
+            np.copyto(self._display_arr, arr64[idx][:, idx])
 
             self._send_frame_to_esp32(arr64)  # passe le numpy array 64×64
 
             self._led_label.setPixmap(QPixmap.fromImage(
-                QImage(self._qimg_buf, LED_DISPLAY, LED_DISPLAY, 3 * LED_DISPLAY, QImage.Format.Format_RGB888)
+                QImage(self._display_arr.tobytes(), LED_DISPLAY, LED_DISPLAY, 3 * LED_DISPLAY, QImage.Format.Format_RGB888)
             ))
         except Exception as e:
             log.error("[Render] frame %d : %s", self._frame_idx, e)
@@ -962,13 +956,14 @@ class RpiVJPanel(QMainWindow):
         if self._led_layer is None:
             return
         try:
-            active_effects = self._led_layer.active_effects
+            active_effects = list(self._led_layer.active_effects)
             num = len(active_effects)
             visible: set[str] = set()
             for i, name in enumerate(active_effects):
                 if self._led_layer._calculate_effect_alpha(i, time_pos, num) > 0.0:
                     visible.add(name)
-        except Exception:
+        except Exception as e:
+            log.warning("[Highlight] %s", e)
             return
 
         frozen = frozenset(visible)

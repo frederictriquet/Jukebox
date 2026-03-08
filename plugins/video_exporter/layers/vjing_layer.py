@@ -474,6 +474,7 @@ class VJingLayer(BaseVisualLayer):
             **kwargs: Additional parameters.
         """
         self._rng = random.Random(rng_seed)
+        self._np_rng = np.random.default_rng(rng_seed)
         self.genre = genre
         self.effect_intensities = effect_intensities or {}
         # Use _global from effect_intensities if provided, otherwise use intensity param
@@ -529,21 +530,8 @@ class VJingLayer(BaseVisualLayer):
         self._cached_post_processors: list[str] = []
         self._cached_final_pass: list[str] = []
 
-        # Pre-allocated ctx dict — updated in-place each frame, no allocation at 30fps.
-        self._render_ctx: dict = {
-            "energy": 0.0, "bass": 0.0, "mid": 0.0,
-            "treble": 0.0, "fft": np.zeros(32), "is_beat": False,
-        }
-
         # beats as set for O(1) lookup (beats list kept for reversed iteration in effects)
         self._beats_set: set[int] = set()
-
-        # Pre-allocated numpy scratch arrays for compositing (width×height×4, float32)
-        # Sized lazily in _precompute() once dimensions are known.
-        self._comp_eff_f: np.ndarray | None = None  # effect image float32
-        self._comp_img_f: np.ndarray | None = None  # base image float32
-        self._comp_alpha: np.ndarray | None = None  # alpha channel (h, w, 1) float32
-        self._comp_result: np.ndarray | None = None  # result uint8
 
         # Initialize LFOs for parameter modulation
         self._init_lfos()
@@ -810,6 +798,7 @@ class VJingLayer(BaseVisualLayer):
 
     def _precompute(self) -> None:
         """Pre-compute effect-specific data."""
+        logging.info("[VJingLayer] _precompute start (effects=%s)", self.active_effects)
         samples_per_frame = len(self.audio) / self.total_frames
 
         # Compute energy envelope for reactive effects
@@ -818,28 +807,21 @@ class VJingLayer(BaseVisualLayer):
         self.mid_energy = []
         self.treble_energy = []
 
-        # Try to use scipy for frequency band separation
-        try:
-            from scipy import signal
+        # Band separation via FFT — thread-safe; scipy.signal.filtfilt uses BLAS which
+        # SIGBUS on macOS ARM (vecLib) when called from a non-main thread (QThread).
+        fft = np.fft.rfft(self.audio)
+        freqs = np.fft.rfftfreq(len(self.audio), 1.0 / self.sr)
 
-            nyquist = self.sr / 2
+        def _fft_band(lo: float, hi: float | None) -> NDArray:
+            mask = freqs >= lo if hi is None else (freqs >= lo) & (freqs <= hi)
+            filtered = fft.copy()
+            filtered[~mask] = 0.0
+            return np.fft.irfft(filtered, n=len(self.audio)).astype(np.float32)
 
-            # Design filters
-            bass_b, bass_a = signal.butter(4, [20 / nyquist, 250 / nyquist], btype="band")
-            mid_b, mid_a = signal.butter(
-                4, [250 / nyquist, min(4000 / nyquist, 0.99)], btype="band"
-            )
-            treble_b, treble_a = signal.butter(4, min(4000 / nyquist, 0.99), btype="high")
-
-            # Filter audio
-            bass_audio = signal.filtfilt(bass_b, bass_a, self.audio)
-            mid_audio = signal.filtfilt(mid_b, mid_a, self.audio)
-            treble_audio = signal.filtfilt(treble_b, treble_a, self.audio)
-
-            self._has_frequency_bands = True
-        except ImportError:
-            bass_audio = mid_audio = treble_audio = self.audio
-            self._has_frequency_bands = False
+        bass_audio = _fft_band(20.0, 250.0)
+        mid_audio = _fft_band(250.0, 4000.0)
+        treble_audio = _fft_band(4000.0, None)
+        self._has_frequency_bands = True
 
         # Compute per-frame energy
         for frame_idx in range(self.total_frames):
@@ -869,12 +851,15 @@ class VJingLayer(BaseVisualLayer):
         self.mid_energy = normalize(self.mid_energy)
         self.treble_energy = normalize(self.treble_energy)
 
+        logging.info("[VJingLayer] energy computed, running beat detection...")
         # Beat detection (simple onset detection)
         self._detect_beats()
 
         # Compute FFT data for spectrum effects
+        logging.info("[VJingLayer] computing FFT data...")
         self._compute_fft_data()
 
+        logging.info("[VJingLayer] running effect init...")
         # Effect-specific initialization
         if "particles" in self.active_effects:
             self._init_particles()
@@ -915,16 +900,7 @@ class VJingLayer(BaseVisualLayer):
         if "swarm" in self.active_effects:
             self._init_swarm()
 
-        # Pre-allocate compositing scratch arrays now that width/height are known
-        h, w = self.height, self.width
-        self._comp_eff_f = np.empty((h, w, 4), dtype=np.float32)
-        self._comp_img_f = np.empty((h, w, 4), dtype=np.float32)
-        self._comp_alpha = np.empty((h, w, 1), dtype=np.float32)
-        self._comp_result = np.empty((h, w, 4), dtype=np.uint8)
-
-        # Shared scatter-draw scratch array reused by sphere/sea_creature/galaxy/attractor
-        self._scatter_arr = np.zeros((h, w, 4), dtype=np.uint8)
-
+        logging.info("[VJingLayer] _precompute done")
         # Initialize GPU renderer if enabled
         if self._pending_gpu_init:
             self._init_gpu_renderer()
@@ -1057,14 +1033,15 @@ class VJingLayer(BaseVisualLayer):
         # Energy is average of bands, recalculate with sensitivity
         energy_sens = min(1.0, (bass_sens + mid_sens + treble_sens) / 3)
 
-        # Update pre-allocated ctx dict in-place (no allocation at 30fps)
-        ctx = self._render_ctx
-        ctx["energy"] = energy_sens
-        ctx["bass"] = bass_sens
-        ctx["mid"] = mid_sens
-        ctx["treble"] = treble_sens
-        ctx["fft"] = fft
-        ctx["is_beat"] = is_beat
+        # Local ctx dict — must not share with other threads (parallel render)
+        ctx = {
+            "energy": energy_sens,
+            "bass": bass_sens,
+            "mid": mid_sens,
+            "treble": treble_sens,
+            "fft": fft,
+            "is_beat": is_beat,
+        }
 
         # Separate effects into three passes — recompute only when active_effects changes
         if self.active_effects is not self._cached_active_effects:
@@ -1077,6 +1054,9 @@ class VJingLayer(BaseVisualLayer):
                 e for e in self.active_effects if e in self.FINAL_PASS_EFFECTS
             ]
             self._cached_active_effects = self.active_effects
+            logging.debug("[VJingLayer] frame=%d generators=%s post=%s final=%s",
+                          frame_idx, self._cached_generators,
+                          self._cached_post_processors, self._cached_final_pass)
         generators = self._cached_generators
         post_processors = self._cached_post_processors
         final_pass = self._cached_final_pass
@@ -1093,22 +1073,32 @@ class VJingLayer(BaseVisualLayer):
                 effect_img = self.create_transparent_image()
                 self._current_intensity = self._get_intensity(effect_name)
                 effect_method = getattr(self, f"_render_{effect_name}", self._render_wave)
-                effect_method(effect_img, frame_idx, time_pos, ctx)
-                img.alpha_composite(effect_img)  # avoids double-alpha squaring from paste+mask
+                try:
+                    effect_method(effect_img, frame_idx, time_pos, ctx)
+                except Exception:
+                    logging.exception("[VJingLayer] Effect '%s' failed (frame %d)", effect_name, frame_idx)
+                    continue
+                img.alpha_composite(effect_img)
 
         # Second: apply post-processing effects on the composite image
         for effect_name in post_processors:
             self._current_intensity = self._get_intensity(effect_name)
             effect_method = getattr(self, f"_render_{effect_name}", None)
             if effect_method:
-                effect_method(img, frame_idx, time_pos, ctx)
+                try:
+                    effect_method(img, frame_idx, time_pos, ctx)
+                except Exception:
+                    logging.exception("[VJingLayer] Post-proc '%s' failed (frame %d)", effect_name, frame_idx)
 
         # Third: final-pass effects (bloom etc.) on the fully composited image
         for effect_name in final_pass:
             self._current_intensity = self._get_intensity(effect_name)
             effect_method = getattr(self, f"_render_{effect_name}", None)
             if effect_method:
-                effect_method(img, frame_idx, time_pos, ctx)
+                try:
+                    effect_method(img, frame_idx, time_pos, ctx)
+                except Exception:
+                    logging.exception("[VJingLayer] Final-pass '%s' failed (frame %d)", effect_name, frame_idx)
 
         return img
 
@@ -1215,36 +1205,20 @@ class VJingLayer(BaseVisualLayer):
 
             # Render effect
             effect_method = getattr(self, f"_render_{effect_name}", self._render_wave)
-            effect_method(effect_img, frame_idx, time_pos, ctx)
+            try:
+                effect_method(effect_img, frame_idx, time_pos, ctx)
+            except Exception:
+                logging.exception("[VJingLayer] Effect '%s' failed (frame %d)", effect_name, frame_idx)
+                continue
 
-            # Composite onto main image using pre-allocated scratch arrays
-            eff_f = self._comp_eff_f
-            img_f = self._comp_img_f
-            a_ch = self._comp_alpha
-            out = self._comp_result
-
-            np.copyto(eff_f, np.asarray(effect_img), casting="unsafe")
-            np.copyto(img_f, np.asarray(img), casting="unsafe")
-
-            # Modulate effect alpha by transition alpha
+            # Composite via PIL straight-alpha (correct Porter-Duff "over").
+            # Use local array — shared scratch would cause SIGBUS with parallel render workers.
             if alpha < 0.99:
-                eff_f[:, :, 3] *= alpha
-
-            # Pre-multiplied alpha composite: result = eff + img * (1 - eff_alpha/255)
-            np.divide(eff_f[:, :, 3:4], 255.0, out=a_ch)
-            inv_a = 1.0 - a_ch  # temporary but scalar-op on existing array is fine
-            np.multiply(eff_f[:, :, :3], a_ch, out=eff_f[:, :, :3])
-            np.multiply(img_f[:, :, :3], inv_a, out=img_f[:, :, :3])
-            np.add(eff_f[:, :, :3], img_f[:, :, :3], out=img_f[:, :, :3])
-            np.clip(img_f[:, :, :3], 0, 255, out=img_f[:, :, :3])
-
-            # Result alpha: eff_a + img_a * (1 - eff_a/255)
-            np.multiply(img_f[:, :, 3:4], inv_a, out=img_f[:, :, 3:4])
-            np.add(eff_f[:, :, 3:4], img_f[:, :, 3:4], out=img_f[:, :, 3:4])
-            np.clip(img_f[:, :, 3:4], 0, 255, out=img_f[:, :, 3:4])
-
-            out[:] = img_f.astype(np.uint8)
-            img.paste(Image.fromarray(out, "RGBA"))
+                arr = np.array(effect_img)  # local copy; no shared state
+                arr[:, :, 3] = (arr[:, :, 3] * alpha).astype(np.uint8)
+                img.alpha_composite(Image.fromarray(arr, "RGBA"))
+            else:
+                img.alpha_composite(effect_img)
 
     # ========================================================================
     # RHYTHM-SYNCHRONIZED EFFECTS
@@ -2726,11 +2700,11 @@ class VJingLayer(BaseVisualLayer):
         self.num_stars = 300
         n = self.num_stars
         nc = len(self.color_palette)
-        self._star_x = (self._rng.random(n) - 0.5) * 2
-        self._star_y = (self._rng.random(n) - 0.5) * 2
-        self._star_z = self._rng.random(n) * 2 + 0.5
-        self._star_bright = self._rng.random(n) * 0.5 + 0.5
-        self._star_color = self._rng.integers(0, nc, n)
+        self._star_x = (self._np_rng.random(n) - 0.5) * 2
+        self._star_y = (self._np_rng.random(n) - 0.5) * 2
+        self._star_z = self._np_rng.random(n) * 2 + 0.5
+        self._star_bright = self._np_rng.random(n) * 0.5 + 0.5
+        self._star_color = self._np_rng.integers(0, nc, n)
         self.stars: list[dict[str, float]] = []  # kept for API compat
 
     def _spawn_star(self, z: float | None = None) -> None:
@@ -2772,11 +2746,11 @@ class VJingLayer(BaseVisualLayer):
         dead = self._star_z <= 0.01
         n_dead = dead.sum()
         if n_dead > 0:
-            self._star_x[dead] = (self._rng.random(n_dead) - 0.5) * 2
-            self._star_y[dead] = (self._rng.random(n_dead) - 0.5) * 2
-            self._star_z[dead] = 2.0 + self._rng.random(n_dead)
-            self._star_bright[dead] = self._rng.random(n_dead) * 0.5 + 0.5
-            self._star_color[dead] = self._rng.integers(0, n_colors, n_dead)
+            self._star_x[dead] = (self._np_rng.random(n_dead) - 0.5) * 2
+            self._star_y[dead] = (self._np_rng.random(n_dead) - 0.5) * 2
+            self._star_z[dead] = 2.0 + self._np_rng.random(n_dead)
+            self._star_bright[dead] = self._np_rng.random(n_dead) * 0.5 + 0.5
+            self._star_color[dead] = self._np_rng.integers(0, n_colors, n_dead)
 
         alive = ~dead
         sx = self._star_x[alive]
@@ -2984,10 +2958,10 @@ class VJingLayer(BaseVisualLayer):
         s = min(self.width, self.height) / 512
         n = 20
         self.voronoi_num_points = n
-        self._vor_x = self._rng.random(n) * self.width
-        self._vor_y = self._rng.random(n) * self.height
-        self._vor_vx = (self._rng.random(n) - 0.5) * 2 * s
-        self._vor_vy = (self._rng.random(n) - 0.5) * 2 * s
+        self._vor_x = self._np_rng.random(n) * self.width
+        self._vor_y = self._np_rng.random(n) * self.height
+        self._vor_vx = (self._np_rng.random(n) - 0.5) * 2 * s
+        self._vor_vy = (self._np_rng.random(n) - 0.5) * 2 * s
         self._vor_colors = np.array(
             [self._get_palette_color(i) for i in range(n)], dtype=np.uint8
         )  # (n, 3)
@@ -3033,8 +3007,8 @@ class VJingLayer(BaseVisualLayer):
 
         if is_beat:
             n = self.voronoi_num_points
-            self._vor_vx += (self._rng.random(n) - 0.5) * bass * 4 * s
-            self._vor_vy += (self._rng.random(n) - 0.5) * bass * 4 * s
+            self._vor_vx += (self._np_rng.random(n) - 0.5) * bass * 4 * s
+            self._vor_vy += (self._np_rng.random(n) - 0.5) * bass * 4 * s
 
         # Render at lower resolution for performance (adaptive for small viewports)
         scale = max(1, min(4, min(self.width, self.height) // 16))
@@ -3080,11 +3054,11 @@ class VJingLayer(BaseVisualLayer):
         s = min(self.width, self.height) / 512
         n = 6
         self.metaball_count = n
-        self._mb_x = self._rng.random(n) * self.width
-        self._mb_y = self._rng.random(n) * self.height
-        self._mb_vx = (self._rng.random(n) - 0.5) * 4 * s
-        self._mb_vy = (self._rng.random(n) - 0.5) * 4 * s
-        self._mb_radius = self._rng.random(n) * 80 * s + 60 * s
+        self._mb_x = self._np_rng.random(n) * self.width
+        self._mb_y = self._np_rng.random(n) * self.height
+        self._mb_vx = (self._np_rng.random(n) - 0.5) * 4 * s
+        self._mb_vy = (self._np_rng.random(n) - 0.5) * 4 * s
+        self._mb_radius = self._np_rng.random(n) * 80 * s + 60 * s
         self.metaballs: list[dict[str, float]] = []  # kept for API compat
         # Compute grid: at least 128x128 for smooth gradients, higher for large viewports
         self.metaball_w = max(128, self.width // 4)
@@ -3133,8 +3107,8 @@ class VJingLayer(BaseVisualLayer):
         self._mb_y = np.clip(self._mb_y, 0, self.height - 1)
         if is_beat:
             n = self.metaball_count
-            self._mb_vx += (self._rng.random(n) - 0.5) * bass * 6 * s
-            self._mb_vy += (self._rng.random(n) - 0.5) * bass * 6 * s
+            self._mb_vx += (self._np_rng.random(n) - 0.5) * bass * 6 * s
+            self._mb_vy += (self._np_rng.random(n) - 0.5) * bass * 6 * s
 
         # Compute metaball field — vectorised over all balls simultaneously
         radii = self._mb_radius * (1 + bass * 0.5)
@@ -4290,10 +4264,10 @@ class VJingLayer(BaseVisualLayer):
         s = min(self.width, self.height) / 512
         self.swarm_count = 120
         n = self.swarm_count
-        angles = self._rng.random(n) * math.pi * 2
-        speeds = self._rng.uniform(1.0, 3.0, n) * s
-        self._swarm_x = self._rng.random(n) * self.width
-        self._swarm_y = self._rng.random(n) * self.height
+        angles = self._np_rng.random(n) * math.pi * 2
+        speeds = self._np_rng.uniform(1.0, 3.0, n) * s
+        self._swarm_x = self._np_rng.random(n) * self.width
+        self._swarm_y = self._np_rng.random(n) * self.height
         self._swarm_vx = np.cos(angles) * speeds
         self._swarm_vy = np.sin(angles) * speeds
         self._swarm_color_idx = np.arange(n, dtype=np.int32)
@@ -4575,9 +4549,10 @@ class VJingLayer(BaseVisualLayer):
         gx = col_idx[np.newaxis, :] * cell_w          # (rows+1, cols+1)
         gy = row_idx[:, np.newaxis] * cell_h           # (rows+1, cols+1)
 
-        # Base slow undulation
-        dx = np.sin(gy * 0.01 + time_pos * 1.5) * (8 * s * energy)
-        dy = np.cos(gx * 0.01 + time_pos * 1.2) * (8 * s * energy)
+        # Base slow undulation — broadcast to full (rows+1, cols+1) so ripple += works
+        zeros = np.zeros((rows + 1, cols + 1), dtype=np.float32)
+        dx = np.sin(gy * 0.01 + time_pos * 1.5) * (8 * s * energy) + zeros
+        dy = np.cos(gx * 0.01 + time_pos * 1.2) * (8 * s * energy) + zeros
 
         # Beat-triggered ripples — vectorised over all grid points for each ripple
         spread = 60 * s
@@ -4806,8 +4781,7 @@ class VJingLayer(BaseVisualLayer):
         colors = self._attractor_lut[color_idx]  # (N, 3)
 
         # Scatter-assign to RGBA array — 2×2 pixels to match original fillRect(…,2,2)
-        arr = self._scatter_arr
-        arr[:] = 0
+        arr = np.zeros((h, w, 4), dtype=np.uint8)
         alpha = min(255, int(210 * self._current_intensity))
         px1 = np.clip(px + 1, 0, w - 1)
         py1 = np.clip(py + 1, 0, h - 1)
@@ -5011,9 +4985,8 @@ class VJingLayer(BaseVisualLayer):
             depth_v * 240.0 * self._current_intensity, 30, 240
         ).astype(np.uint8)
 
-        # Draw 2×2 pixel blocks (reuse shared scatter scratch)
-        arr = self._scatter_arr
-        arr[:] = 0
+        # Draw 2×2 pixel blocks
+        arr = np.zeros((h, w, 4), dtype=np.uint8)
         sx1 = np.clip(sx + 1, 0, w - 1)
         sy1 = np.clip(sy + 1, 0, h - 1)
         for qx, qy in ((sx, sy), (sx1, sy), (sx, sy1), (sx1, sy1)):
@@ -5083,8 +5056,7 @@ class VJingLayer(BaseVisualLayer):
         colors = self._sea_lut[lut_idx]  # (N_valid, 3)
 
         alpha = min(255, int(220 * self._current_intensity))
-        arr = self._scatter_arr
-        arr[:] = 0
+        arr = np.zeros((h, w, 4), dtype=np.uint8)
         arr[py, px, :3] = colors
         arr[py, px, 3] = alpha
 
@@ -5156,10 +5128,7 @@ class VJingLayer(BaseVisualLayer):
         # Larger s at greater radii compensates for the low particle count at large canvases.
         s_arr = np.clip((d_v / 9.0).astype(np.int32), 2, 20)
         alpha_contrib = 0.1 * self._current_intensity
-        if not hasattr(self, "_galaxy_acc") or self._galaxy_acc.shape[:2] != (h, w):
-            self._galaxy_acc = np.zeros((h, w, 4), dtype=np.float32)
-        acc = self._galaxy_acc
-        acc[:] = 0.0
+        acc = np.zeros((h, w, 4), dtype=np.float32)
 
         for s in range(2, 21):
             mask = s_arr == s

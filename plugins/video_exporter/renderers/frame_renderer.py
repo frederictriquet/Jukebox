@@ -143,6 +143,7 @@ class FrameRenderer:
                 logging.warning(f"[Frame Renderer] Failed to init video layer: {e}")
 
         if layers_config.get("waveform", False):
+            logging.info("[Frame Renderer] initializing waveform layer...")
             try:
                 from plugins.video_exporter.layers.waveform_layer import WaveformLayer
 
@@ -160,6 +161,7 @@ class FrameRenderer:
                 logging.warning(f"[Frame Renderer] Failed to init waveform layer: {e}")
 
         if layers_config.get("dynamics", False):
+            logging.info("[Frame Renderer] initializing dynamics layer...")
             try:
                 from plugins.video_exporter.layers.dynamics_layer import DynamicsLayer
 
@@ -170,6 +172,7 @@ class FrameRenderer:
                 logging.warning(f"[Frame Renderer] Failed to init dynamics layer: {e}")
 
         if layers_config.get("vjing", False):
+            logging.info("[Frame Renderer] initializing vjing layer...")
             try:
                 from plugins.video_exporter.layers.vjing_layer import VJingLayer
 

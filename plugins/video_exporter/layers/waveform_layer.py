@@ -91,40 +91,30 @@ class WaveformLayer(BaseVisualLayer):
         except (ValueError, IndexError):
             return default
 
+    @staticmethod
+    def _fft_bandpass(audio: NDArray, sr: int, low_hz: float, high_hz: float) -> NDArray:
+        """Bandpass filter via FFT — pure numpy, thread-safe (no scipy BLAS)."""
+        fft = np.fft.rfft(audio)
+        freqs = np.fft.rfftfreq(len(audio), 1.0 / sr)
+        fft[~((freqs >= low_hz) & (freqs <= high_hz))] = 0.0
+        return np.fft.irfft(fft, n=len(audio)).astype(np.float32)
+
+    @staticmethod
+    def _fft_highpass(audio: NDArray, sr: int, low_hz: float) -> NDArray:
+        """Highpass filter via FFT — pure numpy, thread-safe (no scipy BLAS)."""
+        fft = np.fft.rfft(audio)
+        freqs = np.fft.rfftfreq(len(audio), 1.0 / sr)
+        fft[freqs < low_hz] = 0.0
+        return np.fft.irfft(fft, n=len(audio)).astype(np.float32)
+
     def _precompute(self) -> None:
         """Pre-compute waveform data for all frames."""
-        # Import scipy for filtering
-        try:
-            from scipy import signal
-        except ImportError:
-            # Fallback without filtering
-            self._use_filtering = False
-            self._compute_simple_waveform()
-            return
-
         self._use_filtering = True
 
-        # Design filters
-        nyquist = self.sr / 2
-
-        # Bass filter: 20-250 Hz
-        bass_low = FREQ_BASS_LOW / nyquist
-        bass_high = FREQ_BASS_HIGH / nyquist
-        self.bass_b, self.bass_a = signal.butter(4, [bass_low, bass_high], btype="band")
-
-        # Mid filter: 250-4000 Hz
-        mid_low = FREQ_BASS_HIGH / nyquist
-        mid_high = min(FREQ_MID_HIGH / nyquist, 0.99)
-        self.mid_b, self.mid_a = signal.butter(4, [mid_low, mid_high], btype="band")
-
-        # Treble filter: 4000+ Hz
-        treble_low = min(FREQ_MID_HIGH / nyquist, 0.99)
-        self.treble_b, self.treble_a = signal.butter(4, treble_low, btype="high")
-
-        # Apply filters
-        self.bass_audio = signal.filtfilt(self.bass_b, self.bass_a, self.audio)
-        self.mid_audio = signal.filtfilt(self.mid_b, self.mid_a, self.audio)
-        self.treble_audio = signal.filtfilt(self.treble_b, self.treble_a, self.audio)
+        # Band separation via FFT (thread-safe; avoids scipy BLAS SIGBUS on macOS ARM)
+        self.bass_audio = self._fft_bandpass(self.audio, self.sr, FREQ_BASS_LOW, FREQ_BASS_HIGH)
+        self.mid_audio = self._fft_bandpass(self.audio, self.sr, FREQ_BASS_HIGH, FREQ_MID_HIGH)
+        self.treble_audio = self._fft_highpass(self.audio, self.sr, FREQ_MID_HIGH)
 
         # Compute waveform display data (envelope)
         self._compute_waveform_envelope()
