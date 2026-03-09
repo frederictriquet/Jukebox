@@ -41,7 +41,7 @@ except ImportError:
     PILImage = None  # type: ignore[assignment,misc]
     HAS_PIL = False
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Slot
 from PySide6.QtGui import QColor, QImage, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QMessageBox,
@@ -1047,6 +1047,7 @@ class RpiVJPanel(QMainWindow):
 
     # ─── Rendu ───────────────────────────────────────────────────────────
 
+    @Slot()
     def _update_frame(self) -> None:
         # Mise à jour status ESP32 depuis thread de fond (thread-safe)
         if self._esp32_status_pending is not None:
