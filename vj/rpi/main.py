@@ -1107,8 +1107,14 @@ class RpiVJPanel(QMainWindow):
 
             self._send_frame_to_esp32(arr64)  # passe le numpy array 64×64
 
+            # Garder raw_bytes en variable locale : QImage(bytes, ...) stocke un
+            # pointeur C sans copier les données. Si bytes est un temporaire dans une
+            # expression imbriquée, son refcount tombe à 0 dès que QImage.__init__
+            # retourne → mémoire libérée → QPixmap.fromImage lit un pointeur dangling
+            # → corruption du refcount de None → none_dealloc fatal.
+            raw_bytes = self._display_arr.tobytes()
             self._led_label.setPixmap(QPixmap.fromImage(
-                QImage(self._display_arr.tobytes(), LED_DISPLAY, LED_DISPLAY, 3 * LED_DISPLAY, QImage.Format.Format_RGB888)
+                QImage(raw_bytes, LED_DISPLAY, LED_DISPLAY, 3 * LED_DISPLAY, QImage.Format.Format_RGB888)
             ))
         except Exception as e:
             log.error("[Render] frame %d : %s", self._frame_idx, e)
