@@ -15,36 +15,38 @@
 #14 0x00000055557a8fb8 in _Py_FatalErrorFormat ()
 #15 0x00000055557a8fd0 in _Py_FatalRefcountErrorFunc ()
 #16 0x0000005555768164 in none_dealloc ()
-#17 0x0000007fec310a78 in ?? () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/libpyside6.abi3.so.6.10
-#18 0x0000007fec310f9c in PySide::SignalManager::callPythonMetaMethod(QMetaMethod, void**, _object*) () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/libpyside6.abi3.so.6.10
-#19 0x0000007fec313728 in ?? () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/libpyside6.abi3.so.6.10
-#20 0x0000007fe76b958c in ?? () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/Qt/lib/libQt6Core.so.6
-#21 0x0000007fe76c9d10 in QTimer::timeout(QTimer::QPrivateSignal) () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/Qt/lib/libQt6Core.so.6
-#22 0x0000007fe7d2b800 in ?? () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/QtCore.abi3.so
-#23 0x0000007fe76acc18 in QObject::event(QEvent*) () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/Qt/lib/libQt6Core.so.6
-#24 0x0000007fe7d163a4 in ?? () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/QtCore.abi3.so
-#25 0x0000007fe27bebe0 in QApplicationPrivate::notify_helper(QObject*, QEvent*) () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/Qt/lib/libQt6Widgets.so.6
-#26 0x0000007fe32d06d4 in ?? () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/QtWidgets.abi3.so
-#27 0x0000007fe7656530 in QCoreApplication::notifyInternal2(QObject*, QEvent*) () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/Qt/lib/libQt6Core.so.6
-#28 0x0000007fe781084c in QTimerInfoList::activateTimers() () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/Qt/lib/libQt6Core.so.6
-#29 0x0000007fe794514c in ?? () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/Qt/lib/libQt6Core.so.6
-#30 0x0000007fe701e3b4 in ?? () from /lib/aarch64-linux-gnu/libglib-2.0.so.0
-#31 0x0000007fe702087c in ?? () from /lib/aarch64-linux-gnu/libglib-2.0.so.0
-#32 0x0000007fe7021124 in g_main_context_iteration () from /lib/aarch64-linux-gnu/libglib-2.0.so.0
-#33 0x0000007fe7945454 in QEventDispatcherGlib::processEvents(QFlags<QEventLoop::ProcessEventsFlag>) () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/Qt/lib/libQt6Core.so.6
-#34 0x0000007fe7663a3c in QEventLoop::exec(QFlags<QEventLoop::ProcessEventsFlag>) () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/Qt/lib/libQt6Core.so.6
-#35 0x0000007fe765e108 in QCoreApplication::exec() () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/Qt/lib/libQt6Core.so.6
-#36 0x0000007fe3287ce8 in ?? () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/QtWidgets.abi3.so
-#37 0x000000555589ebd0 in cfunction_vectorcall_NOARGS ()
-#38 0x00000055559040a4 in _PyEval_EvalFrameDefault ()
-#39 0x00000055559ef97c in _PyEval_Vector ()
-#40 0x00000055559ef72c in PyEval_EvalCode ()
-#41 0x0000005555a221e4 in run_mod ()
-#42 0x00000055557ab680 in pyrun_file ()
-#43 0x00000055557ab0ec in _PyRun_SimpleFileObject ()
-#44 0x00000055557aaac0 in _PyRun_AnyFileObject ()
-#45 0x00000055557b61f4 in pymain_run_file_obj ()
-#46 0x00000055557b5c60 in pymain_run_file ()
-#47 0x0000005555a2f250 in Py_RunMain ()
-#48 0x000000555573402c in main ()
--
+#17 0x00000055558d64a4 in _PyEval_EvalFrameDefault ()
+#18 0x000000555587c3c0 in _PyFunction_Vectorcall ()
+#19 0x000000555587f024 in method_vectorcall ()
+#20 0x0000007fec310a44 in ?? () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/libpyside6.abi3.so.6.10
+#21 0x0000007fec310f9c in PySide::SignalManager::callPythonMetaMethod(QMetaMethod, void**, _object*) () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/libpyside6.abi3.so.6.10
+#22 0x0000007fec313728 in ?? () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/libpyside6.abi3.so.6.10
+#23 0x0000007fe76b958c in ?? () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/Qt/lib/libQt6Core.so.6
+#24 0x0000007fe76c9d10 in QTimer::timeout(QTimer::QPrivateSignal) () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/Qt/lib/libQt6Core.so.6
+#25 0x0000007fe7d2b800 in ?? () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/QtCore.abi3.so
+#26 0x0000007fe76acc18 in QObject::event(QEvent*) () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/Qt/lib/libQt6Core.so.6
+#27 0x0000007fe7d163a4 in ?? () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/QtCore.abi3.so
+#28 0x0000007fe27bebe0 in QApplicationPrivate::notify_helper(QObject*, QEvent*) () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/Qt/lib/libQt6Widgets.so.6
+#29 0x0000007fe32d06d4 in ?? () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/QtWidgets.abi3.so
+#30 0x0000007fe7656530 in QCoreApplication::notifyInternal2(QObject*, QEvent*) () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/Qt/lib/libQt6Core.so.6
+#31 0x0000007fe781084c in QTimerInfoList::activateTimers() () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/Qt/lib/libQt6Core.so.6
+#32 0x0000007fe794514c in ?? () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/Qt/lib/libQt6Core.so.6
+#33 0x0000007fe701e3b4 in ?? () from /lib/aarch64-linux-gnu/libglib-2.0.so.0
+#34 0x0000007fe702087c in ?? () from /lib/aarch64-linux-gnu/libglib-2.0.so.0
+#35 0x0000007fe7021124 in g_main_context_iteration () from /lib/aarch64-linux-gnu/libglib-2.0.so.0
+#36 0x0000007fe7945454 in QEventDispatcherGlib::processEvents(QFlags<QEventLoop::ProcessEventsFlag>) () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/Qt/lib/libQt6Core.so.6
+#37 0x0000007fe7663a3c in QEventLoop::exec(QFlags<QEventLoop::ProcessEventsFlag>) () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/Qt/lib/libQt6Core.so.6
+#38 0x0000007fe765e108 in QCoreApplication::exec() () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/Qt/lib/libQt6Core.so.6
+#39 0x0000007fe3287ce8 in ?? () from /home/fred/Jukebox/.venv/lib/python3.11/site-packages/PySide6/QtWidgets.abi3.so
+#40 0x000000555589ebd0 in cfunction_vectorcall_NOARGS ()
+#41 0x00000055559040a4 in _PyEval_EvalFrameDefault ()
+#42 0x00000055559ef97c in _PyEval_Vector ()
+#43 0x00000055559ef72c in PyEval_EvalCode ()
+#44 0x0000005555a221e4 in run_mod ()
+#45 0x00000055557ab680 in pyrun_file ()
+#46 0x00000055557ab0ec in _PyRun_SimpleFileObject ()
+#47 0x00000055557aaac0 in _PyRun_AnyFileObject ()
+#48 0x00000055557b61f4 in pymain_run_file_obj ()
+#49 0x00000055557b5c60 in pymain_run_file ()
+#50 0x0000005555a2f250 in Py_RunMain ()
+#51 0x000000555573402c in main ()
