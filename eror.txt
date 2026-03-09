@@ -1,15 +1,13 @@
+
 Fatal Python error: none_dealloc: deallocating None: bug likely caused by a refcount error in a C extension
 Python runtime state: initialized
 
-Thread 0x0000007f789bf1a0 (most recent call first):
+Thread 0x0000007fa48b71a0 (most recent call first):
   <no Python frame>
 
-Current thread 0x0000007f907e9020 (most recent call first):
-  File "/home/fred/Jukebox/vj/rpi/main.py", line 1135 in _highlight_active_effects
-  File "/home/fred/Jukebox/vj/rpi/main.py", line 1110 in _update_frame
-  File "/home/fred/Jukebox/vj/rpi/main.py", line 1191 in main
-  File "/home/fred/Jukebox/vj/rpi/main.py", line 1195 in <module>
+Current thread 0x0000007fbc8c9020 (most recent call first):
+  File "/home/fred/Jukebox/vj/rpi/main.py", line 1226 in main
+  File "/home/fred/Jukebox/vj/rpi/main.py", line 1230 in <module>
 
 Extension modules: numpy.core._multiarray_umath, numpy.core._multiarray_tests, numpy.linalg._umath_linalg, numpy.fft._pocketfft_internal, numpy.random._common, numpy.random.bit_generator, numpy.random._bounded_integers, numpy.random._mt19937, numpy.random.mtrand, numpy.random._philox, numpy.random._pcg64, numpy.random._sfc64, numpy.random._generator, _cffi_backend, PIL._imaging, shiboken6.Shiboken, PySide6.QtCore, PySide6.QtGui, PySide6.QtWidgets, PIL._imagingft, noise._perlin, noise._simplex, moderngl.mgl (total: 23)
-Q
 
