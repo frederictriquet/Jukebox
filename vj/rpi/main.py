@@ -134,38 +134,56 @@ class MicrophoneSource:
         self._bass_history: deque[float] = deque(maxlen=30)
         self._running_max: float = 1e-6
 
-        # Slices de fréquences (ranges contiguës → pas de copie par masque booléen)
-        freqs = np.fft.rfftfreq(n_fft, 1.0 / sr)
-        n_bins = len(freqs)
-        self._bass_sl = slice(int(np.searchsorted(freqs, 20)),  int(np.searchsorted(freqs, 250)))
-        self._mid_sl  = slice(int(np.searchsorted(freqs, 250)), int(np.searchsorted(freqs, 4000)))
-        self._treble_sl = slice(int(np.searchsorted(freqs, 4000)), None)
-
-        # Bords de bandes pré-calculés pour np.add.reduceat (vectorisé)
         self._n_bands = 32
-        self._band_edges = np.linspace(0, n_bins, self._n_bands + 1, dtype=int)
-        self._band_counts = np.diff(self._band_edges).astype(np.float32)
-        self._band_counts = np.maximum(self._band_counts, 1)  # évite division par zéro
-
-        # Contexte audio pré-alloué (évite dict allocation à 30fps)
         self._ctx: dict = {
             "energy": 0.0, "bass": 0.0, "mid": 0.0,
             "treble": 0.0, "fft": np.zeros(self._n_bands, dtype=np.float32),
             "is_beat": False,
         }
+        self._init_freq_slices(sr)
+
+    def _init_freq_slices(self, sr: int) -> None:
+        """(Re)calcule les slices FFT pour le sample rate donné."""
+        freqs = np.fft.rfftfreq(self._n_fft, 1.0 / sr)
+        n_bins = len(freqs)
+        # Slices de fréquences (ranges contiguës → pas de copie par masque booléen)
+        self._bass_sl = slice(int(np.searchsorted(freqs, 20)),  int(np.searchsorted(freqs, 250)))
+        self._mid_sl  = slice(int(np.searchsorted(freqs, 250)), int(np.searchsorted(freqs, 4000)))
+        self._treble_sl = slice(int(np.searchsorted(freqs, 4000)), None)
+        # Bords de bandes pré-calculés pour np.add.reduceat (vectorisé)
+        self._band_edges = np.linspace(0, n_bins, self._n_bands + 1, dtype=int)
+        self._band_counts = np.maximum(np.diff(self._band_edges).astype(np.float32), 1)
 
     def start(self, device: int | str | None = None) -> None:
         if not HAS_SOUNDDEVICE:
             raise RuntimeError("sounddevice not installed (uv sync --extra video)")
+        # Utilise le sample rate natif du device pour éviter ALSA "Invalid sample rate"
+        # (beaucoup de dongles USB ne supportent que 44100 ou 48000 Hz)
+        actual_sr = self.sr
+        if device is not None:
+            try:
+                dev_info = sd.query_devices(device)
+                native_sr = int(dev_info.get("default_samplerate", self.sr))
+                if native_sr != self.sr:
+                    log.info(
+                        "[Mic] SR natif device=%s : %d Hz (au lieu de %d) — adaptation",
+                        device, native_sr, self.sr,
+                    )
+                    actual_sr = native_sr
+            except Exception:
+                pass
         self._stream = sd.InputStream(
             device=device,
-            samplerate=self.sr,
+            samplerate=actual_sr,
             channels=1,
             blocksize=self.block_size,
             callback=self._callback,
             dtype="float32",
         )
         self._stream.start()
+        if actual_sr != self.sr:
+            self.sr = actual_sr
+            self._init_freq_slices(actual_sr)
         log.info("[Mic] Démarré device=%s %d Hz block=%d", device, self.sr, self.block_size)
 
     def stop(self) -> None:
