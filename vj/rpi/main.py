@@ -42,7 +42,7 @@ except ImportError:
     HAS_PIL = False
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QBrush, QColor, QImage, QLinearGradient, QPainter, QPalette, QPixmap
+from PySide6.QtGui import QColor, QImage, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QMessageBox,
     QApplication,
@@ -53,6 +53,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QProgressBar,
     QPushButton,
     QSlider,
     QSplitter,
@@ -61,6 +62,11 @@ from PySide6.QtWidgets import (
 )
 
 from video_exporter.layers.vjing_layer import VJingLayer
+import video_exporter.layers.vjing_layer as _vjl_mod
+
+# Désactive noise._perlin / noise._simplex sur ARM (alignement mémoire défectueux
+# → none_dealloc fatal). Force le fallback Python _pseudo_perlin2d().
+_vjl_mod.NOISE_AVAILABLE = False
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -316,51 +322,44 @@ class LiveVJingLayer(VJingLayer):
 
 
 # ─── VU Meter ────────────────────────────────────────────────────────────────
+# QProgressBar natif : pas de paintEvent Python → pas de callback shiboken6
+# → élimine le crash none_dealloc sur ARM64 (shiboken6 C++→Python refcount bug)
+
+_VU_METER_STYLE = """
+QProgressBar {
+    background-color: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 0px;
+    text-align: center;
+}
+QProgressBar::chunk {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0.00 rgb(0,170,0),
+        stop:0.60 rgb(170,170,0),
+        stop:0.85 rgb(255,100,0),
+        stop:1.00 rgb(255,0,0));
+}
+"""
 
 
-class VUMeterWidget(QWidget):
-    """Barre de volume avec dégradé fixe vert→rouge sur toute la largeur.
-    Seule la portion jusqu'à la valeur courante est dessinée, donc le rouge
-    n'apparaît qu'en cas de saturation."""
+class VUMeterWidget(QProgressBar):
+    """Barre de volume vert→rouge via QProgressBar stylé (pas de paintEvent Python)."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._value: float = 0.0
-        self._cached_brush: QBrush | None = None
-        self._cached_brush_w: int = 0
+        self.setRange(0, 1000)
+        self.setValue(0)
         self.setFixedHeight(20)
+        self.setTextVisible(False)
+        self.setStyleSheet(_VU_METER_STYLE)
+        self._last_int: int = 0
 
-    def setValue(self, value: float) -> None:
+    def setValue(self, value: float) -> None:  # type: ignore[override]
         """Valeur entre 0.0 et 1.0."""
-        value = max(0.0, min(1.0, value))
-        if abs(value - self._value) > 0.004:
-            self._value = value
-            self.update()
-
-    def paintEvent(self, _event: object) -> None:  # noqa: N802
-        w, h = self.width(), self.height()
-        fill_w = max(0, int(w * self._value))
-
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-
-        # Fond sombre
-        p.fillRect(0, 0, w, h, QColor(26, 26, 26))
-
-        if fill_w > 0:
-            if w != self._cached_brush_w:
-                grad = QLinearGradient(0, 0, w, 0)
-                grad.setColorAt(0.00, QColor(0, 170, 0))
-                grad.setColorAt(0.60, QColor(170, 170, 0))
-                grad.setColorAt(0.85, QColor(255, 100, 0))
-                grad.setColorAt(1.00, QColor(255, 0, 0))
-                self._cached_brush = QBrush(grad)
-                self._cached_brush_w = w
-            p.fillRect(0, 0, fill_w, h, self._cached_brush)
-
-        p.setPen(QColor(51, 51, 51))
-        p.drawRect(0, 0, w - 1, h - 1)
-        p.end()
+        v = max(0, min(1000, int(value * 1000)))
+        if v != self._last_int:
+            self._last_int = v
+            super().setValue(v)
 
 
 # ─── Fenêtre principale ───────────────────────────────────────────────────────
