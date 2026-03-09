@@ -367,7 +367,8 @@ class RpiVJPanel(QMainWindow):
 
         self._led_layer: LiveVJingLayer | None = None
         self._mic_source: MicrophoneSource | None = None
-        self._frame_idx: int = 0
+        self._frame_idx: int = 0       # boucle à total_frames (indexation énergie)
+        self._abs_frame_idx: int = 0   # monotone, jamais remis à zéro (time_pos transitions)
         self._current_palette = "neon"
 
         self._manual_beat = False
@@ -817,7 +818,7 @@ class RpiVJPanel(QMainWindow):
         except ValueError:
             simul = 1
 
-        time_pos = self._frame_idx / FPS
+        time_pos = self._abs_frame_idx / FPS
 
         if self._led_layer is not None:
             self._hot_swap_effects(checked, time_pos)
@@ -867,10 +868,28 @@ class RpiVJPanel(QMainWindow):
     # ─── Effet suivant ────────────────────────────────────────────────────
 
     def _on_next_effect(self) -> None:
-        """Force le passage immédiat à l'effet suivant dans la rotation."""
+        """Déclenche immédiatement la transition vers l'effet suivant.
+
+        Avance _effect_phase_offset jusqu'au début de la fenêtre de transition
+        (cycle - fade), ce qui démarre le fondu croisé sans saut brutal.
+        """
         if self._led_layer is None:
             return
-        self._led_layer._effect_phase_offset += self._led_layer.effect_cycle_duration
+        layer = self._led_layer
+        cycle = layer.effect_cycle_duration
+        fade = layer.transition_duration
+        time_pos = self._abs_frame_idx / FPS
+        num_effects = len(layer.active_effects)
+        if num_effects < 2:
+            return
+        total_cycle = cycle * num_effects
+        t = (time_pos + layer._effect_phase_offset) % total_cycle
+        pos_in_window = t % cycle
+        # Avancer jusqu'au début de la fenêtre de transition (cycle - fade)
+        delta = (cycle - fade) - pos_in_window
+        if delta < 0:
+            delta += cycle  # déjà dans la fenêtre → aller au prochain cycle
+        layer._effect_phase_offset += delta
 
     # ─── ESP32 ───────────────────────────────────────────────────────────
 
@@ -958,11 +977,15 @@ class RpiVJPanel(QMainWindow):
         self._led_layer.live_ctx = ctx
         self._volume_bar.setValue(ctx["energy"])
 
-        time_pos = self._frame_idx / FPS
+        # time_pos monotone (jamais remis à zéro) → transitions sans hard cut
+        time_pos = self._abs_frame_idx / FPS
 
         try:
             led_img = self._led_layer.render(self._frame_idx, time_pos)
-            led_rgb = led_img.convert("RGB")
+            # Composer l'RGBA sur fond noir pour préserver les fondus (convert("RGB")
+            # ignore silencieusement le canal alpha, rendant les transitions invisibles)
+            led_rgb = PILImage.new("RGB", led_img.size, (0, 0, 0))
+            led_rgb.paste(led_img, mask=led_img.getchannel("A"))
 
             # Upscale numpy 4× NEAREST — indices pré-calculés, écrit dans _display_arr (writable)
             arr64 = np.asarray(led_rgb, dtype=np.uint8)           # view, pas de copie
@@ -978,8 +1001,9 @@ class RpiVJPanel(QMainWindow):
             log.error("[Render] frame %d : %s", self._frame_idx, e)
 
         self._highlight_active_effects(time_pos)
-        # Wrapping au lieu de pinning : les effets continuent de progresser indéfiniment
-        self._frame_idx = (self._frame_idx + 1) % (self._led_layer.total_frames if self._led_layer else 1)
+        total = self._led_layer.total_frames if self._led_layer else 1
+        self._frame_idx = (self._frame_idx + 1) % total
+        self._abs_frame_idx += 1
 
     def _highlight_active_effects(self, time_pos: float) -> None:
         if self._led_layer is None:

@@ -1107,8 +1107,9 @@ class VJingLayer(BaseVisualLayer):
     ) -> float:
         """Calculate alpha multiplier for crossfade between effects.
 
-        Supports multiple simultaneous effects. At any time, `simultaneous_effects`
-        effects are visible, cycling through the list with smooth transitions.
+        The outgoing effect fades out simultaneously with the incoming effect
+        fading in (crossfade). With simultaneous_effects=1, at any given moment
+        at most 2 effects are partially visible during the transition window.
 
         Args:
             effect_idx: Index of the effect in active_effects.
@@ -1125,51 +1126,37 @@ class VJingLayer(BaseVisualLayer):
 
         # If we want more simultaneous effects than available, show all at full intensity
         if self.simultaneous_effects >= num_effects:
-            return 1.0  # All effects visible at full intensity
+            return 1.0
 
         cycle = self.effect_cycle_duration
         fade = self.transition_duration
         num_simultaneous = self.simultaneous_effects
 
-        # Total cycle = time for all effects to rotate through
         total_cycle = cycle * num_effects
         t = (time_pos + self._effect_phase_offset) % total_cycle
 
-        # Calculate which "slot" is currently the primary (oldest visible effect)
+        # primary_slot = oldest currently visible effect
         primary_slot = int(t / cycle) % num_effects
         pos_in_window = t % cycle
 
-        # Determine if this effect is in one of the visible slots
-        # Visible slots are: primary_slot, primary_slot+1, ..., primary_slot+(num_simultaneous-1)
         for slot_offset in range(num_simultaneous):
             slot_idx = (primary_slot + slot_offset) % num_effects
-
             if effect_idx == slot_idx:
-                # This effect is in a visible slot - full intensity
-                # Check if we're in a transition period
                 if pos_in_window >= cycle - fade:
-                    # Transition period
+                    # Transition window: oldest fades out, others stay full
                     transition_progress = (pos_in_window - (cycle - fade)) / fade
-
                     if slot_offset == 0:
-                        # Oldest effect (primary) - fading out
-                        return 1.0 - transition_progress
-                    else:
-                        # Other visible effects stay at full intensity
-                        return 1.0
-                else:
-                    # Not in transition - full intensity
+                        return 1.0 - transition_progress  # fade out
                     return 1.0
+                return 1.0  # full intensity outside transition
 
-        # Check if this effect is the incoming one during transition
+        # Incoming effect: fades in during the outgoing effect's transition window
         if pos_in_window >= cycle - fade:
             next_slot_idx = (primary_slot + num_simultaneous) % num_effects
             if effect_idx == next_slot_idx:
-                # Incoming effect - fading in
                 transition_progress = (pos_in_window - (cycle - fade)) / fade
-                return transition_progress
+                return transition_progress  # fade in
 
-        # Effect is not visible
         return 0.0
 
     def _render_with_transitions(
