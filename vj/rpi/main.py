@@ -98,6 +98,21 @@ def _discover_effects() -> list[str]:
 # ─── Capture microphone ───────────────────────────────────────────────────────
 
 
+def _list_input_devices() -> list[tuple[int, str]]:
+    """Retourne [(index, nom)] des périphériques d'entrée audio disponibles."""
+    if not HAS_SOUNDDEVICE:
+        return []
+    try:
+        devices = sd.query_devices()
+        return [
+            (i, d["name"])
+            for i, d in enumerate(devices)
+            if d["max_input_channels"] > 0
+        ]
+    except Exception:
+        return []
+
+
 class MicrophoneSource:
     """Capture microphone temps réel avec extraction de features audio."""
 
@@ -139,10 +154,11 @@ class MicrophoneSource:
             "is_beat": False,
         }
 
-    def start(self) -> None:
+    def start(self, device: int | str | None = None) -> None:
         if not HAS_SOUNDDEVICE:
             raise RuntimeError("sounddevice not installed (uv sync --extra video)")
         self._stream = sd.InputStream(
+            device=device,
             samplerate=self.sr,
             channels=1,
             blocksize=self.block_size,
@@ -150,7 +166,7 @@ class MicrophoneSource:
             dtype="float32",
         )
         self._stream.start()
-        log.info("[Mic] Démarré à %d Hz, block=%d", self.sr, self.block_size)
+        log.info("[Mic] Démarré device=%s %d Hz block=%d", device, self.sr, self.block_size)
 
     def stop(self) -> None:
         if self._stream:
@@ -566,6 +582,24 @@ class RpiVJPanel(QMainWindow):
         sens_row.addWidget(self._sensitivity_label)
         right_layout.addLayout(sens_row)
 
+        # Sélecteur de périphérique audio
+        device_row = QHBoxLayout()
+        self._device_combo = QComboBox()
+        self._device_combo.setStyleSheet("font-size: 20px; min-height: 44px;")
+        self._device_indices: list[int] = []
+        self._refresh_device_list()
+        device_row.addWidget(self._device_combo)
+        btn_refresh = QPushButton("⟳")
+        btn_refresh.setFixedSize(48, 44)
+        btn_refresh.setStyleSheet(
+            "QPushButton { font-size: 22px; background: #2a2a2a; color: #aaa; "
+            "border: 1px solid #555; border-radius: 4px; }"
+            "QPushButton:pressed { background: #444; }"
+        )
+        btn_refresh.clicked.connect(self._refresh_device_list)
+        device_row.addWidget(btn_refresh)
+        right_layout.addLayout(device_row)
+
         # Mode mic / auto
         self._btn_mic_mode = QPushButton("Mic ON")
         self._btn_mic_mode.setFixedHeight(48)
@@ -668,7 +702,29 @@ class RpiVJPanel(QMainWindow):
         if self._mic_mode:
             self._btn_mic_mode.setText("Mic ON")
             self._btn_mic_mode.setStyleSheet(self._STYLE_MIC_ON)
-            self._start_mic()
+            # Démarre uniquement le matériel mic — ne reconstruit PAS le layer
+            # (sinon random.shuffle change l'ordre des effets en cours)
+            if not HAS_SOUNDDEVICE:
+                self._mic_mode = False
+                self._btn_mic_mode.setText("Auto (no mic)")
+                self._btn_mic_mode.setStyleSheet(self._STYLE_MIC_OFF)
+                self.statusBar().showMessage("ERROR: sounddevice not installed — auto mode")
+                return
+            device = self._selected_device()
+            self._mic_source = MicrophoneSource(sr=MIC_SR, block_size=MIC_BLOCK_SIZE)
+            try:
+                self._mic_source.start(device=device)
+                self.statusBar().showMessage(
+                    f"Mic active — device={device if device is not None else 'default'}, "
+                    f"palette={self._current_palette}"
+                )
+            except Exception as e:
+                log.error("Mic : %s", e)
+                self._mic_mode = False
+                self._btn_mic_mode.setText("Auto (no mic)")
+                self._btn_mic_mode.setStyleSheet(self._STYLE_MIC_OFF)
+                self._mic_source = None
+                self.statusBar().showMessage(f"Mic error: {e} — auto mode")
         else:
             self._btn_mic_mode.setText("Auto (no mic)")
             self._btn_mic_mode.setStyleSheet(self._STYLE_MIC_OFF)
@@ -683,15 +739,48 @@ class RpiVJPanel(QMainWindow):
 
     # ─── Mic ─────────────────────────────────────────────────────────────
 
+    def _refresh_device_list(self) -> None:
+        """Recharge la liste des périphériques d'entrée dans le combo."""
+        devices = _list_input_devices()
+        self._device_combo.blockSignals(True)
+        current_idx = (
+            self._device_indices[self._device_combo.currentIndex()]
+            if self._device_indices and self._device_combo.currentIndex() >= 0
+            else None
+        )
+        self._device_combo.clear()
+        self._device_indices = []
+        # Option "défaut système"
+        self._device_combo.addItem("(défaut système)")
+        self._device_indices.append(-1)
+        for idx, name in devices:
+            self._device_combo.addItem(f"{idx}: {name}")
+            self._device_indices.append(idx)
+            # Pré-sélectionner USB/dongle si détecté
+            if current_idx is None and any(
+                kw in name.lower() for kw in ("usb", "audio device", "dongle", "card")
+            ):
+                self._device_combo.setCurrentIndex(len(self._device_indices) - 1)
+        self._device_combo.blockSignals(False)
+
+    def _selected_device(self) -> int | None:
+        """Retourne l'index sounddevice sélectionné, ou None pour le défaut."""
+        combo_idx = self._device_combo.currentIndex()
+        if combo_idx < 0 or combo_idx >= len(self._device_indices):
+            return None
+        dev = self._device_indices[combo_idx]
+        return None if dev == -1 else dev
+
     def _start_mic(self) -> None:
         if not HAS_SOUNDDEVICE:
             self.statusBar().showMessage("ERROR: sounddevice not installed — auto mode")
             self._switch_to_auto_mode()
             return
 
+        device = self._selected_device()
         self._mic_source = MicrophoneSource(sr=MIC_SR, block_size=MIC_BLOCK_SIZE)
         try:
-            self._mic_source.start()
+            self._mic_source.start(device=device)
         except Exception as e:
             log.error("Mic : %s", e)
             self.statusBar().showMessage(f"Mic error: {e} — auto mode")
