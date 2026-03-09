@@ -394,8 +394,21 @@ class RpiVJPanel(QMainWindow):
         self._upscale = LED_DISPLAY // LED_SIZE
         # Indices pré-calculés pour l'upscale (nearest-neighbor 4×) sans allocation intermédiaire
         self._upscale_idx = np.arange(LED_SIZE, dtype=np.intp).repeat(self._upscale)
-        # Buffer display pré-alloué (np.empty = writable garanti, contrairement à frombuffer)
-        self._display_arr = np.empty((LED_DISPLAY, LED_DISPLAY, 3), dtype=np.uint8)
+        # Buffer display partagé bytearray ↔ numpy ↔ QImage (zéro copie, zéro allocation)
+        # bytearray est le seul propriétaire de la mémoire ; numpy et QImage n'en font que
+        # des vues. QImage et QPixmap sont créés une seule fois (pas de dealloc shiboken6
+        # ARM64) ; QPixmap.convertFromImage() les met à jour sur place chaque frame.
+        self._display_rawbuf = bytearray(LED_DISPLAY * LED_DISPLAY * 3)
+        self._display_arr = np.frombuffer(self._display_rawbuf, dtype=np.uint8).reshape(
+            LED_DISPLAY, LED_DISPLAY, 3
+        )
+        # QImage pointe directement sur _display_rawbuf — créé une seule fois, jamais libéré
+        self._display_qimage = QImage(
+            self._display_rawbuf, LED_DISPLAY, LED_DISPLAY, 3 * LED_DISPLAY,
+            QImage.Format.Format_RGB888,
+        )
+        # QPixmap mis à jour en place via convertFromImage() — créé une seule fois
+        self._display_qpixmap = QPixmap(LED_DISPLAY, LED_DISPLAY)
         # Contexte auto pré-alloué (évite dict allocation à 30fps)
         self._auto_ctx: dict = {
             "energy": 0.5, "bass": 0.4, "mid": 0.5,
@@ -1083,7 +1096,8 @@ class RpiVJPanel(QMainWindow):
             led_rgb.paste(led_img, mask=led_img.getchannel("A"))
 
             log.debug("[frame %d] E:numpy_upscale", self._frame_idx)
-            # Upscale numpy 4× NEAREST — indices pré-calculés, écrit dans _display_arr (writable)
+            # Upscale numpy 4× NEAREST — écrit dans _display_arr (vue sur _display_rawbuf)
+            # → met à jour automatiquement le bytearray partagé avec _display_qimage
             arr64 = np.asarray(led_rgb, dtype=np.uint8)           # view, pas de copie
             idx = self._upscale_idx
             np.copyto(self._display_arr, arr64[idx][:, idx])
@@ -1092,17 +1106,10 @@ class RpiVJPanel(QMainWindow):
             self._send_frame_to_esp32(arr64)  # passe le numpy array 64×64
 
             log.debug("[frame %d] G:setPixmap", self._frame_idx)
-            # Garder raw_bytes en variable locale : QImage(bytes, ...) stocke un
-            # pointeur C sans copier les données. Si bytes est un temporaire dans une
-            # expression imbriquée, son refcount tombe à 0 dès que QImage.__init__
-            # retourne → mémoire libérée → QPixmap.fromImage lit un pointeur dangling
-            # → corruption du refcount de None → none_dealloc fatal.
-            raw_bytes = self._display_arr.tobytes()
-            self._current_qimage = QImage(
-                raw_bytes, LED_DISPLAY, LED_DISPLAY, 3 * LED_DISPLAY,
-                QImage.Format.Format_RGB888,
-            )
-            self._led_label.setPixmap(QPixmap.fromImage(self._current_qimage))
+            # Mise à jour en place : zéro création/destruction d'objets Python Qt
+            # _display_rawbuf → _display_qimage → _display_qpixmap (tous pré-alloués)
+            self._display_qpixmap.convertFromImage(self._display_qimage)
+            self._led_label.setPixmap(self._display_qpixmap)
         except Exception as e:
             log.error("[Render] frame %d : %s", self._frame_idx, e)
 
