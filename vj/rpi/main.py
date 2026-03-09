@@ -575,6 +575,27 @@ class RpiVJPanel(QMainWindow):
         self._btn_mic_mode.clicked.connect(self._toggle_mic_mode)
         right_layout.addWidget(self._btn_mic_mode)
 
+        # Bouton passage effet suivant
+        self._next_effect_btn = QPushButton("NEXT EFFECT ▶")
+        self._next_effect_btn.setFixedHeight(100)
+        self._next_effect_btn.setStyleSheet("""
+            QPushButton {
+                background: #1a1a3a;
+                color: #66aaff;
+                font-size: 28px;
+                font-weight: bold;
+                border: 2px solid #3355aa;
+                border-radius: 8px;
+            }
+            QPushButton:pressed {
+                background: #2244cc;
+                color: white;
+                border-color: #4488ff;
+            }
+        """)
+        self._next_effect_btn.clicked.connect(self._on_next_effect)
+        right_layout.addWidget(self._next_effect_btn)
+
         # Zone de tap beat (tactile)
         self._beat_btn = QPushButton("TAP BEAT")
         self._beat_btn.setFixedHeight(240)
@@ -842,6 +863,14 @@ class RpiVJPanel(QMainWindow):
 
     def _on_tap_beat(self) -> None:
         self._manual_beat = True
+
+    # ─── Effet suivant ────────────────────────────────────────────────────
+
+    def _on_next_effect(self) -> None:
+        """Force le passage immédiat à l'effet suivant dans la rotation."""
+        if self._led_layer is None:
+            return
+        self._led_layer._effect_phase_offset += self._led_layer.effect_cycle_duration
 
     # ─── ESP32 ───────────────────────────────────────────────────────────
 
