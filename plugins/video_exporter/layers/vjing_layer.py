@@ -1202,7 +1202,10 @@ class VJingLayer(BaseVisualLayer):
             # Use local array — shared scratch would cause SIGBUS with parallel render workers.
             if alpha < 0.99:
                 arr = np.array(effect_img)  # local copy; no shared state
-                arr[:, :, 3] = (arr[:, :, 3] * alpha).astype(np.uint8)
+                # np.multiply in-place évite l'allocation temporaire intermédiaire
+                # (arr[:,:,3] * alpha crée un float64 temporaire qui peut corrompre
+                # le refcount de None sur ARM dans certains contextes C extension)
+                np.multiply(arr[:, :, 3], alpha, out=arr[:, :, 3], casting="unsafe")
                 img.alpha_composite(Image.fromarray(arr, "RGBA"))
             else:
                 img.alpha_composite(effect_img)

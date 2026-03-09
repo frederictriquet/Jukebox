@@ -201,21 +201,26 @@ class MicrophoneSource:
     def _callback(
         self, indata: np.ndarray, frames: int, _time_info: object, status: object
     ) -> None:
-        """Callback audio — écrit dans le buffer circulaire sans allocation."""
+        """Callback audio — écrit dans le buffer circulaire SANS allocation.
+
+        Le gain n'est PAS appliqué ici : toute allocation numpy dans un callback
+        PortAudio (thread C sans frame Python) peut libérer le GIL et provoquer
+        des corruptions mémoire (none_dealloc). Le gain est appliqué dans
+        get_audio_features() qui tourne dans le thread Qt.
+        """
         if status:
             log.debug("[Mic] status: %s", status)
         n = min(frames, len(indata))
         buf_size = len(self._buffer)
         head = self._buf_head
         end = head + n
-        samples = indata[:n, 0] * self.gain if self.gain != 1.0 else indata[:n, 0]
         with self._lock:
             if end <= buf_size:
-                self._buffer[head:end] = samples
+                self._buffer[head:end] = indata[:n, 0]
             else:
                 first = buf_size - head
-                self._buffer[head:] = samples[:first]
-                self._buffer[:end - buf_size] = samples[first:]
+                self._buffer[head:] = indata[:first, 0]
+                self._buffer[:end - buf_size] = indata[first:n, 0]
             self._buf_head = end % buf_size
 
     def _read_chunk(self) -> None:
@@ -231,6 +236,9 @@ class MicrophoneSource:
 
     def get_audio_features(self, frame_idx: int) -> dict:
         self._read_chunk()
+        # Gain appliqué ici (thread Qt) plutôt que dans _callback (thread C PortAudio)
+        if self.gain != 1.0:
+            self._chunk_out *= self.gain
 
         fft_full = np.abs(np.fft.rfft(self._chunk_out))
 
