@@ -323,8 +323,9 @@ class LiveVJingLayer(VJingLayer):
 
 
 # ─── VU Meter ────────────────────────────────────────────────────────────────
-# QProgressBar natif : pas de paintEvent Python → pas de callback shiboken6
-# → élimine le crash none_dealloc sur ARM64 (shiboken6 C++→Python refcount bug)
+# QProgressBar pur C++ (non sous-classé en Python) : shiboken6 ne fait aucun
+# lookup de virtual-override Python lors des repaints → élimine le crash
+# none_dealloc ARM64 causé par ce lookup sur les sous-classes Python de QWidget.
 
 _VU_METER_STYLE = """
 QProgressBar {
@@ -343,24 +344,15 @@ QProgressBar::chunk {
 """
 
 
-class VUMeterWidget(QProgressBar):
-    """Barre de volume vert→rouge via QProgressBar stylé (pas de paintEvent Python)."""
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._last_int: int = 0
-        self.setRange(0, 1000)
-        self.setValue(0)
-        self.setFixedHeight(20)
-        self.setTextVisible(False)
-        self.setStyleSheet(_VU_METER_STYLE)
-
-    def setValue(self, value: float) -> None:  # type: ignore[override]
-        """Valeur entre 0.0 et 1.0."""
-        v = max(0, min(1000, int(value * 1000)))
-        if v != self._last_int:
-            self._last_int = v
-            super().setValue(v)
+def _make_vu_meter(parent: QWidget | None = None) -> QProgressBar:
+    """Crée un QProgressBar stylé sans sous-classe Python."""
+    bar = QProgressBar(parent)
+    bar.setRange(0, 1000)
+    bar.setValue(0)
+    bar.setFixedHeight(20)
+    bar.setTextVisible(False)
+    bar.setStyleSheet(_VU_METER_STYLE)
+    return bar
 
 
 # ─── Fenêtre principale ───────────────────────────────────────────────────────
@@ -396,6 +388,7 @@ class RpiVJPanel(QMainWindow):
         self._mic_mode = True  # False = mode auto sans micro
         self._last_visible: frozenset[str] = frozenset()
         self._esp32_status_pending: str | None = None  # mis à jour depuis thread de fond
+        self._last_vu_int: int = 0
 
         # Facteur d'upscale pour la preview (LED_DISPLAY / LED_SIZE = 4)
         self._upscale = LED_DISPLAY // LED_SIZE
@@ -537,7 +530,7 @@ class RpiVJPanel(QMainWindow):
         vol_lbl.setStyleSheet("font-size: 20px; color: #aaa;")
         vol_lbl.setFixedWidth(44)
         vol_row.addWidget(vol_lbl)
-        self._volume_bar = VUMeterWidget()
+        self._volume_bar = _make_vu_meter()
         vol_row.addWidget(self._volume_bar)
         right_layout.addLayout(vol_row)
 
@@ -1072,7 +1065,10 @@ class RpiVJPanel(QMainWindow):
 
         log.debug("[frame %d] B:live_ctx+vu", self._frame_idx)
         self._led_layer.live_ctx = ctx
-        self._volume_bar.setValue(ctx["bass"])  # bass_n atteint ~80% sur les drops
+        vu = max(0, min(1000, int(ctx["bass"] * 1000)))
+        if vu != self._last_vu_int:
+            self._last_vu_int = vu
+            self._volume_bar.setValue(vu)
 
         # time_pos monotone (jamais remis à zéro) → transitions sans hard cut
         time_pos = self._abs_frame_idx / FPS
