@@ -236,9 +236,6 @@ class MicrophoneSource:
 
     def get_audio_features(self, frame_idx: int) -> dict:
         self._read_chunk()
-        # Gain appliqué ici (thread Qt) plutôt que dans _callback (thread C PortAudio)
-        if self.gain != 1.0:
-            self._chunk_out *= self.gain
 
         fft_full = np.abs(np.fft.rfft(self._chunk_out))
 
@@ -257,6 +254,17 @@ class MicrophoneSource:
         bass_n   = min(1.0, bass_e   / norm)
         mid_n    = min(1.0, mid_e    / norm)
         treble_n = min(1.0, treble_e / norm)
+
+        # Le gain est appliqué APRÈS la normalisation : la normalisation s'adapte
+        # au niveau absolu du signal (et annulerait un gain pré-FFT), tandis que
+        # le gain post-normalisation agit comme un amplificateur de sensibilité.
+        # Cela compense le désaccord line-level → mic-level sans que le running_max
+        # ne l'absorbe. Les valeurs sont clampées à 1.0.
+        if self.gain != 1.0:
+            bass_n   = min(1.0, bass_n   * self.gain)
+            mid_n    = min(1.0, mid_n    * self.gain)
+            treble_n = min(1.0, treble_n * self.gain)
+
         energy = (bass_n + mid_n + treble_n) / 3.0
 
         # 32 bandes vectorisées (np.add.reduceat = une seule passe C)
