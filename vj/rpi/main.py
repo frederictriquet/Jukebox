@@ -140,7 +140,6 @@ class MicrophoneSource:
             "treble": 0.0, "fft": np.zeros(self._n_bands, dtype=np.float32),
             "is_beat": False,
         }
-        self.gain: float = 1.0  # gain numérique pré-normalization (compense line-level → mic-level)
         self._init_freq_slices(sr)
 
     def _init_freq_slices(self, sr: int) -> None:
@@ -254,17 +253,6 @@ class MicrophoneSource:
         bass_n   = min(1.0, bass_e   / norm)
         mid_n    = min(1.0, mid_e    / norm)
         treble_n = min(1.0, treble_e / norm)
-
-        # Le gain est appliqué APRÈS la normalisation : la normalisation s'adapte
-        # au niveau absolu du signal (et annulerait un gain pré-FFT), tandis que
-        # le gain post-normalisation agit comme un amplificateur de sensibilité.
-        # Cela compense le désaccord line-level → mic-level sans que le running_max
-        # ne l'absorbe. Les valeurs sont clampées à 1.0.
-        if self.gain != 1.0:
-            bass_n   = min(1.0, bass_n   * self.gain)
-            mid_n    = min(1.0, mid_n    * self.gain)
-            treble_n = min(1.0, treble_n * self.gain)
-
         energy = (bass_n + mid_n + treble_n) / 3.0
 
         # 32 bandes vectorisées (np.add.reduceat = une seule passe C)
@@ -618,25 +606,6 @@ class RpiVJPanel(QMainWindow):
         sens_row.addWidget(self._sensitivity_label)
         right_layout.addLayout(sens_row)
 
-        # Input Gain (compense line-level → mic-level, ex. sortie Booth contrôleur DJ)
-        gain_row = QHBoxLayout()
-        gain_lbl = QLabel("Input Gain:")
-        gain_lbl.setStyleSheet("font-size: 28px;")
-        gain_row.addWidget(gain_lbl)
-        self._gain_slider = QSlider(Qt.Orientation.Horizontal)
-        self._gain_slider.setRange(10, 200)   # 0.1x – 20x
-        self._gain_slider.setValue(10)         # défaut 1x
-        self._gain_slider.setTickInterval(10)
-        self._gain_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self._gain_slider.setStyleSheet("min-height: 48px;")
-        self._gain_slider.valueChanged.connect(self._on_gain_changed)
-        gain_row.addWidget(self._gain_slider)
-        self._gain_label = QLabel("1.0x")
-        self._gain_label.setStyleSheet("font-size: 28px;")
-        self._gain_label.setFixedWidth(80)
-        gain_row.addWidget(self._gain_label)
-        right_layout.addLayout(gain_row)
-
         # Sélecteur de périphérique audio
         device_row = QHBoxLayout()
         self._device_combo = QComboBox()
@@ -988,12 +957,6 @@ class RpiVJPanel(QMainWindow):
         if self._led_layer is not None:
             self._led_layer.audio_sensitivity = {"bass": val, "mid": val, "treble": val}
 
-    def _on_gain_changed(self, value: int) -> None:
-        gain = value / 10.0
-        self._gain_label.setText(f"{gain:.1f}x")
-        if self._mic_source is not None:
-            self._mic_source.gain = gain
-
     def _check_all_effects(self) -> None:
         for cb in self._effect_checkboxes.values():
             cb.blockSignals(True)
@@ -1125,7 +1088,7 @@ class RpiVJPanel(QMainWindow):
             self._manual_beat = False
 
         self._led_layer.live_ctx = ctx
-        self._volume_bar.setValue(ctx["energy"])
+        self._volume_bar.setValue(ctx["bass"])  # bass_n atteint ~80% sur les drops
 
         # time_pos monotone (jamais remis à zéro) → transitions sans hard cut
         time_pos = self._abs_frame_idx / FPS
