@@ -114,20 +114,22 @@ def _list_input_devices() -> list[tuple[int, str]]:
 
 
 class MicrophoneSource:
-    """Capture microphone temps réel avec extraction de features audio."""
+    """Capture microphone temps réel avec extraction de features audio.
+
+    Utilise le mode polling (stream.read) plutôt qu'un callback Python.
+    Le callback sounddevice s'exécute dans un thread C PortAudio qui acquiert
+    le GIL pour appeler Python — sur ARM64 avec numpy cela provoque des
+    corruptions de refcount (none_dealloc fatal). Le polling élimine ce thread.
+    """
 
     def __init__(self, sr: int = MIC_SR, block_size: int = MIC_BLOCK_SIZE) -> None:
         self.sr = sr
         self.block_size = block_size
 
-        # Buffer circulaire de taille exactement n_fft (les samples les plus récents
-        # sont toujours accessibles, sans np.roll ni allocation à chaque callback).
         n_fft = block_size * 2
         self._n_fft = n_fft
-        self._buffer = np.zeros(n_fft, dtype=np.float32)
-        self._buf_head: int = 0          # prochain emplacement d'écriture
-        self._chunk_out = np.empty(n_fft, dtype=np.float32)  # buffer de lecture pré-alloué
-        self._lock = threading.Lock()
+        # Buffer glissant : on concatène les derniers blocs lus pour avoir n_fft samples
+        self._ring = np.zeros(n_fft, dtype=np.float32)
         self._stream: sd.InputStream | None = None
 
         self._last_beat_frame = -100
@@ -146,19 +148,15 @@ class MicrophoneSource:
         """(Re)calcule les slices FFT pour le sample rate donné."""
         freqs = np.fft.rfftfreq(self._n_fft, 1.0 / sr)
         n_bins = len(freqs)
-        # Slices de fréquences (ranges contiguës → pas de copie par masque booléen)
         self._bass_sl = slice(int(np.searchsorted(freqs, 20)),  int(np.searchsorted(freqs, 250)))
         self._mid_sl  = slice(int(np.searchsorted(freqs, 250)), int(np.searchsorted(freqs, 4000)))
         self._treble_sl = slice(int(np.searchsorted(freqs, 4000)), None)
-        # Bords de bandes pré-calculés pour np.add.reduceat (vectorisé)
         self._band_edges = np.linspace(0, n_bins, self._n_bands + 1, dtype=int)
         self._band_counts = np.maximum(np.diff(self._band_edges).astype(np.float32), 1)
 
     def start(self, device: int | str | None = None) -> None:
         if not HAS_SOUNDDEVICE:
             raise RuntimeError("sounddevice not installed (uv sync --extra video)")
-        # Utilise le sample rate natif du device pour éviter ALSA "Invalid sample rate"
-        # (beaucoup de dongles USB ne supportent que 44100 ou 48000 Hz)
         actual_sr = self.sr
         if device is not None:
             try:
@@ -172,19 +170,20 @@ class MicrophoneSource:
                     actual_sr = native_sr
             except Exception:
                 pass
+        # Pas de callback= : mode polling, sounddevice bufferise en interne
         self._stream = sd.InputStream(
             device=device,
             samplerate=actual_sr,
             channels=1,
             blocksize=self.block_size,
-            callback=self._callback,
             dtype="float32",
+            latency="low",
         )
         self._stream.start()
         if actual_sr != self.sr:
             self.sr = actual_sr
             self._init_freq_slices(actual_sr)
-        log.info("[Mic] Démarré device=%s %d Hz block=%d", device, self.sr, self.block_size)
+        log.info("[Mic] Démarré (polling) device=%s %d Hz block=%d", device, self.sr, self.block_size)
 
     def stop(self) -> None:
         if self._stream:
@@ -197,46 +196,28 @@ class MicrophoneSource:
     def is_active(self) -> bool:
         return self._stream is not None and self._stream.active
 
-    def _callback(
-        self, indata: np.ndarray, frames: int, _time_info: object, status: object
-    ) -> None:
-        """Callback audio — écrit dans le buffer circulaire SANS allocation.
-
-        Le gain n'est PAS appliqué ici : toute allocation numpy dans un callback
-        PortAudio (thread C sans frame Python) peut libérer le GIL et provoquer
-        des corruptions mémoire (none_dealloc). Le gain est appliqué dans
-        get_audio_features() qui tourne dans le thread Qt.
-        """
-        if status:
-            log.debug("[Mic] status: %s", status)
-        n = min(frames, len(indata))
-        buf_size = len(self._buffer)
-        head = self._buf_head
-        end = head + n
-        with self._lock:
-            if end <= buf_size:
-                self._buffer[head:end] = indata[:n, 0]
-            else:
-                first = buf_size - head
-                self._buffer[head:] = indata[:first, 0]
-                self._buffer[:end - buf_size] = indata[first:n, 0]
-            self._buf_head = end % buf_size
-
-    def _read_chunk(self) -> None:
-        """Copie le buffer circulaire dans _chunk_out (ordre chronologique)."""
-        with self._lock:
-            head = self._buf_head
-            buf_size = len(self._buffer)
-            if head == 0:
-                np.copyto(self._chunk_out, self._buffer)
-            else:
-                self._chunk_out[:buf_size - head] = self._buffer[head:]
-                self._chunk_out[buf_size - head:] = self._buffer[:head]
+    def _poll(self) -> None:
+        """Lit les samples disponibles et met à jour le buffer glissant (thread Qt)."""
+        if self._stream is None:
+            return
+        available = self._stream.read_available
+        if available <= 0:
+            return
+        data, _ = self._stream.read(available)   # (available, 1) float32
+        samples = data[:, 0]
+        n = len(samples)
+        if n >= self._n_fft:
+            # Plus de samples que le buffer : garder les plus récents
+            self._ring[:] = samples[-self._n_fft:]
+        else:
+            # Décaler et ajouter
+            self._ring[:-n] = self._ring[n:]
+            self._ring[-n:] = samples
 
     def get_audio_features(self, frame_idx: int) -> dict:
-        self._read_chunk()
+        self._poll()  # lit les nouveaux samples depuis sounddevice (thread Qt, pas de callback)
 
-        fft_full = np.abs(np.fft.rfft(self._chunk_out))
+        fft_full = np.abs(np.fft.rfft(self._ring))
 
         # RMS par bande via np.dot (évite ** 2 + mean séparés)
         def _rms(sl: slice) -> float:
