@@ -347,12 +347,12 @@ class VUMeterWidget(QProgressBar):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._last_int: int = 0
         self.setRange(0, 1000)
         self.setValue(0)
         self.setFixedHeight(20)
         self.setTextVisible(False)
         self.setStyleSheet(_VU_METER_STYLE)
-        self._last_int: int = 0
 
     def setValue(self, value: float) -> None:  # type: ignore[override]
         """Valeur entre 0.0 et 1.0."""
