@@ -140,6 +140,7 @@ class MicrophoneSource:
             "treble": 0.0, "fft": np.zeros(self._n_bands, dtype=np.float32),
             "is_beat": False,
         }
+        self.gain: float = 1.0  # gain numérique pré-normalization (compense line-level → mic-level)
         self._init_freq_slices(sr)
 
     def _init_freq_slices(self, sr: int) -> None:
@@ -207,13 +208,14 @@ class MicrophoneSource:
         buf_size = len(self._buffer)
         head = self._buf_head
         end = head + n
+        samples = indata[:n, 0] * self.gain if self.gain != 1.0 else indata[:n, 0]
         with self._lock:
             if end <= buf_size:
-                self._buffer[head:end] = indata[:n, 0]
+                self._buffer[head:end] = samples
             else:
                 first = buf_size - head
-                self._buffer[head:] = indata[:first, 0]
-                self._buffer[:end - buf_size] = indata[first:n, 0]
+                self._buffer[head:] = samples[:first]
+                self._buffer[:end - buf_size] = samples[first:]
             self._buf_head = end % buf_size
 
     def _read_chunk(self) -> None:
@@ -600,6 +602,25 @@ class RpiVJPanel(QMainWindow):
         sens_row.addWidget(self._sensitivity_label)
         right_layout.addLayout(sens_row)
 
+        # Input Gain (compense line-level → mic-level, ex. sortie Booth contrôleur DJ)
+        gain_row = QHBoxLayout()
+        gain_lbl = QLabel("Input Gain:")
+        gain_lbl.setStyleSheet("font-size: 28px;")
+        gain_row.addWidget(gain_lbl)
+        self._gain_slider = QSlider(Qt.Orientation.Horizontal)
+        self._gain_slider.setRange(10, 200)   # 0.1x – 20x
+        self._gain_slider.setValue(10)         # défaut 1x
+        self._gain_slider.setTickInterval(10)
+        self._gain_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self._gain_slider.setStyleSheet("min-height: 48px;")
+        self._gain_slider.valueChanged.connect(self._on_gain_changed)
+        gain_row.addWidget(self._gain_slider)
+        self._gain_label = QLabel("1.0x")
+        self._gain_label.setStyleSheet("font-size: 28px;")
+        self._gain_label.setFixedWidth(80)
+        gain_row.addWidget(self._gain_label)
+        right_layout.addLayout(gain_row)
+
         # Sélecteur de périphérique audio
         device_row = QHBoxLayout()
         self._device_combo = QComboBox()
@@ -950,6 +971,12 @@ class RpiVJPanel(QMainWindow):
         self._sensitivity_label.setText(f"{val:.1f}x")
         if self._led_layer is not None:
             self._led_layer.audio_sensitivity = {"bass": val, "mid": val, "treble": val}
+
+    def _on_gain_changed(self, value: int) -> None:
+        gain = value / 10.0
+        self._gain_label.setText(f"{gain:.1f}x")
+        if self._mic_source is not None:
+            self._mic_source.gain = gain
 
     def _check_all_effects(self) -> None:
         for cb in self._effect_checkboxes.values():
