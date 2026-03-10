@@ -43,7 +43,7 @@ except ImportError:
     PILImage = None  # type: ignore[assignment,misc]
     HAS_PIL = False
 
-from PySide6.QtCore import Qt, QTimer, Slot
+from PySide6.QtCore import QObject, Qt, QTimer, Slot
 from PySide6.QtGui import QColor, QImage, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QMessageBox,
@@ -422,13 +422,21 @@ def _make_vu_meter(parent: QWidget | None = None) -> QLabel:
 # ─── Fenêtre principale ───────────────────────────────────────────────────────
 
 
-class RpiVJPanel(QMainWindow):
-    """App VJing pour Raspberry Pi — micro continu → LED 64×64 → ESP32."""
+class RpiVJPanel(QObject):
+    """App VJing pour Raspberry Pi — micro continu → LED 64×64 → ESP32.
+
+    Hérite de QObject (pas de QMainWindow) : la fenêtre est un QMainWindow
+    pur C++ stocké dans self._win. Cela évite que shiboken6 ARM64 vérifie les
+    surcharges Python pour chaque événement Qt (paintEvent, resizeEvent, …) sur
+    la fenêtre principale — ces vérifications corrompent le refcount de None.
+    """
 
     def __init__(self, esp32_host: str = "ledpanel.local") -> None:
         super().__init__()
-        self.setWindowTitle("VJ Panel")
-        self.setMinimumSize(900, 700)
+        # Fenêtre principale pure C++ — aucun sous-classement Python
+        self._win = QMainWindow()
+        self._win.setWindowTitle("VJ Panel")
+        self._win.setMinimumSize(900, 700)
 
         self._esp32_host = esp32_host
         self._esp32_ip: str | None = None  # resolved once in background thread
@@ -491,7 +499,7 @@ class RpiVJPanel(QMainWindow):
 
     def _setup_ui(self) -> None:
         central = QWidget()
-        self.setCentralWidget(central)
+        self._win.setCentralWidget(central)
         main_layout = QHBoxLayout(central)
         main_layout.setContentsMargins(8, 8, 8, 8)
 
@@ -746,7 +754,7 @@ class RpiVJPanel(QMainWindow):
         splitter.addWidget(right)
         splitter.setSizes([560, LED_DISPLAY + 40])
 
-        self.statusBar().showMessage("Starting microphone…")
+        self._win.statusBar().showMessage("Starting microphone…")
 
     # ─── Styles boutons effets ────────────────────────────────────────────
 
@@ -783,13 +791,13 @@ class RpiVJPanel(QMainWindow):
                 self._mic_mode = False
                 self._btn_mic_mode.setText("Auto (no mic)")
                 self._btn_mic_mode.setStyleSheet(self._STYLE_MIC_OFF)
-                self.statusBar().showMessage("ERROR: sounddevice not installed — auto mode")
+                self._win.statusBar().showMessage("ERROR: sounddevice not installed — auto mode")
                 return
             device = self._selected_device()
             self._mic_source = MicrophoneSource(sr=MIC_SR, block_size=MIC_BLOCK_SIZE)
             try:
                 self._mic_source.start(device=device)
-                self.statusBar().showMessage(
+                self._win.statusBar().showMessage(
                     f"Mic active — device={device if device is not None else 'default'}, "
                     f"palette={self._current_palette}"
                 )
@@ -799,7 +807,7 @@ class RpiVJPanel(QMainWindow):
                 self._btn_mic_mode.setText("Auto (no mic)")
                 self._btn_mic_mode.setStyleSheet(self._STYLE_MIC_OFF)
                 self._mic_source = None
-                self.statusBar().showMessage(f"Mic error: {e} — auto mode")
+                self._win.statusBar().showMessage(f"Mic error: {e} — auto mode")
         else:
             self._btn_mic_mode.setText("Auto (no mic)")
             self._btn_mic_mode.setStyleSheet(self._STYLE_MIC_OFF)
@@ -848,7 +856,7 @@ class RpiVJPanel(QMainWindow):
 
     def _start_mic(self) -> None:
         if not HAS_SOUNDDEVICE:
-            self.statusBar().showMessage("ERROR: sounddevice not installed — auto mode")
+            self._win.statusBar().showMessage("ERROR: sounddevice not installed — auto mode")
             self._switch_to_auto_mode()
             return
 
@@ -858,14 +866,14 @@ class RpiVJPanel(QMainWindow):
             self._mic_source.start(device=device)
         except Exception as e:
             log.error("Mic : %s", e)
-            self.statusBar().showMessage(f"Mic error: {e} — auto mode")
+            self._win.statusBar().showMessage(f"Mic error: {e} — auto mode")
             self._switch_to_auto_mode()
             return
 
         self._build_live_layer()
         self._frame_idx = 0
         self._timer.start()
-        self.statusBar().showMessage(
+        self._win.statusBar().showMessage(
             f"Mic active — {len(self._effect_checkboxes)} effects, palette={self._current_palette}"
         )
 
@@ -895,7 +903,7 @@ class RpiVJPanel(QMainWindow):
         random.shuffle(checked)
         if not checked:
             self._led_layer = None
-            self.statusBar().showMessage("No effect selected")
+            self._win.statusBar().showMessage("No effect selected")
             return
 
         try:
@@ -924,7 +932,7 @@ class RpiVJPanel(QMainWindow):
         except Exception as e:
             log.error("LiveVJingLayer : %s", e)
             self._led_layer = None
-            self.statusBar().showMessage(f"Layer error: {e}")
+            self._win.statusBar().showMessage(f"Layer error: {e}")
 
     def _hot_swap_effects(self, effects: list[str], time_pos: float) -> None:
         if self._led_layer is None:
@@ -974,7 +982,7 @@ class RpiVJPanel(QMainWindow):
         checked = self._get_checked_effects()
         if not checked:
             self._led_layer = None
-            self.statusBar().showMessage("No effect selected")
+            self._win.statusBar().showMessage("No effect selected")
             return
 
         try:
@@ -990,7 +998,7 @@ class RpiVJPanel(QMainWindow):
         else:
             self._build_live_layer()
 
-        self.statusBar().showMessage(
+        self._win.statusBar().showMessage(
             f"{len(checked)} effects, palette={self._current_palette}"
         )
 
@@ -1206,24 +1214,25 @@ class RpiVJPanel(QMainWindow):
             rb.setStyleSheet(self._fx_btn_style(checked=rb.isChecked(), active=name in visible))
 
     def _confirm_quit(self) -> None:
-        dlg = QMessageBox(self)
+        dlg = QMessageBox(self._win)
         dlg.setWindowTitle("Quit")
         dlg.setText("Quit the application?")
         dlg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         dlg.setDefaultButton(QMessageBox.StandardButton.No)
         dlg.setStyleSheet("font-size: 28px;")
         if dlg.exec() == QMessageBox.StandardButton.Yes:
-            self.close()
+            self._win.close()
 
     # ─── Nettoyage ───────────────────────────────────────────────────────
 
-    def closeEvent(self, event) -> None:  # noqa: N802
+    @Slot()
+    def _cleanup(self) -> None:
+        """Nettoyage à la fermeture — connecté à QApplication.aboutToQuit."""
         self._timer.stop()
         if self._mic_source:
             self._mic_source.stop()
         if self._esp32_socket:
             self._esp32_socket.close()
-        event.accept()
 
 
 # ─── Entrée ───────────────────────────────────────────────────────────────────
@@ -1259,8 +1268,9 @@ def main() -> None:
 
     _dbg("INIT: creating RpiVJPanel")
     window = RpiVJPanel(esp32_host=args.esp32)
+    app.aboutToQuit.connect(window._cleanup)
     _dbg("INIT: showFullScreen")
-    window.showFullScreen()
+    window._win.showFullScreen()
     _dbg("INIT: entering app.exec()")
     sys.exit(app.exec())
 
