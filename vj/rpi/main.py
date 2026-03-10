@@ -342,21 +342,35 @@ class LiveVJingLayer(VJingLayer):
 # lookup de virtual-override Python lors des repaints → élimine le crash
 # none_dealloc ARM64 causé par ce lookup sur les sous-classes Python de QWidget.
 
-_VU_METER_STYLE = """
-QProgressBar {
-    background-color: #1a1a1a;
-    border: 1px solid #333;
-    border-radius: 0px;
-    text-align: center;
-}
-QProgressBar::chunk {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0.00 rgb(0,170,0),
-        stop:0.60 rgb(170,170,0),
-        stop:0.85 rgb(255,100,0),
-        stop:1.00 rgb(255,0,0));
-}
-"""
+# qlineargradient dans ::chunk est relatif au chunk (pas à la barre entière) :
+# même à 10% de remplissage on voit vert→rouge. Correction : couleur solide
+# interpolée mise à jour dynamiquement, avec quantification par paliers de 20
+# pour limiter les appels setStyleSheet à ~5-10 fois par seconde max.
+_VU_BASE_STYLE = (
+    "QProgressBar { background-color: #1a1a1a; border: 1px solid #333;"
+    " border-radius: 0px; } "
+    "QProgressBar::chunk { background: "
+)
+
+
+def _compute_vu_colors() -> list[tuple[int, int, int]]:
+    """Précalcule la couleur RGB pour chaque valeur VU 0–1000 (vert→jaune→rouge)."""
+    colors: list[tuple[int, int, int]] = []
+    for v in range(1001):
+        t = v / 1000.0
+        if t <= 0.60:
+            r = int(t / 0.60 * 170)
+            colors.append((r, 170, 0))
+        elif t <= 0.85:
+            tt = (t - 0.60) / 0.25
+            colors.append((int(170 + tt * 85), int(170 * (1 - tt)), 0))
+        else:
+            tt = (t - 0.85) / 0.15
+            colors.append((255, int(100 * (1 - tt)), 0))
+    return colors
+
+
+_VU_COLORS: list[tuple[int, int, int]] = _compute_vu_colors()
 
 
 def _make_vu_meter(parent: QWidget | None = None) -> QProgressBar:
@@ -366,7 +380,7 @@ def _make_vu_meter(parent: QWidget | None = None) -> QProgressBar:
     bar.setValue(0)
     bar.setFixedHeight(20)
     bar.setTextVisible(False)
-    bar.setStyleSheet(_VU_METER_STYLE)
+    bar.setStyleSheet(_VU_BASE_STYLE + "rgb(0,170,0); }")
     return bar
 
 
@@ -1095,8 +1109,12 @@ class RpiVJPanel(QMainWindow):
         self._led_layer.live_ctx = ctx
         vu = max(0, min(1000, int(ctx["bass"] * 1000)))
         if vu != self._last_vu_int:
+            old_bucket = self._last_vu_int // 20
             self._last_vu_int = vu
             self._volume_bar.setValue(vu)
+            if vu // 20 != old_bucket:
+                r, g, b = _VU_COLORS[vu]
+                self._volume_bar.setStyleSheet(f"{_VU_BASE_STYLE}rgb({r},{g},{b}); }}")
 
         # time_pos monotone (jamais remis à zéro) → transitions sans hard cut
         time_pos = self._abs_frame_idx / FPS
@@ -1105,15 +1123,17 @@ class RpiVJPanel(QMainWindow):
             log.debug("[frame %d] C:render", self._frame_idx)
             led_img = self._led_layer.render(self._frame_idx, time_pos)
             log.debug("[frame %d] D:pil_compose", self._frame_idx)
-            # Composer l'RGBA sur fond noir pour préserver les fondus (convert("RGB")
-            # ignore silencieusement le canal alpha, rendant les transitions invisibles)
-            led_rgb = PILImage.new("RGB", led_img.size, (0, 0, 0))
-            led_rgb.paste(led_img, mask=led_img.getchannel("A"))
+            # Alpha blend RGBA→RGB via numpy : évite PIL.new + getchannel("A") + paste
+            # qui allouent/libèrent 2-3 PIL Images via PIL._imaging C ext par frame.
+            # Sur ARM64, ces deallocations accumulées corrompent le refcount de None
+            # (none_dealloc fatal), crash typique après ~9s / ~300 frames.
+            arr_rgba = np.asarray(led_img, dtype=np.uint8)  # view sur buffer PIL, pas de copie
 
             log.debug("[frame %d] E:numpy_upscale", self._frame_idx)
-            # Upscale numpy 4× NEAREST — écrit dans _display_arr (vue sur _display_rawbuf)
-            # → met à jour automatiquement le bytearray partagé avec _display_qimage
-            arr64 = np.asarray(led_rgb, dtype=np.uint8)           # view, pas de copie
+            # Alpha blend sur noir, puis upscale 4× NEAREST
+            arr64 = (arr_rgba[:, :, :3] * (arr_rgba[:, :, 3:4].astype(np.float32) / 255.0)).astype(
+                np.uint8
+            )
             idx = self._upscale_idx
             np.copyto(self._display_arr, arr64[idx][:, idx])
 
