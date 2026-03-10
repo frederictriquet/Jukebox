@@ -78,7 +78,7 @@ class _BlockedModule(_types.ModuleType):
         raise ImportError(f"Module {self.__name__!r} bloqué sur ARM64")
 
 
-for _blocked in ("noise", "moderngl"):
+for _blocked in ("noise", "moderngl", "PIL._imagingft"):
     if _blocked not in sys.modules:
         sys.modules[_blocked] = _BlockedModule(_blocked)
 
@@ -461,6 +461,7 @@ class RpiVJPanel(QObject):
         self._last_visible: frozenset[str] = frozenset()
         self._esp32_status_pending: str | None = None  # mis à jour depuis thread de fond
         self._last_vu_int: int = 0
+        self._ext_modules_prev: int = 0  # pour détecter les nouveaux C ext chargés
 
         # Facteur d'upscale pour la preview (LED_DISPLAY / LED_SIZE = 4)
         self._upscale = LED_DISPLAY // LED_SIZE
@@ -1148,6 +1149,14 @@ class RpiVJPanel(QObject):
             ctx["bass"] = max(ctx["bass"], 0.85)
             self._manual_beat = False
 
+        # Détecte les nouveaux C extensions chargés (ex: PIL._imagingft au 1er rendu texte)
+        n_ext = len([m for m in sys.modules.values()
+                     if getattr(m, "__file__", None) and ".so" in str(m.__file__)])
+        if n_ext != self._ext_modules_prev:
+            new_mods = [name for name, m in sys.modules.items()
+                        if getattr(m, "__file__", None) and ".so" in str(getattr(m, "__file__", ""))]
+            _dbg(f"[frame {self._frame_idx}] NEW_EXT total={n_ext}: {new_mods}")
+            self._ext_modules_prev = n_ext
         _dbg(f"[frame {self._frame_idx}] B:live_ctx+vu")
         self._led_layer.live_ctx = ctx
         vu = max(0, min(1000, int(ctx["bass"] * 1000)))
