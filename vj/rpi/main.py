@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import logging
 import faulthandler
+import os
 import random
 import socket
 import struct
@@ -85,6 +86,14 @@ from video_exporter.layers.vjing_layer import VJingLayer  # noqa: E402
 
 logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
+
+
+def _dbg(msg: str) -> None:
+    """Écrit directement sur fd 2 (stderr) sans passer par les buffers Python.
+    os.write() est un syscall — le message est visible dans le log même si
+    Python crashe immédiatement après (pas de perte sur abort C-level)."""
+    os.write(2, (msg + "\n").encode("utf-8", errors="replace"))
+
 
 LED_SIZE = 64
 LED_DISPLAY = 256
@@ -1119,7 +1128,7 @@ class RpiVJPanel(QMainWindow):
         if self._led_layer is None:
             return
 
-        log.debug("[frame %d] A:ctx", self._frame_idx)
+        _dbg(f"[frame {self._frame_idx}] A:ctx")
         if self._mic_mode and self._mic_source and self._mic_source.is_active:
             ctx = self._mic_source.get_audio_features(self._frame_idx)
         else:
@@ -1131,7 +1140,7 @@ class RpiVJPanel(QMainWindow):
             ctx["bass"] = max(ctx["bass"], 0.85)
             self._manual_beat = False
 
-        log.debug("[frame %d] B:live_ctx+vu", self._frame_idx)
+        _dbg(f"[frame {self._frame_idx}] B:live_ctx+vu")
         self._led_layer.live_ctx = ctx
         vu = max(0, min(1000, int(ctx["bass"] * 1000)))
         if vu != self._last_vu_int:
@@ -1144,35 +1153,28 @@ class RpiVJPanel(QMainWindow):
         time_pos = self._abs_frame_idx / FPS
 
         try:
-            log.debug("[frame %d] C:render", self._frame_idx)
+            _dbg(f"[frame {self._frame_idx}] C:render")
             led_img = self._led_layer.render(self._frame_idx, time_pos)
-            log.debug("[frame %d] D:pil_compose", self._frame_idx)
-            # Alpha blend RGBA→RGB via numpy : évite PIL.new + getchannel("A") + paste
-            # qui allouent/libèrent 2-3 PIL Images via PIL._imaging C ext par frame.
-            # Sur ARM64, ces deallocations accumulées corrompent le refcount de None
-            # (none_dealloc fatal), crash typique après ~9s / ~300 frames.
+            _dbg(f"[frame {self._frame_idx}] D:alpha_blend")
             arr_rgba = np.asarray(led_img, dtype=np.uint8)  # view sur buffer PIL, pas de copie
 
-            log.debug("[frame %d] E:numpy_upscale", self._frame_idx)
-            # Alpha blend sur noir, puis upscale 4× NEAREST
+            _dbg(f"[frame {self._frame_idx}] E:numpy_upscale")
             arr64 = (arr_rgba[:, :, :3] * (arr_rgba[:, :, 3:4].astype(np.float32) / 255.0)).astype(
                 np.uint8
             )
             idx = self._upscale_idx
             np.copyto(self._display_arr, arr64[idx][:, idx])
 
-            log.debug("[frame %d] F:esp32", self._frame_idx)
-            self._send_frame_to_esp32(arr64)  # passe le numpy array 64×64
+            _dbg(f"[frame {self._frame_idx}] F:esp32")
+            self._send_frame_to_esp32(arr64)
 
-            log.debug("[frame %d] G:setPixmap", self._frame_idx)
-            # Mise à jour en place : zéro création/destruction d'objets Python Qt
-            # _display_rawbuf → _display_qimage → _display_qpixmap (tous pré-alloués)
+            _dbg(f"[frame {self._frame_idx}] G:setPixmap")
             self._display_qpixmap.convertFromImage(self._display_qimage)
             self._led_label.setPixmap(self._display_qpixmap)
         except Exception as e:
             log.error("[Render] frame %d : %s", self._frame_idx, e)
 
-        log.debug("[frame %d] H:highlight", self._frame_idx)
+        _dbg(f"[frame {self._frame_idx}] H:highlight")
         self._highlight_active_effects(time_pos)
         total = self._led_layer.total_frames if self._led_layer else 1
         self._frame_idx = (self._frame_idx + 1) % total
@@ -1255,8 +1257,11 @@ def main() -> None:
     palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
     app.setPalette(palette)
 
+    _dbg("INIT: creating RpiVJPanel")
     window = RpiVJPanel(esp32_host=args.esp32)
+    _dbg("INIT: showFullScreen")
     window.showFullScreen()
+    _dbg("INIT: entering app.exec()")
     sys.exit(app.exec())
 
 
