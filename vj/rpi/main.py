@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import logging
 import faulthandler
-import os
 import random
 import socket
 import struct
@@ -92,12 +91,6 @@ from video_exporter.layers.vjing_layer import VJingLayer  # noqa: E402
 logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
-
-def _dbg(msg: str) -> None:
-    """Écrit directement sur fd 2 (stderr) sans passer par les buffers Python.
-    os.write() est un syscall — le message est visible dans le log même si
-    Python crashe immédiatement après (pas de perte sur abort C-level)."""
-    os.write(2, (msg + "\n").encode("utf-8", errors="replace"))
 
 
 LED_SIZE = 64
@@ -466,7 +459,6 @@ class RpiVJPanel(QObject):
         self._last_visible: frozenset[str] = frozenset()
         self._esp32_status_pending: str | None = None  # mis à jour depuis thread de fond
         self._last_vu_int: int = 0
-        self._ext_modules_prev: int = 0  # pour détecter les nouveaux C ext chargés
 
         # Facteur d'upscale pour la preview (LED_DISPLAY / LED_SIZE = 4)
         self._upscale = LED_DISPLAY // LED_SIZE
@@ -1142,7 +1134,6 @@ class RpiVJPanel(QObject):
         if self._led_layer is None:
             return
 
-        _dbg(f"[frame {self._frame_idx}] A:ctx")
         if self._mic_mode and self._mic_source and self._mic_source.is_active:
             ctx = self._mic_source.get_audio_features(self._frame_idx)
         else:
@@ -1154,15 +1145,6 @@ class RpiVJPanel(QObject):
             ctx["bass"] = max(ctx["bass"], 0.85)
             self._manual_beat = False
 
-        # Détecte les nouveaux C extensions chargés (ex: PIL._imagingft au 1er rendu texte)
-        n_ext = len([m for m in sys.modules.values()
-                     if getattr(m, "__file__", None) and ".so" in str(m.__file__)])
-        if n_ext != self._ext_modules_prev:
-            new_mods = [name for name, m in sys.modules.items()
-                        if getattr(m, "__file__", None) and ".so" in str(getattr(m, "__file__", ""))]
-            _dbg(f"[frame {self._frame_idx}] NEW_EXT total={n_ext}: {new_mods}")
-            self._ext_modules_prev = n_ext
-        _dbg(f"[frame {self._frame_idx}] B:live_ctx+vu")
         self._led_layer.live_ctx = ctx
         vu = max(0, min(1000, int(ctx["bass"] * 1000)))
         if vu != self._last_vu_int:
@@ -1175,28 +1157,18 @@ class RpiVJPanel(QObject):
         time_pos = self._abs_frame_idx / FPS
 
         try:
-            _dbg(f"[frame {self._frame_idx}] C:render")
             led_img = self._led_layer.render(self._frame_idx, time_pos)
-            _dbg(f"[frame {self._frame_idx}] D:alpha_blend")
             arr_rgba = np.asarray(led_img, dtype=np.uint8)  # view sur buffer PIL, pas de copie
-
-            _dbg(f"[frame {self._frame_idx}] E:numpy_upscale")
             arr64 = (arr_rgba[:, :, :3] * (arr_rgba[:, :, 3:4].astype(np.float32) / 255.0)).astype(
                 np.uint8
             )
             idx = self._upscale_idx
             np.copyto(self._display_arr, arr64[idx][:, idx])
-
-            _dbg(f"[frame {self._frame_idx}] F:esp32")
             self._send_frame_to_esp32(arr64)
-
-            _dbg(f"[frame {self._frame_idx}] G:setPixmap")
             self._display_qpixmap.convertFromImage(self._display_qimage)
             self._led_label.setPixmap(self._display_qpixmap)
         except Exception as e:
             log.error("[Render] frame %d : %s", self._frame_idx, e)
-
-        _dbg(f"[frame {self._frame_idx}] H:highlight")
         self._highlight_active_effects(time_pos)
         total = self._led_layer.total_frames if self._led_layer else 1
         self._frame_idx = (self._frame_idx + 1) % total
@@ -1280,12 +1252,9 @@ def main() -> None:
     palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
     app.setPalette(palette)
 
-    _dbg("INIT: creating RpiVJPanel")
     window = RpiVJPanel(esp32_host=args.esp32)
     app.aboutToQuit.connect(window._cleanup)
-    _dbg("INIT: showFullScreen")
     window._win.showFullScreen()
-    _dbg("INIT: entering app.exec()")
     sys.exit(app.exec())
 
 
