@@ -62,12 +62,27 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from video_exporter.layers.vjing_layer import VJingLayer
-import video_exporter.layers.vjing_layer as _vjl_mod
+# ── Blocage des C extensions ARM64 bugguées ──────────────────────────────────
+# noise._perlin / noise._simplex et moderngl.mgl ont des bugs d'initialisation
+# (PyInit_*) sur ARM64 qui corrompent le refcount de None même sans être appelés.
+# On injecte des faux modules dans sys.modules AVANT que vjing_layer.py ne fasse
+# `from noise import pnoise2, snoise2` (niveau module), afin que les vraies
+# C extensions ne soient jamais chargées.
+import types as _types
 
-# Désactive noise._perlin / noise._simplex sur ARM (alignement mémoire défectueux
-# → none_dealloc fatal). Force le fallback Python _pseudo_perlin2d().
-_vjl_mod.NOISE_AVAILABLE = False
+
+class _BlockedModule(_types.ModuleType):
+    """Module fantôme : tout accès d'attribut lève ImportError → fallbacks activés."""
+
+    def __getattr__(self, name: str) -> object:
+        raise ImportError(f"Module {self.__name__!r} bloqué sur ARM64")
+
+
+for _blocked in ("noise", "moderngl"):
+    if _blocked not in sys.modules:
+        sys.modules[_blocked] = _BlockedModule(_blocked)
+
+from video_exporter.layers.vjing_layer import VJingLayer  # noqa: E402
 
 logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
