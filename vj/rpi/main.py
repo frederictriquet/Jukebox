@@ -54,7 +54,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
-    QProgressBar,
     QPushButton,
     QSlider,
     QSplitter,
@@ -342,15 +341,13 @@ class LiveVJingLayer(VJingLayer):
 # lookup de virtual-override Python lors des repaints → élimine le crash
 # none_dealloc ARM64 causé par ce lookup sur les sous-classes Python de QWidget.
 
-# qlineargradient dans ::chunk est relatif au chunk (pas à la barre entière) :
-# même à 10% de remplissage on voit vert→rouge. Correction : couleur solide
-# interpolée mise à jour dynamiquement, avec quantification par paliers de 20
-# pour limiter les appels setStyleSheet à ~5-10 fois par seconde max.
-_VU_BASE_STYLE = (
-    "QProgressBar { background-color: #1a1a1a; border: 1px solid #333;"
-    " border-radius: 0px; } "
-    "QProgressBar::chunk { background: "
-)
+# VU Meter via QLabel (pas QProgressBar) :
+# QProgressBar.setValue() émet valueChanged(int) → shiboken6 ARM64 corrompt None.
+# QLabel.setStyleSheet() avec qlineargradient dynamique :
+#   - coordonnées relatives au widget entier (pas à un ::chunk) → dégradé correct
+#   - aucun signal émis → pas de dispatch ARM64 bugué
+# Mise à jour par paliers de 20 (0-1000) pour ~5-10 setStyleSheet/s max.
+_VU_LABEL_BORDER = "QLabel { border: 1px solid #333; border-radius: 0px; "
 
 
 def _compute_vu_colors() -> list[tuple[int, int, int]]:
@@ -373,14 +370,43 @@ def _compute_vu_colors() -> list[tuple[int, int, int]]:
 _VU_COLORS: list[tuple[int, int, int]] = _compute_vu_colors()
 
 
-def _make_vu_meter(parent: QWidget | None = None) -> QProgressBar:
-    """Crée un QProgressBar stylé sans sous-classe Python."""
-    bar = QProgressBar(parent)
-    bar.setRange(0, 1000)
-    bar.setValue(0)
+def _vu_label_style(vu: int) -> str:
+    """Construit le style QLabel pour la valeur VU donnée (0-1000).
+
+    Gradient vert→jaune→rouge sur la partie remplie, fond sombre sur le reste.
+    Les coordonnées qlineargradient sont relatives au QLabel entier.
+    """
+    if vu <= 0:
+        return _VU_LABEL_BORDER + "background: #1a1a1a; }"
+    split = vu / 1000.0
+    r, g, b = _VU_COLORS[vu]
+    # Stops du gradient jusqu'au split (couleurs en position absolue dans la barre)
+    stops: list[str] = ["stop:0.000 rgb(0,170,0)"]
+    if split > 0.600:
+        stops.append("stop:0.600 rgb(170,170,0)")
+    if split > 0.850:
+        stops.append("stop:0.850 rgb(255,100,0)")
+    stops.append(f"stop:{split:.3f} rgb({r},{g},{b})")
+    # Transition abrupte vers le fond sombre
+    if split < 0.999:
+        dark = min(split + 0.002, 1.0)
+        stops.append(f"stop:{dark:.3f} #1a1a1a")
+        stops.append("stop:1.000 #1a1a1a")
+    return (
+        f"{_VU_LABEL_BORDER}"
+        f"background: qlineargradient(x1:0, y1:0, x2:1, y2:0, {', '.join(stops)}); }}"
+    )
+
+
+def _make_vu_meter(parent: QWidget | None = None) -> QLabel:
+    """Crée un QLabel stylé en VU meter.
+
+    Utilise un QLabel plutôt qu'un QProgressBar : setValue() sur QProgressBar
+    émet valueChanged(int) qui passe par shiboken6 ARM64 et corrompt None.
+    """
+    bar = QLabel(parent)
     bar.setFixedHeight(20)
-    bar.setTextVisible(False)
-    bar.setStyleSheet(_VU_BASE_STYLE + "rgb(0,170,0); }")
+    bar.setStyleSheet(_vu_label_style(0))
     return bar
 
 
@@ -1111,10 +1137,8 @@ class RpiVJPanel(QMainWindow):
         if vu != self._last_vu_int:
             old_bucket = self._last_vu_int // 20
             self._last_vu_int = vu
-            self._volume_bar.setValue(vu)
             if vu // 20 != old_bucket:
-                r, g, b = _VU_COLORS[vu]
-                self._volume_bar.setStyleSheet(f"{_VU_BASE_STYLE}rgb({r},{g},{b}); }}")
+                self._volume_bar.setStyleSheet(_vu_label_style(vu))
 
         # time_pos monotone (jamais remis à zéro) → transitions sans hard cut
         time_pos = self._abs_frame_idx / FPS
