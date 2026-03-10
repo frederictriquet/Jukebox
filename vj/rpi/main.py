@@ -75,6 +75,10 @@ class _BlockedModule(_types.ModuleType):
     """Module fantôme : tout accès d'attribut lève ImportError → fallbacks activés."""
 
     def __getattr__(self, name: str) -> object:
+        # Les dunders (__file__, __spec__…) doivent lever AttributeError (standard
+        # Python) pour que getattr(m, "__file__", None) fonctionne correctement.
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
         raise ImportError(f"Module {self.__name__!r} bloqué sur ARM64")
 
 
