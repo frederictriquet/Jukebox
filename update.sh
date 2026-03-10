@@ -1,6 +1,5 @@
 #!/bin/bash
+set -e
 git pull
-python -m venv .venv
-source .venv/bin/activate
+uv venv --python 3.13
 uv sync
-

@@ -86,6 +86,7 @@ for _blocked in ("noise", "moderngl", "PIL._imagingft"):
     if _blocked not in sys.modules:
         sys.modules[_blocked] = _BlockedModule(_blocked)
 
+
 from video_exporter.layers.vjing_layer import VJingLayer  # noqa: E402
 
 logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
