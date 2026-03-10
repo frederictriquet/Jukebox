@@ -18,6 +18,8 @@ dependencies = [
     "scipy>=1.11.0",
     "femtologger>=0.1.0",
     "pyrubberband>=0.4.0",
+    "Pillow>=10.0.0",
+    "sounddevice>=0.4.6",
 ]
 
 [project.optional-dependencies]
@@ -31,11 +33,9 @@ ml-xgboost = [
     "xgboost>=2.0.0",
 ]
 video = [
-    "Pillow>=10.0.0",
     "opencv-python>=4.8.0",  # Optional, for video background layer
-    "noise>=1.2.2",  # Perlin/Simplex noise for VJing effects
-    "moderngl>=5.8.0",  # GPU shaders for heavy VJing effects
-    "sounddevice>=0.4.6",  # Microphone capture for live VJing playground
+    "noise>=1.2.2",  # Perlin/Simplex noise for VJing effects (désactivé sur ARM64)
+    "moderngl>=5.8.0",  # GPU shaders for heavy VJing effects (désactivé sur ARM64)
 ]
 dev = [
     "pytest>=7.4.0",
