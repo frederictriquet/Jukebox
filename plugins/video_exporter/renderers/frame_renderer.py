@@ -39,6 +39,7 @@ class FrameRenderer:
         transitions_enabled: bool = True,
         simultaneous_effects: int = 1,
         use_all_effects: bool = False,
+        enabled_post_processing: list[str] | None = None,
         intro_video_path: str = "",
         rng_seed: int = 42,
     ) -> None:
@@ -87,6 +88,7 @@ class FrameRenderer:
         self.transitions_enabled = transitions_enabled
         self.simultaneous_effects = simultaneous_effects
         self.use_all_effects = use_all_effects
+        self.enabled_post_processing = enabled_post_processing or []
         self.intro_video_path = intro_video_path
         self.rng_seed = rng_seed
 
@@ -195,6 +197,7 @@ class FrameRenderer:
                     transitions_enabled=self.transitions_enabled,
                     simultaneous_effects=self.simultaneous_effects,
                     use_all_effects=self.use_all_effects,
+                    enabled_post_processing=self.enabled_post_processing,
                     rng_seed=self.rng_seed,
                 )
                 self.layers.append(layer)

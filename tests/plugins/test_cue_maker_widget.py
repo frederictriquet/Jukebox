@@ -5,7 +5,8 @@ from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 import pytest
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QMessageBox, QWidget
 
 from plugins.cue_maker.model import CueEntry
 from plugins.cue_maker.widgets.cue_maker_widget import CueMakerWidget
@@ -21,9 +22,46 @@ def mock_context():  # type: ignore
     return context
 
 
+class _FakePlotWidget:
+    """Minimal stub for pg.PlotWidget used by WaveformWidget."""
+
+    def addItem(self, item: object) -> None:  # noqa: N802
+        pass
+
+    def removeItem(self, item: object) -> None:  # noqa: N802
+        pass
+
+    def update(self) -> None:
+        pass
+
+
+class _FakeWaveformWidget(QWidget):
+    """Stub replacing pyqtgraph-based WaveformWidget to avoid SIGSEGV in tests."""
+
+    position_clicked = Signal(float)
+
+    def __init__(self, config: object = None) -> None:
+        super().__init__()
+        self.expected_length: int = 0
+        self.plot_widget = _FakePlotWidget()
+
+    def clear_waveform(self) -> None:
+        pass
+
+    def set_position(self, position: float) -> None:
+        pass
+
+    def display_waveform(self, data: object) -> None:
+        pass
+
+
 @pytest.fixture(autouse=True)
-def _no_waveform_worker(monkeypatch):  # type: ignore
-    """Prevent waveform worker from starting in tests."""
+def _no_waveform(monkeypatch):  # type: ignore
+    """Replace WaveformWidget with a safe stub and disable waveform worker."""
+    monkeypatch.setattr(
+        "plugins.waveform_visualizer.WaveformWidget",
+        _FakeWaveformWidget,
+    )
     monkeypatch.setattr(
         "plugins.cue_maker.widgets.cue_maker_widget.CueMakerWidget._start_waveform_generation",
         lambda self, filepath: None,

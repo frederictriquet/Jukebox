@@ -538,6 +538,9 @@ class ExportDialog(QDialog):
             transitions_enabled=True,
             simultaneous_effects=self.simultaneous_effects_spin.value(),
             use_all_effects=self.use_all_effects_check.isChecked(),
+            enabled_post_processing=[
+                eid for eid, cb in self.pp_effect_checks.items() if cb.isChecked()
+            ],
             rng_seed=self._rng_seed,
         )
         self._refresh_preview_frame()
@@ -722,7 +725,7 @@ class ExportDialog(QDialog):
         self.fade_spin.setValue(1.0)
         self.fade_spin.setSingleStep(0.5)
         self.fade_spin.setSuffix(" s")
-        self.fade_spin.setToolTip("Durée du fade in/out audio et vidéo (0 = désactivé)")
+        self.fade_spin.setToolTip("Audio and video fade in/out duration (0 = disabled)")
         layout.addRow("Fade in/out:", self.fade_spin)
 
         # Output directory
@@ -807,18 +810,18 @@ class ExportDialog(QDialog):
 
         # Simultaneous effects selector
         simultaneous_layout = QHBoxLayout()
-        simultaneous_layout.addWidget(QLabel("    Simultanés:"))
+        simultaneous_layout.addWidget(QLabel("    Simultaneous:"))
         self.simultaneous_effects_spin = QSpinBox()
         self.simultaneous_effects_spin.setRange(1, 10)
         self.simultaneous_effects_spin.setValue(1)
         self.simultaneous_effects_spin.setToolTip(
-            "Nombre d'effets visibles en même temps (1 = un seul effet à la fois)"
+            "Number of effects visible at the same time (1 = one effect at a time)"
         )
         simultaneous_layout.addWidget(self.simultaneous_effects_spin)
-        self.use_all_effects_check = QCheckBox("Tous (30 effets)")
+        self.use_all_effects_check = QCheckBox("All (30 effects)")
         self.use_all_effects_check.setChecked(False)
         self.use_all_effects_check.setToolTip(
-            "Utiliser les 30 effets disponibles au lieu de ceux définis par le genre"
+            "Use all 30 available effects instead of genre-based ones"
         )
         simultaneous_layout.addWidget(self.use_all_effects_check)
         simultaneous_layout.addStretch()
@@ -856,6 +859,31 @@ class ExportDialog(QDialog):
         layers_layout.addLayout(intro_video_layout)
 
         layout.addWidget(layers_group)
+
+        # Post-processing effects group
+        pp_group = QGroupBox("Post-Processing Effects")
+        pp_layout = QVBoxLayout(pp_group)
+        pp_layout.setSpacing(4)
+        pp_layout.setContentsMargins(12, 16, 12, 12)
+
+        pp_hint = QLabel("Enable effects to make them available. At most one is applied at a time.")
+        pp_hint.setStyleSheet("color: #888; font-size: 10px;")
+        pp_hint.setWordWrap(True)
+        pp_layout.addWidget(pp_hint)
+
+        from plugins.video_exporter.layers.vjing_layer import VJingLayer as _VjPP
+
+        self.pp_effect_checks: dict[str, QCheckBox] = {}
+        for effect_id in _VjPP.AVAILABLE_EFFECTS:
+            if effect_id not in _VjPP.POST_PROCESSING_EFFECTS:
+                continue
+            display_name, _cat = _VjPP.EFFECT_CATALOG[effect_id]
+            cb = QCheckBox(display_name)
+            cb.setChecked(False)
+            pp_layout.addWidget(cb)
+            self.pp_effect_checks[effect_id] = cb
+
+        layout.addWidget(pp_group)
 
         # Effect intensities group
         intensity_group = QGroupBox("Effect Intensities")
@@ -1209,6 +1237,9 @@ class ExportDialog(QDialog):
                 transitions_enabled=True,
                 simultaneous_effects=self.simultaneous_effects_spin.value(),
                 use_all_effects=self.use_all_effects_check.isChecked(),
+                enabled_post_processing=[
+                    eid for eid, cb in self.pp_effect_checks.items() if cb.isChecked()
+                ],
                 rng_seed=self._rng_seed,
             )
 
@@ -1466,6 +1497,10 @@ class ExportDialog(QDialog):
             "simultaneous_effects": self.simultaneous_effects_spin.value(),
             # Use all effects
             "use_all_effects": self.use_all_effects_check.isChecked(),
+            # Post-processing effects pool (only enabled ones are usable)
+            "enabled_post_processing": [
+                eid for eid, cb in self.pp_effect_checks.items() if cb.isChecked()
+            ],
             # Fade in/out
             "fade_duration": self.fade_spin.value(),
             # Intro video overlay

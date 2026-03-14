@@ -134,6 +134,7 @@ class VideoExportWorker(QThread):
                 transitions_enabled=self.config.get("transitions_enabled", True),
                 simultaneous_effects=self.config.get("simultaneous_effects", 1),
                 use_all_effects=self.config.get("use_all_effects", False),
+                enabled_post_processing=self.config.get("enabled_post_processing", []),
                 intro_video_path=self.config.get("intro_video_path", ""),
                 rng_seed=self.config.get("rng_seed", 42),
             )

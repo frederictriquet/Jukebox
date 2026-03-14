@@ -443,6 +443,7 @@ class VJingLayer(BaseVisualLayer):
         effect_cycle_duration: float = 8.0,
         simultaneous_effects: int = 1,
         use_all_effects: bool = False,
+        enabled_post_processing: list[str] | None = None,
         use_gpu: bool = True,
         rng_seed: int = 42,
         **kwargs: Any,
@@ -497,6 +498,7 @@ class VJingLayer(BaseVisualLayer):
         self.effect_cycle_duration = effect_cycle_duration
         self.simultaneous_effects = max(1, min(10, simultaneous_effects))
         self.use_all_effects = use_all_effects
+        self.enabled_post_processing: set[str] = set(enabled_post_processing or [])
         self.use_gpu = use_gpu
         self._gpu_renderer: GPUShaderRenderer | None = None
         # Cache for pre-rendered GPU frames: {frame_idx: {effect_name: Image}}
@@ -1047,8 +1049,11 @@ class VJingLayer(BaseVisualLayer):
         if self.active_effects is not self._cached_active_effects:
             all_special = self.POST_PROCESSING_EFFECTS | self.FINAL_PASS_EFFECTS
             self._cached_generators = [e for e in self.active_effects if e not in all_special]
+            # Post-processors come exclusively from enabled_post_processing (UI checkboxes),
+            # not from genre/preset mappings. Order follows AVAILABLE_EFFECTS definition.
             self._cached_post_processors = [
-                e for e in self.active_effects if e in self.POST_PROCESSING_EFFECTS
+                e for e in self.AVAILABLE_EFFECTS
+                if e in self.enabled_post_processing
             ]
             self._cached_final_pass = [
                 e for e in self.active_effects if e in self.FINAL_PASS_EFFECTS
@@ -1080,15 +1085,31 @@ class VJingLayer(BaseVisualLayer):
                     continue
                 img.alpha_composite(effect_img)
 
-        # Second: apply post-processing effects on the composite image
-        for effect_name in post_processors:
-            self._current_intensity = self._get_intensity(effect_name)
-            effect_method = getattr(self, f"_render_{effect_name}", None)
-            if effect_method:
-                try:
-                    effect_method(img, frame_idx, time_pos, ctx)
-                except Exception:
-                    logging.exception("[VJingLayer] Post-proc '%s' failed (frame %d)", effect_name, frame_idx)
+        # Second: apply at most ONE post-processing effect on the composite image.
+        # The active PP cycles over time; energy below 30% of peak → no PP applied.
+        if post_processors:
+            pp_cycle = self.effect_cycle_duration
+            pp_count = len(post_processors)
+            # Add 1 extra "slot" for a no-effect gap
+            total_slots = pp_count + 1
+            slot_idx = int(time_pos / pp_cycle) % total_slots
+            # Last slot = no post-processing
+            if slot_idx < pp_count:
+                energy = ctx.get("energy", 0.0)
+                peak = max(self.energy) if self.energy else 1.0
+                # Skip PP during quiet passages (below 30% of peak energy)
+                if peak > 0.0 and energy >= 0.3 * peak:
+                    effect_name = post_processors[slot_idx]
+                    self._current_intensity = self._get_intensity(effect_name)
+                    effect_method = getattr(self, f"_render_{effect_name}", None)
+                    if effect_method:
+                        try:
+                            effect_method(img, frame_idx, time_pos, ctx)
+                        except Exception:
+                            logging.exception(
+                                "[VJingLayer] Post-proc '%s' failed (frame %d)",
+                                effect_name, frame_idx,
+                            )
 
         # Third: final-pass effects (bloom etc.) on the fully composited image
         for effect_name in final_pass:
@@ -1593,7 +1614,7 @@ class VJingLayer(BaseVisualLayer):
     # GEOMETRIC EFFECTS
     # ========================================================================
 
-    @vj_effect("Kaleidoscope", "Géométriques")
+    @vj_effect("Kaleidoscope", "Geometric")
     def _render_kaleidoscope(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
@@ -1639,7 +1660,7 @@ class VJingLayer(BaseVisualLayer):
 
                 draw.polygon(points, outline=(r, g, b, alpha))
 
-    @vj_effect("Lissajous", "Géométriques")
+    @vj_effect("Lissajous", "Geometric")
     def _render_lissajous(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
@@ -1680,7 +1701,7 @@ class VJingLayer(BaseVisualLayer):
             b_ = int(c0[2] * (1 - blend) + c1[2] * blend)
             draw.line([points[i], points[i + 1]], fill=(r, g, b_, 150), width=line_w)
 
-    @vj_effect("Tunnel", "Géométriques")
+    @vj_effect("Tunnel", "Geometric")
     def _render_tunnel(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render infinite tunnel effect with LFO modulation."""
         draw = ImageDraw.Draw(img)
@@ -1748,7 +1769,7 @@ class VJingLayer(BaseVisualLayer):
 
             draw.line(points, fill=(r, g, b, alpha), width=line_w)
 
-    @vj_effect("Spiral", "Géométriques")
+    @vj_effect("Spiral", "Geometric")
     def _render_spiral(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render animated spiral effect with LFO modulation."""
         draw = ImageDraw.Draw(img)
@@ -2399,7 +2420,7 @@ class VJingLayer(BaseVisualLayer):
     # RADAR EFFECT
     # ========================================================================
 
-    @vj_effect("Radar", "Géométriques")
+    @vj_effect("Radar", "Geometric")
     def _render_radar(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render radar sweep effect.
 
@@ -3872,7 +3893,7 @@ class VJingLayer(BaseVisualLayer):
     # Moiré effect - Interference patterns from overlapping rotating grids
     # =========================================================================
 
-    @vj_effect("Moiré", "Géométriques")
+    @vj_effect("Moiré", "Geometric")
     def _render_moire(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render moiré interference from concentric circles with offset centers.
 
@@ -4003,7 +4024,7 @@ class VJingLayer(BaseVisualLayer):
             }
         )
 
-    @vj_effect("Circuit", "Géométriques")
+    @vj_effect("Circuit", "Geometric")
     def _render_circuit(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render animated circuit board with light signals traveling along traces.
 
@@ -4507,7 +4528,7 @@ class VJingLayer(BaseVisualLayer):
         # Active wave ripples triggered by beats: (start_time, cx, cy)
         self.grid_ripples: list[tuple[float, float, float]] = []
 
-    @vj_effect("Grid", "Géométriques")
+    @vj_effect("Grid", "Geometric")
     def _render_grid(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Render dynamic grid deformed by beat-triggered sine waves."""
         draw = ImageDraw.Draw(img)
@@ -4902,7 +4923,7 @@ class VJingLayer(BaseVisualLayer):
         result = Image.fromarray(np.dstack([rgb, alpha]), "RGBA")
         img.paste(result, (0, 0), result)
 
-    @vj_effect("Sphere", "Géométriques")
+    @vj_effect("Sphere", "Geometric")
     def _render_sphere(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:

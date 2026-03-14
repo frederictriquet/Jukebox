@@ -44,6 +44,8 @@ class ShortcutMixin:
         """Register all shortcuts. Calls the plugin-specific implementation."""
         if not self.shortcut_manager:
             return
+        # Load config from database (overrides config.yaml values if present)
+        self._reload_plugin_config()
         self._register_plugin_shortcuts()
 
     def _register_plugin_shortcuts(self) -> None:
@@ -57,10 +59,7 @@ class ShortcutMixin:
         # Unregister all current shortcuts
         self._unregister_all_shortcuts()
 
-        # Reload config from database (if implemented)
-        self._reload_plugin_config()
-
-        # Re-register shortcuts with new config
+        # Re-register shortcuts with new config (reloads from database first)
         self._register_all_shortcuts()
 
     def _unregister_all_shortcuts(self) -> None:

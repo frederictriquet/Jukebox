@@ -76,6 +76,26 @@ class TestRegisterShortcuts:
 
         mock_register.assert_called_once()
 
+    def test_register_all_shortcuts_reloads_config_before_registering(self) -> None:
+        """_register_all_shortcuts calls _reload_plugin_config before _register_plugin_shortcuts."""
+        plugin = ConcretePlugin()
+        plugin.shortcut_manager = MagicMock()
+        call_order: list[str] = []
+
+        with (
+            patch.object(
+                plugin, "_reload_plugin_config",
+                side_effect=lambda: call_order.append("reload"),
+            ),
+            patch.object(
+                plugin, "_register_plugin_shortcuts",
+                side_effect=lambda: call_order.append("register"),
+            ),
+        ):
+            plugin._register_all_shortcuts()
+
+        assert call_order == ["reload", "register"]
+
 
 class TestRegisterPluginShortcutsNotImplemented:
     """Tests that the base ShortcutMixin raises NotImplementedError."""
@@ -100,7 +120,7 @@ class TestOnSettingsChanged:
     """Tests for _on_settings_changed."""
 
     def test_settings_changed_calls_steps_in_order(self) -> None:
-        """_on_settings_changed calls unregister, reload config, re-register in order."""
+        """_on_settings_changed calls unregister then re-register in order."""
         plugin = ConcretePlugin()
         plugin.shortcut_manager = MagicMock()
         call_order: list[str] = []
@@ -108,20 +128,16 @@ class TestOnSettingsChanged:
         def record_unregister() -> None:
             call_order.append("unregister")
 
-        def record_reload() -> None:
-            call_order.append("reload")
-
         def record_register() -> None:
             call_order.append("register")
 
         with (
             patch.object(plugin, "_unregister_all_shortcuts", side_effect=record_unregister),
-            patch.object(plugin, "_reload_plugin_config", side_effect=record_reload),
             patch.object(plugin, "_register_all_shortcuts", side_effect=record_register),
         ):
             plugin._on_settings_changed()
 
-        assert call_order == ["unregister", "reload", "register"]
+        assert call_order == ["unregister", "register"]
 
     def test_settings_changed_calls_unregister(self) -> None:
         """_on_settings_changed calls _unregister_all_shortcuts."""
@@ -137,15 +153,15 @@ class TestOnSettingsChanged:
 
         mock_unreg.assert_called_once()
 
-    def test_settings_changed_calls_reload_config(self) -> None:
-        """_on_settings_changed calls _reload_plugin_config."""
+    def test_settings_changed_reloads_config_via_register_all(self) -> None:
+        """_on_settings_changed triggers config reload via _register_all_shortcuts."""
         plugin = ConcretePlugin()
         plugin.shortcut_manager = MagicMock()
 
         with (
             patch.object(plugin, "_unregister_all_shortcuts"),
             patch.object(plugin, "_reload_plugin_config") as mock_reload,
-            patch.object(plugin, "_register_all_shortcuts"),
+            patch.object(plugin, "_register_plugin_shortcuts"),
         ):
             plugin._on_settings_changed()
 
