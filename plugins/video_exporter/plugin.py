@@ -10,12 +10,13 @@ from PySide6.QtWidgets import QPushButton
 
 from jukebox.core.constants import StatusColors
 from jukebox.core.event_bus import Events
+from jukebox.core.settings_sync_mixin import SettingsSyncMixin, SyncedSetting
 
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
 
 
-class VideoExporterPlugin:
+class VideoExporterPlugin(SettingsSyncMixin):
     """Export video clips from loop sections with visual layers."""
 
     name = "video_exporter"
@@ -131,49 +132,27 @@ class VideoExporterPlugin:
         if self.export_button:
             self.export_button.setVisible(False)
 
+    _synced_settings = [
+        SyncedSetting("default_resolution", str),
+        SyncedSetting("output_directory", str),
+        SyncedSetting("video_clips_folder", str),
+        SyncedSetting("waveform_bass_color", str),
+        SyncedSetting("waveform_mid_color", str),
+        SyncedSetting("waveform_treble_color", str),
+        SyncedSetting("waveform_cursor_color", str),
+        SyncedSetting("default_fps", int),
+        SyncedSetting("waveform_height_ratio", float),
+        SyncedSetting("waveform_enabled", bool),
+        SyncedSetting("text_enabled", bool),
+        SyncedSetting("dynamics_enabled", bool),
+        SyncedSetting("vjing_enabled", bool),
+        SyncedSetting("video_background_enabled", bool),
+    ]
+
     def _on_settings_changed(self) -> None:
         """Reload config when settings change."""
         logging.info("[Video Exporter] Settings changed, reloading config from database")
-
-        config = self.context.config.video_exporter
-
-        # Reload string settings
-        for key in (
-            "default_resolution",
-            "output_directory",
-            "video_clips_folder",
-            "waveform_bass_color",
-            "waveform_mid_color",
-            "waveform_treble_color",
-            "waveform_cursor_color",
-        ):
-            value = self.context.get_setting("video_exporter", key, str, getattr(config, key))
-            setattr(config, key, value)
-            logging.debug(f"[Video Exporter] {key}: {value}")
-
-        # Reload int settings
-        config.default_fps = self.context.get_setting(
-            "video_exporter", "default_fps", int, config.default_fps
-        )
-        logging.debug(f"[Video Exporter] default_fps: {config.default_fps}")
-
-        # Reload float settings
-        config.waveform_height_ratio = self.context.get_setting(
-            "video_exporter", "waveform_height_ratio", float, config.waveform_height_ratio
-        )
-        logging.debug(f"[Video Exporter] waveform_height_ratio: {config.waveform_height_ratio}")
-
-        # Reload boolean settings
-        for key in (
-            "waveform_enabled",
-            "text_enabled",
-            "dynamics_enabled",
-            "vjing_enabled",
-            "video_background_enabled",
-        ):
-            value = self.context.get_setting("video_exporter", key, bool, getattr(config, key))
-            setattr(config, key, value)
-            logging.debug(f"[Video Exporter] {key}: {value}")
+        self._sync_settings_from_db()
 
     def _show_export_dialog(self) -> None:
         """Show the export configuration dialog."""

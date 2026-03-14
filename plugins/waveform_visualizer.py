@@ -19,12 +19,13 @@ from jukebox.core.constants import (
     WORKER_WAIT_TIMEOUT_MS,
 )
 from jukebox.core.event_bus import Events
+from jukebox.core.settings_sync_mixin import SettingsSyncMixin, SyncedSetting
 
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
 
 
-class WaveformVisualizerPlugin:
+class WaveformVisualizerPlugin(SettingsSyncMixin):
     """Visualize track waveforms."""
 
     name = "waveform_visualizer"
@@ -361,26 +362,20 @@ class WaveformVisualizerPlugin:
                 pass
         # Don't set to None - keep it alive so orphan workers can finish
 
+    _config_attr = "waveform"
+    _synced_settings = [
+        SyncedSetting("chunk_duration", int),
+        SyncedSetting("height", int),
+    ]
+
     def _on_settings_changed(self) -> None:
         """Reload config when settings change."""
         logging.info("[Waveform] Settings changed, reloading config from database")
+        self._sync_settings_from_db()
 
-        config = self.context.config.waveform
-
-        # Reload chunk_duration
-        config.chunk_duration = self.context.get_setting(
-            "waveform_visualizer", "chunk_duration", int, config.chunk_duration
-        )
-        logging.debug(f"[Waveform] chunk_duration: {config.chunk_duration}")
-
-        # Reload height
-        new_height = self.context.get_setting("waveform_visualizer", "height", int, config.height)
-        if new_height != config.height:
-            config.height = new_height
-            logging.debug(f"[Waveform] height: {config.height}")
-            # Update widget height if it exists
-            if self.waveform_widget:
-                self.waveform_widget.setFixedHeight(new_height)
+    def _after_settings_sync(self, config: Any) -> None:
+        if self.waveform_widget:
+            self.waveform_widget.setFixedHeight(config.height)
 
     def get_settings_schema(self) -> dict[str, Any]:
         """Return settings schema for configuration UI.

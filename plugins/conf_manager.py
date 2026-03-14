@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QHBoxLayout,
     QHeaderView,
     QLineEdit,
     QPushButton,
@@ -288,7 +289,7 @@ class ConfigDialog(QDialog):
         super().__init__()
         self.context = context
         self.setWindowTitle("Plugin Configuration")
-        self.setMinimumSize(800, 600)
+        self.setMinimumSize(1000, 700)
 
         # Apply minimal styling (works for both light and dark themes)
         # Don't hardcode colors - let Qt use the system palette
@@ -321,14 +322,14 @@ class ConfigDialog(QDialog):
         layout.addWidget(self.tabs)
 
         # Buttons
-        button_layout = QVBoxLayout()
-        save_btn = QPushButton("Save")
-        save_btn.clicked.connect(self._save_settings)
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
         cancel_btn = QPushButton("Cancel")
         cancel_btn.clicked.connect(self.reject)
-
-        button_layout.addWidget(save_btn)
+        save_btn = QPushButton("Save")
+        save_btn.clicked.connect(self._save_settings)
         button_layout.addWidget(cancel_btn)
+        button_layout.addWidget(save_btn)
         layout.addLayout(button_layout)
 
         self.setLayout(layout)

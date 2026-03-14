@@ -133,17 +133,20 @@ class TestParseFilename:
 class TestMakeDisplay:
     """Tests for DuplicateChecker._make_display (static)."""
 
-    def test_artist_and_title(self) -> None:
-        assert (
-            DuplicateChecker._make_display("Daft Punk", "Get Lucky", "x.mp3")
-            == "Daft Punk - Get Lucky"
-        )
+    def test_artist_and_title_with_filepath(self) -> None:
+        result = DuplicateChecker._make_display("Daft Punk", "Get Lucky", "x.mp3", "/music/x.mp3")
+        assert result == "Daft Punk - Get Lucky\n/music/x.mp3"
 
-    def test_title_only(self) -> None:
-        assert DuplicateChecker._make_display("", "Get Lucky", "x.mp3") == "Get Lucky"
+    def test_title_only_with_filepath(self) -> None:
+        result = DuplicateChecker._make_display("", "Get Lucky", "x.mp3", "/music/x.mp3")
+        assert result == "Get Lucky\n/music/x.mp3"
 
-    def test_filename_fallback(self) -> None:
-        assert DuplicateChecker._make_display("", "", "fallback.mp3") == "fallback.mp3"
+    def test_filename_fallback_with_filepath(self) -> None:
+        result = DuplicateChecker._make_display("", "", "fallback.mp3", "/music/fallback.mp3")
+        assert result == "fallback.mp3\n/music/fallback.mp3"
+
+    def test_no_filepath(self) -> None:
+        assert DuplicateChecker._make_display("Daft Punk", "Get Lucky", "x.mp3") == "Daft Punk - Get Lucky"
 
 
 class TestTokenize:
@@ -183,7 +186,7 @@ class TestPass1ExactMatch:
         )
         result = checker.check({"artist": "Daft Punk", "title": "Get Lucky", "filename": ""})
         assert result.status == DuplicateStatus.RED
-        assert result.match_info == "Daft Punk - Get Lucky"
+        assert result.match_info == "Daft Punk - Get Lucky\n/music/track.mp3"
 
     def test_exact_match_is_case_insensitive(self, tmp_path: Path) -> None:
         checker = make_checker(
@@ -273,7 +276,7 @@ class TestPass2FilenameParseMatch:
         )
         result = checker.check({"artist": "", "title": "", "filename": "Daft Punk - Get Lucky.mp3"})
         assert result.status == DuplicateStatus.RED
-        assert result.match_info == "Daft Punk - Get Lucky"
+        assert result.match_info == "Daft Punk - Get Lucky\n/music/track.mp3"
 
     def test_filename_title_only_match_orange(self, tmp_path: Path) -> None:
         """Filename without ' - ' → title-only lookup → ORANGE."""
@@ -471,7 +474,7 @@ class TestRecheckTracks:
         ]
         checker.recheck_tracks(tracks)
         assert tracks[0]["duplicate_status"] == "red"
-        assert tracks[0]["duplicate_match"] == "Daft Punk - Get Lucky"
+        assert tracks[0]["duplicate_match"] == "Daft Punk - Get Lucky\n/music/track.mp3"
 
     def test_recheck_returns_true_when_status_changed(self, tmp_path: Path) -> None:
         checker = make_checker(
@@ -500,7 +503,7 @@ class TestRecheckTracks:
                 "title": "Get Lucky",
                 "filename": "",
                 "duplicate_status": "red",
-                "duplicate_match": "Daft Punk - Get Lucky",
+                "duplicate_match": "Daft Punk - Get Lucky\n/music/track.mp3",
             }
         ]
         changed = checker.recheck_tracks(tracks)

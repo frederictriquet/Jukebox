@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QInputDialog,
     QMainWindow,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -124,6 +125,16 @@ class MainWindow(QMainWindow):
             stop_shortcut=self.config.shortcuts.stop,
         )
         layout.addWidget(self.controls, stretch=0)
+
+        # Import button (curating mode only)
+        self.import_button = QPushButton("Import")
+        self.import_button.setToolTip("Import tracks from curating directory")
+        self.import_button.setMaximumWidth(80)
+        self.import_button.clicked.connect(self._import_curating_directory)
+        self.import_button.setVisible(self.config.ui.mode == AppMode.CURATING.value)
+        controls_layout = self.controls.layout()
+        if controls_layout:
+            controls_layout.addWidget(self.import_button)
 
         # Set initial volume
         self.controls.set_volume(self.config.audio.default_volume)
@@ -357,6 +368,32 @@ class MainWindow(QMainWindow):
         else:
             logging.error(f"[MainWindow] Could not find next filepath: {next_filepath}")
 
+    def _import_curating_directory(self) -> None:
+        """Import tracks from the configured curating directory."""
+        from jukebox.utils.scanner import FileScanner
+
+        curating_dir = self.config.ui.curating_directory
+        if not curating_dir:
+            self.event_bus.emit(Events.STATUS_MESSAGE, message="No curating directory configured")
+            return
+        path = Path(curating_dir).expanduser()
+        if not path.is_dir():
+            self.event_bus.emit(
+                Events.STATUS_MESSAGE, message=f"Directory not found: {path}"
+            )
+            return
+        logging.info(f"[MainWindow] Importing from curating directory: {path}")
+        scanner = FileScanner(
+            self.database, self.config.audio.supported_formats, mode="curating"
+        )
+        added = scanner.scan_directory(path, recursive=True)
+        if added > 0:
+            self.event_bus.emit(Events.TRACKS_ADDED)
+        self.event_bus.emit(
+            Events.STATUS_MESSAGE,
+            message=f"Import: {added} new track(s)" if added else "No new tracks to import",
+        )
+
     def _on_files_dropped(self, paths: list[Path]) -> None:
         """Handle files/directories dropped on track list."""
         from jukebox.utils.metadata import MetadataExtractor
@@ -584,6 +621,9 @@ class MainWindow(QMainWindow):
         Args:
             mode: New application mode
         """
+        # Toggle import button visibility
+        self.import_button.setVisible(mode == AppMode.CURATING)
+
         # Only act if mode_switcher plugin is not loaded
         if "mode_switcher" not in self.plugin_manager.plugins:
             logging.info(f"[MainWindow] Mode changed to {mode.value} (no mode_switcher plugin)")

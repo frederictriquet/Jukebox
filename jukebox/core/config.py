@@ -11,7 +11,6 @@ class AudioConfig(BaseModel):
 
     default_volume: int = Field(ge=0, le=100, default=70)
     supported_formats: list[str] = ["mp3", "flac", "aiff", "aif", "wav"]
-    music_directory: Path = Field(default_factory=lambda: Path.home() / "Music")
 
 
 class UIConfig(BaseModel):
@@ -22,6 +21,7 @@ class UIConfig(BaseModel):
     window_height: int = Field(ge=480, default=768)
     theme: str = "dark"
     mode: str = "jukebox"
+    curating_directory: str = ""
     waveform_cache_size: int = Field(ge=10, le=10000, default=500)
 
 

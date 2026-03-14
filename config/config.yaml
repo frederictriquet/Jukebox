@@ -6,7 +6,6 @@ audio:
     - aiff
     - aif
     - wav
-  music_directory: ~/Music
 
 ui:
   window_title: "Jukebox"
@@ -14,6 +13,7 @@ ui:
   window_height: 768
   theme: "dark"
   mode: "curating" # "jukebox" or "curating"
+  curating_directory: ~/Music/Soulseek
 
 shortcuts:
   play_pause: "Space"

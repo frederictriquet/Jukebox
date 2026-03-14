@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from jukebox.core.event_bus import Events
+from jukebox.core.settings_sync_mixin import SettingsSyncMixin, SyncedSetting
 
 if TYPE_CHECKING:
     from jukebox.core.protocols import (
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
     )
 
 
-class PlaybackNavigationPlugin:
+class PlaybackNavigationPlugin(SettingsSyncMixin):
     """Navigate playback with keyboard shortcuts."""
 
     name = "playback_navigation"
@@ -260,35 +261,21 @@ class PlaybackNavigationPlugin:
         """Cleanup on application exit. No cleanup needed for this plugin."""
         ...
 
+    _synced_settings = [
+        SyncedSetting("seek_amount", int),
+        SyncedSetting(
+            "rapid_press_threshold",
+            int,
+            default_fn=lambda c: int(c.rapid_press_threshold * 1000),
+            transform=lambda v: v / 1000.0,
+        ),
+        SyncedSetting("max_seek_multiplier", int),
+    ]
+
     def _on_settings_changed(self) -> None:
         """Reload config when settings change."""
         logging.info("[Playback Navigation] Settings changed, reloading config from database")
-
-        config = self.context.config.playback_navigation
-
-        # Reload seek_amount
-        config.seek_amount = self.context.get_setting(
-            "playback_navigation", "seek_amount", int, config.seek_amount
-        )
-        logging.debug(f"[Playback Navigation] seek_amount: {config.seek_amount}")
-
-        # Reload rapid_press_threshold (stored in ms in DB, config expects seconds)
-        threshold_ms = self.context.get_setting(
-            "playback_navigation",
-            "rapid_press_threshold",
-            int,
-            int(config.rapid_press_threshold * 1000),
-        )
-        config.rapid_press_threshold = threshold_ms / 1000.0
-        logging.debug(
-            f"[Playback Navigation] rapid_press_threshold: {config.rapid_press_threshold}"
-        )
-
-        # Reload max_seek_multiplier
-        config.max_seek_multiplier = self.context.get_setting(
-            "playback_navigation", "max_seek_multiplier", int, config.max_seek_multiplier
-        )
-        logging.debug(f"[Playback Navigation] max_seek_multiplier: {config.max_seek_multiplier}")
+        self._sync_settings_from_db()
 
     def get_settings_schema(self) -> dict[str, Any]:
         """Return settings schema for configuration UI.

@@ -1,6 +1,5 @@
 """Pytest configuration and fixtures."""
 
-from pathlib import Path
 
 import pytest
 from PySide6.QtWidgets import QApplication
@@ -27,7 +26,6 @@ def test_config():
         audio=AudioConfig(
             default_volume=50,
             supported_formats=["mp3", "flac"],
-            music_directory=Path("/tmp/test_music"),
         ),
         ui=UIConfig(window_title="Test Jukebox", window_width=800, window_height=600, theme="dark"),
         logging=LoggingConfig(level="DEBUG", file="test.log"),

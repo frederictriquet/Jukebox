@@ -173,9 +173,10 @@ class DuplicateChecker:
         for track in rows:
             artist = track["artist"] or ""
             title = track["title"] or ""
-            filename = Path(track["filepath"]).name if track["filepath"] else ""
+            filepath = track["filepath"] or ""
+            filename = Path(filepath).name if filepath else ""
 
-            display = self._make_display(artist, title, filename)
+            display = self._make_display(artist, title, filename, filepath)
 
             # Exact index (only when both artist and title are present)
             artist_norm = self._normalize(artist)
@@ -317,10 +318,17 @@ class DuplicateChecker:
         return {word for word in re.split(r"\s+", text) if len(word) >= self.MIN_TOKEN_LENGTH}
 
     @staticmethod
-    def _make_display(artist: str, title: str, filename: str) -> str:
-        """Build a display string for a jukebox track."""
+    def _make_display(artist: str, title: str, filename: str, filepath: str = "") -> str:
+        """Build a display string for a jukebox track.
+
+        Format: 'Artist - Title\\n/path/to/file.mp3' (filepath on second line).
+        """
         if artist and title:
-            return f"{artist} - {title}"
-        if title:
-            return title
-        return filename
+            label = f"{artist} - {title}"
+        elif title:
+            label = title
+        else:
+            label = filename
+        if filepath:
+            return f"{label}\n{filepath}"
+        return label

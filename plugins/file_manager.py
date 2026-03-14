@@ -9,15 +9,17 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6.QtWidgets import QPushButton
 
+from jukebox.core.config import FileManagerDestinationConfig
 from jukebox.core.event_bus import Events
 from jukebox.core.mode_manager import AppMode
+from jukebox.core.settings_sync_mixin import SettingsSyncMixin, SyncedJsonList, SyncedSetting
 from jukebox.core.shortcut_mixin import ShortcutMixin
 
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
 
 
-class FileManagerPlugin(ShortcutMixin):
+class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
     """Manage files: move, rename, and delete tracks."""
 
     name = "file_manager"
@@ -105,34 +107,17 @@ class FileManagerPlugin(ShortcutMixin):
         self.current_filepath = Path(track["filepath"]) if track else None
         logging.debug(f"[File Manager] Track loaded: id={track_id}, filepath={self.current_filepath}")
 
+    _synced_settings = [
+        SyncedSetting("trash_directory", str),
+        SyncedSetting("trash_key", str),
+    ]
+    _synced_json_lists = [
+        SyncedJsonList("destinations", "destinations", FileManagerDestinationConfig),
+    ]
+
     def _reload_plugin_config(self) -> None:
         """Reload file_manager config from database."""
-        db = self.context.database
-
-        # Load destinations
-        destinations_json = db.get_plugin_setting("file_manager", "destinations")
-
-        if destinations_json:
-            import json
-            try:
-                destinations_data = json.loads(destinations_json)
-                # Update config with new destinations
-                from jukebox.core.config import FileManagerDestinationConfig
-                self.context.config.file_manager.destinations = [
-                    FileManagerDestinationConfig(**dest) for dest in destinations_data
-                ]
-            except (json.JSONDecodeError, ValueError) as e:
-                logging.error(f"Failed to parse destinations config: {e}")
-
-        # Load trash directory
-        trash_dir = db.get_plugin_setting("file_manager", "trash_directory")
-        if trash_dir:
-            self.context.config.file_manager.trash_directory = trash_dir
-
-        # Load trash key
-        trash_key = db.get_plugin_setting("file_manager", "trash_key")
-        if trash_key:
-            self.context.config.file_manager.trash_key = trash_key
+        self._sync_settings_from_db()
 
     def _move_to_destination(self, dest_config: Any) -> None:
         """Move current track to destination and rename it 'artist - title.extension'."""

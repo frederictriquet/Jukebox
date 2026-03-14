@@ -9,12 +9,13 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QPushButton
 
 from jukebox.core.event_bus import Events
+from jukebox.core.settings_sync_mixin import SettingsSyncMixin, SyncedSetting
 
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
 
 
-class LoopPlayerPlugin:
+class LoopPlayerPlugin(SettingsSyncMixin):
     """Enable looping a section of the current track."""
 
     name = "loop_player"
@@ -367,32 +368,20 @@ class LoopPlayerPlugin:
                 self.loop_button.setChecked(False)
             self._update_button_style()
 
+    _synced_settings = [
+        SyncedSetting("duration", float),
+        SyncedSetting("coarse_step", float),
+        SyncedSetting("fine_step", float),
+    ]
+
     def _on_settings_changed(self) -> None:
         """Reload config when settings change."""
         logging.info("[Loop Player] Settings changed, reloading config from database")
+        self._sync_settings_from_db()
 
-        config = self.context.config.loop_player
-
-        # Reload duration setting
-        duration = self.context.get_setting("loop_player", "duration", float, config.duration)
-        config.duration = duration
-        logging.debug(f"[Loop Player] Loop duration: {duration}s")
-
-        # Update button tooltip if button exists
+    def _after_settings_sync(self, config: Any) -> None:
         if self.loop_button:
-            self.loop_button.setToolTip(f"Loop section ({duration}s from current position)")
-
-        # Reload coarse_step setting
-        config.coarse_step = self.context.get_setting(
-            "loop_player", "coarse_step", float, config.coarse_step
-        )
-        logging.debug(f"[Loop Player] Coarse step: {config.coarse_step}s")
-
-        # Reload fine_step setting
-        config.fine_step = self.context.get_setting(
-            "loop_player", "fine_step", float, config.fine_step
-        )
-        logging.debug(f"[Loop Player] Fine step: {config.fine_step}s")
+            self.loop_button.setToolTip(f"Loop section ({config.duration}s from current position)")
 
     def get_settings_schema(self) -> dict[str, Any]:
         """Return settings schema for configuration UI.

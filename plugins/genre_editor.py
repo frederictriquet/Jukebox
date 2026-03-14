@@ -7,14 +7,16 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from jukebox.core.config import GenreCodeConfig
 from jukebox.core.event_bus import Events
+from jukebox.core.settings_sync_mixin import SettingsSyncMixin, SyncedJsonList, SyncedSetting
 from jukebox.core.shortcut_mixin import ShortcutMixin
 
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
 
 
-class GenreEditorPlugin(ShortcutMixin):
+class GenreEditorPlugin(SettingsSyncMixin, ShortcutMixin):
     """Edit genre using keyboard shortcuts for code toggles."""
 
     name = "genre_editor"
@@ -83,29 +85,16 @@ class GenreEditorPlugin(ShortcutMixin):
         else:
             self.current_genre = ""
 
+    _synced_settings = [
+        SyncedSetting("rating_key", str),
+    ]
+    _synced_json_lists = [
+        SyncedJsonList("genre_codes", "codes", GenreCodeConfig),
+    ]
+
     def _reload_plugin_config(self) -> None:
         """Reload genre_editor config from database."""
-        db = self.context.database
-
-        # Load genre codes
-        codes_json = db.get_plugin_setting("genre_editor", "genre_codes")
-
-        if codes_json:
-            import json
-            try:
-                codes_data = json.loads(codes_json)
-                # Update config with new codes
-                from jukebox.core.config import GenreCodeConfig
-                self.context.config.genre_editor.codes = [
-                    GenreCodeConfig(**code) for code in codes_data
-                ]
-            except (json.JSONDecodeError, ValueError) as e:
-                logging.error(f"Failed to parse genre codes config: {e}")
-
-        # Load rating key
-        rating_key = db.get_plugin_setting("genre_editor", "rating_key")
-        if rating_key:
-            self.context.config.genre_editor.rating_key = rating_key
+        self._sync_settings_from_db()
 
     def _toggle_code(self, code: str) -> None:
         """Toggle a genre code in the current genre."""

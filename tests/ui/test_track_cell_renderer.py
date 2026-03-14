@@ -65,7 +65,7 @@ class TestDuplicateStatusStyler:
     def test_tooltip_red_with_match(self) -> None:
         styler = DuplicateStatusStyler()
         track = make_track(duplicate_status="red", duplicate_match="Daft Punk - Get Lucky")
-        assert styler.tooltip(None, track) == "Certain duplicate: Daft Punk - Get Lucky"
+        assert styler.tooltip(None, track) == "Certain duplicate:\nDaft Punk - Get Lucky"
 
     def test_tooltip_red_without_match(self) -> None:
         styler = DuplicateStatusStyler()
@@ -75,7 +75,7 @@ class TestDuplicateStatusStyler:
     def test_tooltip_orange_with_match(self) -> None:
         styler = DuplicateStatusStyler()
         track = make_track(duplicate_status="orange", duplicate_match="Some Track")
-        assert styler.tooltip(None, track) == "Possible duplicate: Some Track"
+        assert styler.tooltip(None, track) == "Possible duplicate:\nSome Track"
 
     def test_tooltip_orange_without_match(self) -> None:
         styler = DuplicateStatusStyler()

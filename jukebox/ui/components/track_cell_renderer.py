@@ -490,16 +490,16 @@ class DuplicateStatusStyler(Styler):
         return "●"
 
     def tooltip(self, data: Any, track: dict[str, Any]) -> str | None:
-        """Explain the duplicate status with matched track info if available."""
+        """Explain the duplicate status with matched track info and path."""
         status = track.get("duplicate_status", "green")
         match_info = track.get("duplicate_match")
         if status == "red":
             if match_info:
-                return f"Certain duplicate: {match_info}"
+                return f"Certain duplicate:\n{match_info}"
             return "Certain duplicate in library"
         if status == "orange":
             if match_info:
-                return f"Possible duplicate: {match_info}"
+                return f"Possible duplicate:\n{match_info}"
             return "Possible duplicate in library"
         if status == "pending":
             return "Checking for duplicates..."
