@@ -256,6 +256,9 @@ cue_maker:
   overlap: 15.0  # Overlap between segments in seconds
   max_workers: 4  # Parallel workers for analysis
 
+engine_dj:
+  database_path: ""
+
 directory_navigator:
   default_directory: "NORMALIZED"
 

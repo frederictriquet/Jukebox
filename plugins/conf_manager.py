@@ -104,6 +104,28 @@ class DirectoryInput(QLineEdit):
         super().mousePressEvent(event)
 
 
+class FileInput(QLineEdit):
+    """Widget for selecting a file - click to browse."""
+
+    def __init__(self, file_filter: str = "", parent: Any = None):
+        """Initialize widget."""
+        super().__init__(parent)
+        self.file_filter = file_filter
+        self.setPlaceholderText("Click to select file...")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mousePressEvent(self, event: Any) -> None:  # noqa: N802
+        """Open file browser on click."""
+        current = self.text() or str(Path.home())
+        start_dir = str(Path(current).parent) if current and Path(current).exists() else current
+        filepath, _ = QFileDialog.getOpenFileName(
+            self, "Select File", start_dir, self.file_filter
+        )
+        if filepath:
+            self.setText(filepath)
+        super().mousePressEvent(event)
+
+
 class ListEditor(QWidget):
     """Widget for editing a list of structured items."""
 
@@ -334,8 +356,31 @@ class ConfigDialog(QDialog):
 
         self.setLayout(layout)
 
-        # Build plugin tabs
+        # Build tabs
+        self._build_general_tab()
         self._build_plugin_tabs()
+
+    def _build_general_tab(self) -> None:
+        """Build the General settings tab."""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        form = QFormLayout()
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        # Engine DJ database path
+        self._engine_dj_path_input = FileInput("SQLite Database (*.db)")
+        current_path = self.context.config.engine_dj.database_path
+        if current_path:
+            self._engine_dj_path_input.setText(current_path)
+        form.addRow("Engine DJ Database:", self._engine_dj_path_input)
+
+        layout.addLayout(form)
+        layout.addStretch()
+        widget.setLayout(layout)
+        self.tabs.addTab(widget, "General")
 
     def _build_plugin_tabs(self) -> None:
         """Build configuration tabs for each plugin dynamically."""
@@ -458,6 +503,14 @@ class ConfigDialog(QDialog):
 
     def load_settings(self) -> None:
         """Load settings from database for all plugins."""
+        # Load general settings
+        if hasattr(self, "_engine_dj_path_input"):
+            db_value = self._get_setting("general", "engine_dj_database_path")
+            if db_value:
+                self._engine_dj_path_input.setText(db_value)
+            else:
+                self._engine_dj_path_input.setText(self.context.config.engine_dj.database_path)
+
         if not hasattr(self, "_plugin_inputs"):
             return
 
@@ -520,6 +573,12 @@ class ConfigDialog(QDialog):
 
     def _save_settings(self) -> None:
         """Save settings to database for all plugins."""
+        # Save general settings
+        if hasattr(self, "_engine_dj_path_input"):
+            engine_dj_path = self._engine_dj_path_input.text()
+            self._set_setting("general", "engine_dj_database_path", engine_dj_path)
+            self.context.config.engine_dj.database_path = engine_dj_path
+
         if not hasattr(self, "_plugin_inputs"):
             return
 

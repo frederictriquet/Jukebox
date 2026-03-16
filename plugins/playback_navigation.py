@@ -51,7 +51,7 @@ class PlaybackNavigationPlugin(SettingsSyncMixin):
     def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register auto-play and random mode menu and buttons."""
         # Add menu options
-        menu = ui_builder.add_menu("&Playback")
+        menu = ui_builder.get_or_create_menu("&Playback")
 
         from PySide6.QtGui import QAction
 

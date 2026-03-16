@@ -40,7 +40,7 @@ from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QStandardItem, QStandardItemModel
-from PySide6.QtWidgets import QTreeView, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QMenu, QMessageBox, QTreeView, QVBoxLayout, QWidget
 
 from jukebox.core.event_bus import Events
 from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
@@ -87,6 +87,10 @@ class DirectoryTreeWidget(QWidget):
             playlists: List of playlist dicts with 'id', 'name', 'track_count'
             default_directory: Directory name to select by default
         """
+        # Save expanded state and current selection before clearing
+        expanded_texts = self._get_expanded_texts()
+        selected_path = self._get_selected_path()
+
         self.model.clear()
         root = self.model.invisibleRootItem()
 
@@ -118,19 +122,86 @@ class DirectoryTreeWidget(QWidget):
                 pl_item.setData(f"playlist:{pl['id']}", ROLE_PATH)
                 pl_node.appendRow(pl_item)
 
-        # Expand "Directories" and select default directory if found
-        dir_index = self.model.indexFromItem(dir_node)
-        self.tree_view.expand(dir_index)
+        # Restore expanded state, or expand "Directories" by default
+        if expanded_texts:
+            self._restore_expanded_texts(expanded_texts)
+        else:
+            dir_index = self.model.indexFromItem(dir_node)
+            self.tree_view.expand(dir_index)
 
-        if default_directory:
+        # Restore selection
+        if selected_path is not None:
+            self._restore_selected_path(selected_path)
+        elif not expanded_texts and default_directory:
             target = self._find_item_by_name(dir_node, default_directory)
             if target is not None:
                 target_index = self.model.indexFromItem(target)
                 self.tree_view.setCurrentIndex(target_index)
                 self.tree_view.clicked.emit(target_index)
                 return
+            self.tree_view.setCurrentIndex(self.model.indexFromItem(dir_node))
 
-        self.tree_view.setCurrentIndex(dir_index)
+    def _get_selected_path(self) -> str | None:
+        """Get the ROLE_PATH data of the currently selected item."""
+        index = self.tree_view.currentIndex()
+        if not index.isValid():
+            return None
+        item = self.model.itemFromIndex(index)
+        if item is None:
+            return None
+        node_type = item.data(ROLE_NODE_TYPE)
+        path_data = item.data(ROLE_PATH)
+        # Encode both type and path for unambiguous restore
+        return f"{node_type}:{path_data}" if node_type else None
+
+    def _restore_selected_path(self, selected_key: str) -> None:
+        """Restore selection by matching ROLE_NODE_TYPE:ROLE_PATH."""
+        self._find_and_select(self.model.invisibleRootItem(), selected_key)
+
+    def _find_and_select(self, item: QStandardItem, selected_key: str) -> bool:
+        """Recursively find and select item matching the key."""
+        for i in range(item.rowCount()):
+            child = item.child(i)
+            node_type = child.data(ROLE_NODE_TYPE)
+            path_data = child.data(ROLE_PATH)
+            key = f"{node_type}:{path_data}"
+            if key == selected_key:
+                idx = self.model.indexFromItem(child)
+                self.tree_view.setCurrentIndex(idx)
+                return True
+            if self._find_and_select(child, selected_key):
+                return True
+        return False
+
+    def _get_expanded_texts(self) -> set[str]:
+        """Get the base names of all currently expanded nodes."""
+        expanded: set[str] = set()
+        self._collect_expanded(self.model.invisibleRootItem(), expanded)
+        return expanded
+
+    def _collect_expanded(self, item: QStandardItem, expanded: set[str]) -> None:
+        """Recursively collect expanded node names."""
+        for i in range(item.rowCount()):
+            child = item.child(i)
+            idx = self.model.indexFromItem(child)
+            if self.tree_view.isExpanded(idx):
+                # Strip count suffix: "Playlists (3)" -> "Playlists"
+                text = child.text().rsplit(" (", 1)[0]
+                expanded.add(text)
+            self._collect_expanded(child, expanded)
+
+    def _restore_expanded_texts(self, expanded_texts: set[str]) -> None:
+        """Restore expanded state by matching node names."""
+        self._expand_matching(self.model.invisibleRootItem(), expanded_texts)
+
+    def _expand_matching(self, item: QStandardItem, expanded_texts: set[str]) -> None:
+        """Recursively expand nodes whose base name is in the set."""
+        for i in range(item.rowCount()):
+            child = item.child(i)
+            text = child.text().rsplit(" (", 1)[0]
+            if text in expanded_texts:
+                self.tree_view.expand(self.model.indexFromItem(child))
+            self._expand_matching(child, expanded_texts)
 
     @staticmethod
     def _find_item_by_name(
@@ -232,6 +303,7 @@ class DirectoryNavigatorPlugin:
         context.subscribe(Events.TRACKS_ADDED, self._rebuild_tree)
         context.subscribe(Events.TRACK_DELETED, self._on_track_changed)
         context.subscribe(Events.TRACK_METADATA_UPDATED, self._on_track_changed)
+        context.subscribe(Events.PLAYLIST_CHANGED, self._rebuild_tree)
 
     def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register left sidebar widget.
@@ -248,8 +320,10 @@ class DirectoryNavigatorPlugin:
         if dock and hasattr(dock, "setVisible"):
             dock.setVisible(False)
 
-        # Connect tree click
+        # Connect tree click and context menu
         self.widget.tree_view.clicked.connect(self._on_item_clicked)
+        self.widget.tree_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.widget.tree_view.customContextMenuRequested.connect(self._on_context_menu)
 
         # Initial tree build
         self._rebuild_tree()
@@ -291,8 +365,11 @@ class DirectoryNavigatorPlugin:
 
         db = self.context.database
 
-        # Get all filepaths
-        rows = db.conn.execute("SELECT filepath FROM tracks").fetchall()  # type: ignore[attr-defined]
+        # Get filepaths for current mode only
+        mode = self.context.app.mode_manager.get_mode().value  # type: ignore[attr-defined]
+        rows = db.conn.execute(  # type: ignore[attr-defined]
+            "SELECT filepath FROM tracks WHERE mode = ?", (mode,)
+        ).fetchall()
         filepaths = [row["filepath"] for row in rows]
 
         # Get playlists with track counts
@@ -375,6 +452,56 @@ class DirectoryNavigatorPlugin:
             node_type,
             path_data,
         )
+
+    def _on_context_menu(self, pos) -> None:  # type: ignore[no-untyped-def]
+        """Show context menu on right-click."""
+        if self.widget is None:
+            return
+
+        index = self.widget.tree_view.indexAt(pos)
+        if not index.isValid():
+            return
+
+        item = self.widget.model.itemFromIndex(index)
+        if item is None:
+            return
+
+        node_type = item.data(ROLE_NODE_TYPE)
+        if node_type != "playlist":
+            return
+
+        path_data = item.data(ROLE_PATH)
+        playlist_id = int(path_data.split(":")[1])
+        playlist_name = item.text().rsplit(" (", 1)[0]
+
+        menu = QMenu(self.widget)
+        delete_action = menu.addAction(f"Delete \"{playlist_name}\"")
+
+        action = menu.exec(self.widget.tree_view.viewport().mapToGlobal(pos))
+        if action != delete_action:
+            return
+
+        reply = QMessageBox.question(
+            self.widget,
+            "Delete Playlist",
+            f"Delete playlist \"{playlist_name}\"?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        db = self.context.database
+        db.conn.execute(  # type: ignore[attr-defined]
+            "DELETE FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,)
+        )
+        db.conn.execute(  # type: ignore[attr-defined]
+            "DELETE FROM playlists WHERE id = ?", (playlist_id,)
+        )
+        db.conn.commit()  # type: ignore[attr-defined]
+        logger.info("[Directory Navigator] Deleted playlist '%s' (id=%d)", playlist_name, playlist_id)
+        self.context.emit(Events.PLAYLIST_CHANGED)
+        self._rebuild_tree()
 
     def shutdown(self) -> None:
         """Cleanup references."""

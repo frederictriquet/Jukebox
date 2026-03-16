@@ -219,6 +219,12 @@ class ShortcutsConfigProtocol(Protocol):
     seek_backward: str
 
 
+class EngineDJConfigProtocol(Protocol):
+    """Protocol for Engine DJ integration configuration."""
+
+    database_path: str
+
+
 @runtime_checkable
 class JukeboxConfigProtocol(Protocol):
     """Protocol for application configuration used by plugins."""
@@ -232,6 +238,7 @@ class JukeboxConfigProtocol(Protocol):
     genre_editor: GenreEditorConfigProtocol
     shortcuts: ShortcutsConfigProtocol
     video_exporter: VideoExporterConfigProtocol
+    engine_dj: EngineDJConfigProtocol
 
 
 # ============================================================================
