@@ -298,7 +298,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     errors = 0
     broken_pool = False
 
-    with ProcessPoolExecutor(max_workers=args.workers) as executor:
+    with ProcessPoolExecutor(max_workers=args.workers, max_tasks_per_child=1) as executor:
         # Submit all tasks
         futures = {
             executor.submit(_analyze_track, track): track

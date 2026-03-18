@@ -104,6 +104,17 @@ class MetadataExtractor:
             except (ValueError, TypeError):
                 pass  # noqa: SIM105
 
+        # Comment — ID3 COMM keys have variable suffixes (e.g. "COMM::eng")
+        comment = MetadataExtractor._get_tag(audio, ["comment", "\xa9cmt"])
+        if not comment and audio.tags:
+            for key in audio.tags:
+                if str(key).startswith("COMM"):
+                    val = audio.tags[key]
+                    comment = str(val) if not isinstance(val, list) else str(val[0])
+                    break
+        if comment:
+            tags["comment"] = comment
+
         return tags
 
     @staticmethod

@@ -6,13 +6,14 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -152,6 +153,20 @@ class MetadataEditorPlugin:
                     values[config.tag] = str(db_value) if isinstance(db_value, int) else db_value
                 else:
                     values[config.tag] = ""
+            # For comment: fallback to file tag if DB value is NULL (never imported)
+            if "comment" in values and not values["comment"]:
+                db_comment = track.get("comment")
+                if db_comment is None:
+                    from jukebox.utils.metadata import MetadataExtractor
+
+                    try:
+                        file_meta = MetadataExtractor.extract(Path(track["filepath"]))
+                        comment = file_meta.get("comment", "") or ""
+                    except Exception:
+                        comment = ""
+                    self.context.database.tracks.update_metadata(track_id, {"comment": comment})
+                    values["comment"] = comment
+
             self.editor_widget.set_metadata(values)
 
     def _on_save_metadata(self, field_values: dict[str, str]) -> None:
@@ -255,51 +270,70 @@ class MetadataEditorWidget(QWidget):
 
     def _init_ui(self) -> None:
         """Initialize UI dynamically based on field configuration."""
-        layout = QGridLayout()
-        layout.setContentsMargins(10, 5, 10, 5)
-        layout.setSpacing(5)
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(10, 5, 10, 5)
+        main_layout.setSpacing(5)
 
-        # Create widgets for each configured field
-        # Layout: 2 columns, filling row by row
+        label_width = 65
+
+        # Grid 4 colonnes : label | input | label | input
+        grid = QGridLayout()
+        grid.setSpacing(5)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(2, 0)
+        grid.setColumnStretch(3, 1)
+
         for idx, config in enumerate(self.field_configs):
-            row = idx // 2  # Integer division: 0,1 -> row 0; 2,3 -> row 1, etc.
-            col_pair = (idx % 2) * 2  # 0 for first column pair (0,1), 2 for second (2,3)
+            row = idx // 2
+            col_pair = (idx % 2) * 2
 
-            # Add label
             label = QLabel(f"{config.label}:")
-            layout.addWidget(label, row, col_pair)
+            label.setFixedWidth(label_width)
+            grid.addWidget(label, row, col_pair)
 
-            # Add line edit
             line_edit = QLineEdit()
             if config.width:
                 line_edit.setMaximumWidth(config.width)
 
-            # For the "date" (Year) field: group with split-filename button
-            if config.tag == "date":
-                year_row = QHBoxLayout()
-                year_row.setSpacing(5)
-                year_row.setContentsMargins(0, 0, 0, 0)
-                year_row.addWidget(line_edit)
-                self._split_btn = QPushButton("Name → Artist / Title")
-                self._split_btn.setToolTip("Extract Artist and Title from filename")
-                self._split_btn.clicked.connect(self._on_split_filename)
-                year_row.addWidget(self._split_btn)
-                year_row.addStretch()
-                layout.addLayout(year_row, row, col_pair + 1)
-            elif config.width:
-                layout.addWidget(line_edit, row, col_pair + 1, alignment=Qt.AlignmentFlag.AlignLeft)
-            else:
-                layout.addWidget(line_edit, row, col_pair + 1)
+            # Comment : col_span sur les 3 colonnes restantes
+            is_last_alone = idx == len(self.field_configs) - 1 and idx % 2 == 0
+            col_span = 3 if is_last_alone else 1
 
-            # Store widget
+            if config.tag == "title":
+                h = QHBoxLayout()
+                h.setSpacing(5)
+                h.setContentsMargins(0, 0, 0, 0)
+                h.addWidget(line_edit, 1)
+                self._split_btn = QPushButton("Name → Artist / Title")
+                self._split_btn.setToolTip("Extraire Artist et Title du nom de fichier")
+                self._split_btn.setStyleSheet("QPushButton { padding: 6px 8px; }")
+                self._split_btn.clicked.connect(self._on_split_filename)
+                h.addWidget(self._split_btn)
+                grid.addLayout(h, row, col_pair + 1, 1, col_span)
+            elif config.tag == "comment":
+                h = QHBoxLayout()
+                h.setSpacing(5)
+                h.setContentsMargins(0, 0, 0, 0)
+                h.addWidget(line_edit, 1)
+                self._clear_btn = QPushButton("Clear")
+                self._clear_btn.setToolTip("Clear comment")
+                self._clear_btn.setStyleSheet("QPushButton { padding: 6px 8px; }")
+                self._clear_btn.clicked.connect(lambda: self._clear_field("comment"))
+                h.addWidget(self._clear_btn)
+                grid.addLayout(h, row, col_pair + 1, 1, col_span)
+            else:
+                grid.addWidget(line_edit, row, col_pair + 1, 1, col_span)
+
             self.field_widgets.append(line_edit)
             self.field_map[config.tag] = line_edit
-
-            # Connect auto-save
             line_edit.editingFinished.connect(self._on_field_changed)
 
-        self.setLayout(layout)
-        self.setMaximumHeight(100)
+        main_layout.addLayout(grid)
+
+        self.setLayout(main_layout)
+        self.setMaximumHeight(130)
 
         # Setup tab order
         for i in range(len(self.field_widgets) - 1):
@@ -332,6 +366,13 @@ class MetadataEditorWidget(QWidget):
             filepath: Path to the current audio file.
         """
         self._current_filepath = Path(filepath)
+
+    def _clear_field(self, tag: str) -> None:
+        """Clear a field and trigger save."""
+        widget = self.field_map.get(tag)
+        if widget:
+            widget.clear()
+            self._on_field_changed()
 
     def _on_split_filename(self) -> None:
         """Split filename 'Artist - Title.ext' into Artist and Title fields."""

@@ -64,6 +64,8 @@ metadata_editor:
     - tag: "date"
       label: "Year"
       width: 80
+    - tag: "comment"
+      label: "Comment"
 
 genre_editor:
   codes:

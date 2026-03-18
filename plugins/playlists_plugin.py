@@ -5,12 +5,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
     QInputDialog,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
@@ -75,6 +77,8 @@ class PlaylistDialog(QDialog):
         layout = QVBoxLayout()
 
         self.playlist_list = QListWidget()
+        self.playlist_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.playlist_list.customContextMenuRequested.connect(self._show_context_menu)
         layout.addWidget(self.playlist_list)
 
         btn_layout = QHBoxLayout()
@@ -118,6 +122,7 @@ class PlaylistDialog(QDialog):
             count = playlist["track_count"]
             item = QListWidgetItem(f"{playlist['name']} ({count} track{'s' if count != 1 else ''})")
             item.setData(Qt.ItemDataRole.UserRole, playlist["id"])
+            item.setData(Qt.ItemDataRole.UserRole + 1, playlist["name"])
             self.playlist_list.addItem(item)
 
     def _create_playlist(self) -> None:
@@ -195,6 +200,49 @@ class PlaylistDialog(QDialog):
         self.context.emit(Events.LOAD_TRACK_LIST, filepaths=track_filepaths)
 
         self.close()
+
+    def _show_context_menu(self, position: object) -> None:
+        """Show right-click context menu on playlist list."""
+        item = self.playlist_list.itemAt(position)  # type: ignore[arg-type]
+        if not item:
+            return
+
+        menu = QMenu(self)
+
+        load_action = QAction("Load", self)
+        load_action.triggered.connect(self._load_playlist)
+        menu.addAction(load_action)
+
+        view_action = QAction("View", self)
+        view_action.triggered.connect(self._view_playlist)
+        menu.addAction(view_action)
+
+        menu.addSeparator()
+
+        export_action = QAction("Export to Engine DJ", self)
+        export_action.triggered.connect(self._export_to_engine_dj)
+        menu.addAction(export_action)
+
+        menu.addSeparator()
+
+        delete_action = QAction("Delete", self)
+        delete_action.triggered.connect(self._delete_playlist)
+        menu.addAction(delete_action)
+
+        menu.exec(self.playlist_list.mapToGlobal(position))  # type: ignore[arg-type]
+
+    def _export_to_engine_dj(self) -> None:
+        """Export selected playlist to Engine DJ database."""
+        current = self.playlist_list.currentItem()
+        if not current:
+            return
+
+        playlist_id = current.data(Qt.ItemDataRole.UserRole)
+        playlist_name = current.data(Qt.ItemDataRole.UserRole + 1)
+
+        from plugins.engine_dj_export import export_playlist_to_engine_dj
+
+        export_playlist_to_engine_dj(self.context, playlist_id, playlist_name, parent=self)
 
     def _delete_playlist(self) -> None:
         """Delete playlist."""

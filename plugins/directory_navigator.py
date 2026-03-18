@@ -204,9 +204,7 @@ class DirectoryTreeWidget(QWidget):
             self._expand_matching(child, expanded_texts)
 
     @staticmethod
-    def _find_item_by_name(
-        parent: QStandardItem, name: str
-    ) -> QStandardItem | None:
+    def _find_item_by_name(parent: QStandardItem, name: str) -> QStandardItem | None:
         """Recursively find a child item whose text starts with the given name."""
         name_lower = name.lower()
         for i in range(parent.rowCount()):
@@ -475,16 +473,27 @@ class DirectoryNavigatorPlugin:
         playlist_name = item.text().rsplit(" (", 1)[0]
 
         menu = QMenu(self.widget)
-        delete_action = menu.addAction(f"Delete \"{playlist_name}\"")
+        export_action = menu.addAction("Export to Engine DJ")
+        menu.addSeparator()
+        delete_action = menu.addAction(f'Delete "{playlist_name}"')
 
         action = menu.exec(self.widget.tree_view.viewport().mapToGlobal(pos))
+
+        if action == export_action:
+            from plugins.engine_dj_export import export_playlist_to_engine_dj
+
+            export_playlist_to_engine_dj(
+                self.context, playlist_id, playlist_name, parent=self.widget
+            )
+            return
+
         if action != delete_action:
             return
 
         reply = QMessageBox.question(
             self.widget,
             "Delete Playlist",
-            f"Delete playlist \"{playlist_name}\"?",
+            f'Delete playlist "{playlist_name}"?',
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -499,7 +508,9 @@ class DirectoryNavigatorPlugin:
             "DELETE FROM playlists WHERE id = ?", (playlist_id,)
         )
         db.conn.commit()  # type: ignore[attr-defined]
-        logger.info("[Directory Navigator] Deleted playlist '%s' (id=%d)", playlist_name, playlist_id)
+        logger.info(
+            "[Directory Navigator] Deleted playlist '%s' (id=%d)", playlist_name, playlist_id
+        )
         self.context.emit(Events.PLAYLIST_CHANGED)
         self._rebuild_tree()
 
