@@ -253,10 +253,11 @@ def test_initialize_subscribes_to_events(plugin, mock_context) -> None:  # type:
     # Verify event subscriptions
     from jukebox.core.event_bus import Events
 
-    assert mock_context.subscribe.call_count == 3
+    assert mock_context.subscribe.call_count == 4
     mock_context.subscribe.assert_any_call(Events.TRACKS_ADDED, plugin._rebuild_tree)
     mock_context.subscribe.assert_any_call(Events.TRACK_DELETED, plugin._on_track_changed)
     mock_context.subscribe.assert_any_call(Events.TRACK_METADATA_UPDATED, plugin._on_track_changed)
+    mock_context.subscribe.assert_any_call(Events.PLAYLIST_CHANGED, plugin._rebuild_tree)
 
 
 def test_register_ui_creates_widget(qapp, plugin, mock_context, mock_ui_builder) -> None:  # type: ignore

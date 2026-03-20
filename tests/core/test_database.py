@@ -247,7 +247,7 @@ class TestDatabase:
         db.conn.commit()
 
         # Run migration
-        db._migrate_track_mode()
+        db._migrate_tracks_columns()
 
         # Verify mode column exists with default value 'curating'
         track = db.conn.execute("SELECT mode FROM tracks").fetchone()

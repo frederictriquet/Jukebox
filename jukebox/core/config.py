@@ -223,6 +223,12 @@ class CueMakerConfig(BaseModel):
     max_workers: int = Field(ge=1, default=4)
 
 
+class EngineDJConfig(BaseModel):
+    """Engine DJ integration configuration."""
+
+    database_path: str = ""
+
+
 class DirectoryNavigatorConfig(BaseModel):
     """Directory Navigator plugin configuration."""
 
@@ -259,6 +265,7 @@ class JukeboxConfig(BaseModel):
     file_manager: FileManagerConfig = Field(default_factory=FileManagerConfig)
     video_exporter: VideoExporterConfig = Field(default_factory=VideoExporterConfig)
     cue_maker: CueMakerConfig = Field(default_factory=CueMakerConfig)
+    engine_dj: EngineDJConfig = Field(default_factory=EngineDJConfig)
     directory_navigator: DirectoryNavigatorConfig = Field(default_factory=DirectoryNavigatorConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     logging: LoggingConfig

@@ -18,7 +18,7 @@ help:
 	@echo "  make ci              Run all CI checks"
 	@echo ""
 	@echo "ML (genre classifier):"
-	@echo "  make analyze         Extract ML features from tracks"
+	@echo "  make ml-analyze      Extract ML features from tracks"
 	@echo "  make ml-stats        Show dataset statistics"
 	@echo "  make ml-compare      Compare all models (rf, xgboost, svm)"
 	@echo "  make ml-train        Train best model and deploy to ~/.jukebox/genre_model.pkl"

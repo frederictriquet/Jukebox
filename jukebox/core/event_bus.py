@@ -159,6 +159,9 @@ class Events:
     LOOP_ACTIVATED = "loop_activated"  # kwargs: loop_start, loop_end, filepath
     LOOP_DEACTIVATED = "loop_deactivated"  # kwargs: None
 
+    # Playlist events
+    PLAYLIST_CHANGED = "playlist_changed"  # kwargs: None
+
     # Plugin events
     PLUGIN_SETTINGS_CHANGED = "plugin_settings_changed"  # kwargs: None
     WAVEFORM_COMPLETE = "waveform_complete"  # kwargs: track_id (int)

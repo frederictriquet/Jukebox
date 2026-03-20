@@ -32,13 +32,16 @@ def analyze_audio_file(filepath: str, extract_ml_features: bool = False) -> dict
     # Suppress librosa/audioread warnings for corrupted files
     warnings.filterwarnings("ignore", category=UserWarning, module="librosa")
 
-    # Load audio
+    # Load audio at native sample rate to preserve full frequency spectrum
     y, sr = librosa.load(filepath, sr=None, mono=True)
 
     if len(y) == 0:
         raise ValueError("Empty audio file")
 
-    return _extract_ml_features(y, int(sr))
+    try:
+        return _extract_ml_features(y, int(sr))
+    finally:
+        del y
 
 
 def _extract_ml_features(y: np.ndarray, sr: int) -> dict[str, float]:
@@ -169,6 +172,10 @@ def _extract_ml_features(y: np.ndarray, sr: int) -> dict[str, float]:
 
     tonnetz = librosa.feature.tonnetz(y=y_harmonic, sr=sr)
     features["tonnetz_mean"] = float(np.mean(tonnetz))
+
+    # Free large intermediates before structure analysis
+    del stft, spec_norm, spec_entropy, mfcc, chroma, chroma_norm, chroma_entropy
+    del tonnetz, tempogram, onset_env, y_harmonic, y_percussive
 
     # 8. Structure (4 features)
     # Split track into intro (0-20%), core (20-80%), outro (80-100%)

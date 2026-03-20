@@ -15,7 +15,18 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QPalette
-from PySide6.QtWidgets import QMenu, QStyledItemDelegate, QStyleOptionViewItem, QTableView
+from PySide6.QtWidgets import (
+    QDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLineEdit,
+    QMenu,
+    QPushButton,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QTableView,
+    QVBoxLayout,
+)
 
 from jukebox.core.duplicate_checker import DuplicateChecker
 from jukebox.core.event_bus import Events
@@ -174,19 +185,23 @@ class TrackListModel(QAbstractTableModel):
         Args:
             filepath: Path of the track that was updated
         """
-        # Find the row
+        # Find the row — normalize to Path for consistent lookup
+        if not isinstance(filepath, Path):
+            filepath = Path(filepath)
         row = self.find_row_by_filepath(filepath)
         if row < 0 or not self.database:
             return
 
         # Refresh track data from database
         track_db = self.database.conn.execute(
-            "SELECT genre, duration_seconds FROM tracks WHERE filepath = ?",
+            "SELECT artist, title, genre, duration_seconds FROM tracks WHERE filepath = ?",
             (str(filepath),),
         ).fetchone()
 
         if track_db and row < len(self.tracks):
             # Update the track data
+            self.tracks[row]["artist"] = track_db["artist"] or ""
+            self.tracks[row]["title"] = track_db["title"] or ""
             self.tracks[row]["genre"] = track_db["genre"] or ""
             # rating is derived from genre (format: "C-D-*3"), RatingStyler reads from genre
             self.tracks[row]["rating"] = (
@@ -197,7 +212,11 @@ class TrackListModel(QAbstractTableModel):
             # Emit dataChanged to update the view
             left_index = self.index(row, 0)
             right_index = self.index(row, self.columnCount() - 1)
-            self.dataChanged.emit(left_index, right_index, [])
+            self.dataChanged.emit(
+                left_index,
+                right_index,
+                [Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.ToolTipRole],
+            )
 
     def _on_waveform_complete(self, track_id: int) -> None:
         """Handle waveform completion event.
@@ -907,6 +926,13 @@ class TrackList(QTableView):
                         )
                         menu.addAction(action)
 
+        # Edit metadata (quick) — jukebox mode only
+        if self._track_model._mode == AppMode.JUKEBOX.value and not file_missing:
+            menu.addSeparator()
+            edit_action = QAction("Edit Artist / Title...", self)
+            edit_action.triggered.connect(lambda: self._quick_edit_metadata(filepath))
+            menu.addAction(edit_action)
+
         # Remove action — always available
         menu.addSeparator()
         remove_action = QAction("Remove from List", self)
@@ -970,6 +996,93 @@ class TrackList(QTableView):
         event_bus = self._track_model.event_bus
         if event_bus:
             event_bus.emit(Events.TRACK_DELETED, filepath=filepath)
+
+    def _quick_edit_metadata(self, filepath: Path) -> None:
+        """Open a minimal dialog to edit artist and title."""
+        track_dict = self._get_track_dict(filepath)
+        if not track_dict.get("id"):
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Edit Artist / Title")
+        dialog.setMinimumWidth(400)
+
+        layout = QVBoxLayout()
+        form = QFormLayout()
+
+        artist_input = QLineEdit(track_dict.get("artist") or "")
+        title_input = QLineEdit(track_dict.get("title") or "")
+        form.addRow("Artist:", artist_input)
+        form.addRow("Title:", title_input)
+        layout.addLayout(form)
+
+        # Split filename button
+        stem = filepath.stem if isinstance(filepath, Path) else Path(filepath).stem
+        if " - " in stem:
+            split_btn = QPushButton("Name \u2192 Artist / Title")
+            split_btn.setToolTip(f"Split \"{stem}\"")
+
+            def _split() -> None:
+                parts = stem.split(" - ", 1)
+                artist_input.setText(parts[0].strip())
+                title_input.setText(parts[1].strip())
+
+            split_btn.clicked.connect(_split)
+            layout.addWidget(split_btn)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(dialog.reject)
+        save_btn = QPushButton("Save")
+        save_btn.setDefault(True)
+        save_btn.clicked.connect(dialog.accept)
+        btn_layout.addWidget(cancel_btn)
+        btn_layout.addWidget(save_btn)
+        layout.addLayout(btn_layout)
+
+        dialog.setLayout(layout)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        new_artist = artist_input.text().strip()
+        new_title = title_input.text().strip()
+
+        if new_artist == (track_dict.get("artist") or "") and new_title == (
+            track_dict.get("title") or ""
+        ):
+            return  # No change
+
+        main_window = self.window()
+        if not hasattr(main_window, "database"):
+            return
+
+        # Update database
+        updates: dict[str, Any] = {}
+        if new_artist != (track_dict.get("artist") or ""):
+            updates["artist"] = new_artist
+        if new_title != (track_dict.get("title") or ""):
+            updates["title"] = new_title
+
+        main_window.database.tracks.update_metadata(track_dict["id"], updates)
+
+        # Update file tags
+        from jukebox.utils.tag_writer import save_audio_tags
+
+        tag_values: dict[str, str] = {}
+        if "artist" in updates:
+            tag_values["artist"] = new_artist
+        if "title" in updates:
+            tag_values["title"] = new_title
+        save_audio_tags(str(filepath), tag_values)
+
+        # Refresh track list display
+        event_bus = self._track_model.event_bus
+        if event_bus:
+            event_bus.emit(Events.TRACK_METADATA_UPDATED, filepath=filepath)
+
+        logging.info("Quick edit metadata for %s: %s", filepath.name, updates)
 
     def _add_to_playlist(self, filepath: Path, playlist_id: int) -> None:
         """Add track to playlist."""

@@ -267,6 +267,10 @@ class MainWindow(QMainWindow):
                 track.get("date_added"),
             )
 
+        # Re-select the currently playing track if it's in the list
+        if self.player.current_file:
+            self.track_list.select_track_by_filepath(self.player.current_file)
+
     def _on_tracks_changed(self) -> None:
         """Handle tracks added/changed event - reload track list."""
         # Save current selection (track filepath)
@@ -476,24 +480,35 @@ class MainWindow(QMainWindow):
         if not row:
             return
         track_id = row["id"]
+        # Check if already in playlist
+        exists = self.database.conn.execute(
+            "SELECT 1 FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?",
+            (playlist_id, track_id),
+        ).fetchone()
+        if exists:
+            logger.debug("Track %s already in playlist %d, skipping", filepath.name, playlist_id)
+            self.event_bus.emit(
+                Events.STATUS_MESSAGE,
+                message=f"{filepath.name} already in playlist",
+                color="#FFA500",
+            )
+            return
         # Get next position
         pos_row = self.database.conn.execute(
             "SELECT COALESCE(MAX(position), 0) + 1 AS next_pos FROM playlist_tracks WHERE playlist_id = ?",
             (playlist_id,),
         ).fetchone()
         next_pos = pos_row["next_pos"] if pos_row else 1
-        try:
-            self.database.conn.execute(
-                "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)",
-                (playlist_id, track_id, next_pos),
-            )
-            self.database.conn.commit()
-            logger.info("Added track %s to playlist %d", filepath.name, playlist_id)
-            for plugin in self.plugin_manager.plugins:
-                if hasattr(plugin, "_update_context_menu"):
-                    plugin._update_context_menu()
-        except Exception:
-            logger.exception("Failed to add track to playlist")
+        self.database.conn.execute(
+            "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)",
+            (playlist_id, track_id, next_pos),
+        )
+        self.database.conn.commit()
+        logger.info("Added track %s to playlist %d", filepath.name, playlist_id)
+        self.event_bus.emit(Events.PLAYLIST_CHANGED)
+        for plugin in self.plugin_manager.plugins:
+            if hasattr(plugin, "_update_context_menu"):
+                plugin._update_context_menu()
 
     def _load_plugins(self) -> None:
         """Load all plugins."""
@@ -601,6 +616,10 @@ class MainWindow(QMainWindow):
                     track["duration_seconds"],
                     track["date_added"],
                 )
+
+        # Re-select the currently playing track if it's in the new list
+        if self.player.current_file:
+            self.track_list.select_track_by_filepath(self.player.current_file)
 
     def _get_current_mode(self) -> str:
         """Get current application mode.

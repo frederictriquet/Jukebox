@@ -269,8 +269,8 @@ class Database:
         # Migrate schema to add ML features columns if they don't exist
         self._migrate_ml_features()
 
-        # Migrate schema to add mode column if it doesn't exist
-        self._migrate_track_mode()
+        # Migrate schema to add mode and comment columns if they don't exist
+        self._migrate_tracks_columns()
 
         # Plugin settings (runtime configuration overrides)
         self.conn.execute(
@@ -375,21 +375,24 @@ class Database:
 
         self.conn.commit()
 
-    def _migrate_track_mode(self) -> None:
-        """Add mode column to tracks table if it doesn't exist."""
+    def _migrate_tracks_columns(self) -> None:
+        """Add mode and comment columns to tracks table if they don't exist."""
         if self.conn is None:
             return
 
-        # Get existing columns
         cursor = self.conn.execute("PRAGMA table_info(tracks)")
         existing_columns = {row["name"] for row in cursor.fetchall()}
 
         if "mode" not in existing_columns:
-            # Add mode column with default "curating" for existing tracks
             self.conn.execute("ALTER TABLE tracks ADD COLUMN mode TEXT NOT NULL DEFAULT 'curating'")
-            # Create index for efficient mode filtering
             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_tracks_mode ON tracks(mode)")
-            self.conn.commit()
+
+        if "comment" not in existing_columns:
+            self.conn.execute("ALTER TABLE tracks ADD COLUMN comment TEXT")
+            if "description" in existing_columns:
+                self.conn.execute("UPDATE tracks SET comment = description WHERE description != ''")
+
+        self.conn.commit()
 
     # ========== Legacy Methods (delegate to repositories) ==========
 

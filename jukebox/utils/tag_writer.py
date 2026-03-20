@@ -5,6 +5,37 @@ from pathlib import Path
 from typing import Any
 
 
+def _register_easyid3_comment() -> None:
+    """Register 'comment' key in EasyID3 so it maps to COMM frames."""
+    from mutagen.easyid3 import EasyID3
+    from mutagen.id3 import COMM
+
+    def getter(id3: Any, key: str) -> list[str]:
+        for k in id3:
+            if k.startswith("COMM"):
+                return [str(id3[k])]
+        return []
+
+    def setter(id3: Any, key: str, value: list[str]) -> None:
+        for k in list(id3):
+            if k.startswith("COMM"):
+                del id3[k]
+        if value and value[0]:
+            id3.add(COMM(encoding=3, lang="eng", desc="", text=value[0]))
+
+    def deleter(id3: Any, key: str) -> None:
+        for k in list(id3):
+            if k.startswith("COMM"):
+                del id3[k]
+
+    if "comment" not in EasyID3.valid_keys:
+        EasyID3.RegisterKey("comment", getter, setter, deleter)
+
+
+# Register on module import
+_register_easyid3_comment()
+
+
 def save_audio_tags(
     filepath: str | Path,
     tags: dict[str, str],
@@ -19,7 +50,8 @@ def save_audio_tags(
     Args:
         filepath: Path to audio file
         tags: Dict mapping tag names to values. Empty string deletes the tag.
-              For MP3: uses standard tag names (artist, title, album, genre, date, etc.)
+              For MP3: uses standard tag names (artist, title, album, genre, date,
+              comment, etc.)
               For non-MP3: tag names are lowercased by default unless disabled
         lowercase_tags_for_non_mp3: If True, use lowercase tag names for non-MP3 formats.
                                     Set to False to preserve tag name casing.
