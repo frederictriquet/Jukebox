@@ -42,9 +42,6 @@ def analyze_audio_file(filepath: str, extract_ml_features: bool = False) -> dict
         return _extract_ml_features(y, int(sr))
     finally:
         del y
-        import gc
-
-        gc.collect()
 
 
 def _extract_ml_features(y: np.ndarray, sr: int) -> dict[str, float]:

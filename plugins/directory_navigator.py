@@ -502,9 +502,6 @@ class DirectoryNavigatorPlugin:
 
         db = self.context.database
         db.conn.execute(  # type: ignore[attr-defined]
-            "DELETE FROM playlist_tracks WHERE playlist_id = ?", (playlist_id,)
-        )
-        db.conn.execute(  # type: ignore[attr-defined]
             "DELETE FROM playlists WHERE id = ?", (playlist_id,)
         )
         db.conn.commit()  # type: ignore[attr-defined]

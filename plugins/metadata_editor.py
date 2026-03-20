@@ -80,6 +80,16 @@ class TabEventFilter(QObject):
         return False  # Let other events continue
 
 
+TAG_TO_DB_COLUMN = {
+    "artist": "artist",
+    "title": "title",
+    "album": "album",
+    "albumartist": "album_artist",
+    "genre": "genre",
+    "date": "year",
+}
+
+
 class MetadataEditorPlugin:
     """Edit track metadata for currently playing track."""
 
@@ -125,19 +135,9 @@ class MetadataEditorPlugin:
 
         self.current_track_id = track_id
 
-        # Map config tags to database columns
-        tag_to_db_column = {
-            "artist": "artist",
-            "title": "title",
-            "album": "album",
-            "albumartist": "album_artist",  # DB uses underscore
-            "genre": "genre",
-            "date": "year",  # DB uses 'year' column
-        }
-
         # Get track metadata from database
         field_configs = self.context.config.metadata_editor.fields
-        db_columns = [tag_to_db_column.get(f.tag, f.tag) for f in field_configs]
+        db_columns = [TAG_TO_DB_COLUMN.get(f.tag, f.tag) for f in field_configs]
         track = self.context.database.tracks.get_by_id(track_id)
 
         if track:
@@ -193,20 +193,10 @@ class MetadataEditorPlugin:
 
         sanitized_values = {name: sanitize(value) for name, value in field_values.items()}
 
-        # Map config tags to database columns
-        tag_to_db_column = {
-            "artist": "artist",
-            "title": "title",
-            "album": "album",
-            "albumartist": "album_artist",  # DB uses underscore
-            "genre": "genre",
-            "date": "year",  # DB uses 'year' column
-        }
-
         # Update database with mapped column names
         db_updates = {}
         for tag, value in sanitized_values.items():
-            db_column = tag_to_db_column.get(tag, tag)
+            db_column = TAG_TO_DB_COLUMN.get(tag, tag)
             # Convert year to integer if it's a number
             if db_column == "year" and value.isdigit():
                 db_updates[db_column] = int(value)
@@ -220,9 +210,9 @@ class MetadataEditorPlugin:
 
         success = save_audio_tags(filepath, sanitized_values)
         if success:
-            logging.info(f"Saved metadata for track {self.current_track_id}")
+            logging.info("Saved metadata for track %d", self.current_track_id)
         else:
-            logging.error(f"Failed to save file tags: {filepath}")
+            logging.error("Failed to save file tags: %s", filepath)
 
         # Note: We don't emit TRACKS_ADDED here to avoid reloading the entire track list
         # The track list display will update on next full reload
@@ -234,7 +224,7 @@ class MetadataEditorPlugin:
         # Enable TAB event filter
         if self.tab_event_filter:
             self.tab_event_filter.setEnabled(True)
-        logging.debug(f"[Metadata Editor] Activated for {mode} mode")
+        logging.debug("[Metadata Editor] Activated for %s mode", mode)
 
     def deactivate(self, mode: str) -> None:
         """Deactivate plugin for this mode."""
@@ -243,7 +233,7 @@ class MetadataEditorPlugin:
         # Disable TAB event filter
         if self.tab_event_filter:
             self.tab_event_filter.setEnabled(False)
-        logging.debug(f"[Metadata Editor] Deactivated for {mode} mode")
+        logging.debug("[Metadata Editor] Deactivated for %s mode", mode)
 
     def shutdown(self) -> None:
         """Cleanup on application exit. No cleanup needed for this plugin."""

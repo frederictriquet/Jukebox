@@ -10,6 +10,7 @@ import logging
 import shutil
 import sqlite3
 import unicodedata
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -139,32 +140,23 @@ class EngineDJExporter:
         # Step 2: Batch-resolve Engine DJ matches (with path for duplicate resolution)
         # macOS stores filenames in NFD (decomposed), Engine DJ may use NFC (composed).
         # SQLite compares raw bytes, so we resolve in Python with NFC normalization.
-        unique_filenames = list({r["filename"] for r in jukebox_rows})
-        unique_nfc = {unicodedata.normalize("NFC", fn) for fn in unique_filenames}
 
-        # Fetch all Engine DJ tracks whose NFC-normalized filename matches
-        all_engine_rows = conn.execute("SELECT id, filename, path FROM Track").fetchall()
-        engine_rows = [
-            er
-            for er in all_engine_rows
-            if unicodedata.normalize("NFC", er["filename"]) in unique_nfc
-        ]
-
-        # Build map: NFC filename -> list of {engine_id, path}
-        engine_map: dict[str, list[dict]] = {}
-        for er in engine_rows:
-            fn_nfc = unicodedata.normalize("NFC", er["filename"])
-            if fn_nfc not in engine_map:
-                engine_map[fn_nfc] = []
-            engine_map[fn_nfc].append({"engine_id": er["id"], "path": er["path"]})
-
-        # Pre-resolve duplicates: NFC filename -> best engine_id
-        # Build jukebox_filepath lookup for duplicate resolution (keyed by NFC)
+        # Pre-compute NFC filenames and jukebox filepath lookup in a single pass
+        unique_nfc: set[str] = set()
         filepath_by_filename: dict[str, str] = {}
         for row in jukebox_rows:
             fn_nfc = unicodedata.normalize("NFC", row["filename"])
+            unique_nfc.add(fn_nfc)
             if fn_nfc not in filepath_by_filename:
                 filepath_by_filename[fn_nfc] = row["jukebox_filepath"]
+
+        # Fetch all Engine DJ tracks and filter + group in a single pass
+        all_engine_rows = conn.execute("SELECT id, filename, path FROM Track").fetchall()
+        engine_map: dict[str, list[dict]] = defaultdict(list)
+        for er in all_engine_rows:
+            fn_nfc = unicodedata.normalize("NFC", er["filename"])
+            if fn_nfc in unique_nfc:
+                engine_map[fn_nfc].append({"engine_id": er["id"], "path": er["path"]})
 
         dupe_resolution = self._resolve_duplicates(engine_map, filepath_by_filename)
 
@@ -367,7 +359,6 @@ class ExportReportDialog(QDialog):
     def __init__(self, report: ExportReport, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.report = report
-        self.confirmed = False
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -406,7 +397,6 @@ class ExportReportDialog(QDialog):
         self.setLayout(layout)
 
     def _confirm(self) -> None:
-        self.confirmed = True
         self.accept()
 
 
@@ -467,7 +457,7 @@ def export_playlist_to_engine_dj(
     dialog = ExportReportDialog(report, parent)
     dialog.exec()
 
-    if not dialog.confirmed:
+    if dialog.result() != QDialog.DialogCode.Accepted:
         return
 
     try:
