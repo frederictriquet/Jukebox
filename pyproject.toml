@@ -39,7 +39,7 @@ video = [
     "moderngl>=5.8.0",  # GPU shaders for heavy VJing effects (désactivé sur ARM64)
 ]
 dev = [
-    "pytest>=7.4.0",
+    "pytest>=9.0.3",
     "pytest-cov>=4.1.0",
     "pytest-qt>=4.2.0",
     "black>=23.12.0",
