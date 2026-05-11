@@ -70,3 +70,6 @@ jukebox.log
 .grepai/
 .serena/memories/
 .serena/workflow-*.md
+
+# Claude Code state (fichiers runtime, non versionnés)
+.claude/state/
