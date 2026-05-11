@@ -132,10 +132,8 @@ class AnalyzeWorker(QThread):
             logger.error("[Analyzer] Analysis failed: %s", e, exc_info=True)
             self.error.emit(str(e))
         finally:
-            try:
+            if self in _live_workers:
                 _live_workers.remove(self)
-            except ValueError:
-                pass
 
     def _convert_matches(self, matches: list) -> list[CueEntry]:
         """Convert shazamix Match objects to CueEntry objects.
@@ -254,7 +252,5 @@ class TargetedMatchWorker(QThread):
             logger.error("[Analyzer] Targeted match failed: %s", e, exc_info=True)
             self.error.emit(str(e))
         finally:
-            try:
+            if self in _live_workers:
                 _live_workers.remove(self)
-            except ValueError:
-                pass

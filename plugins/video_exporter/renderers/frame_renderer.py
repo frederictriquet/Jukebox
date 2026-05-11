@@ -221,17 +221,14 @@ class FrameRenderer:
 
         # Intro overlay layer (plays once on top of everything)
         if self.intro_video_path:
-            try:
-                from plugins.video_exporter.layers.intro_overlay_layer import IntroOverlayLayer
+            from plugins.video_exporter.layers.intro_overlay_layer import IntroOverlayLayer
 
-                layer = IntroOverlayLayer(
-                    **common_kwargs,
-                    video_path=self.intro_video_path,
-                )
-                self.layers.append(layer)
-                logging.info("[Frame Renderer] Intro overlay layer enabled")
-            except Exception as e:
-                logging.warning(f"[Frame Renderer] Failed to init intro overlay layer: {e}")
+            layer = IntroOverlayLayer(
+                **common_kwargs,
+                video_path=self.intro_video_path,
+            )
+            self.layers.append(layer)
+            logging.info("[Frame Renderer] Intro overlay layer enabled")
 
         # Sort by z-index
         self.layers.sort(key=lambda layer: layer.z_index)

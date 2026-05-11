@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QInputDialog,
     QMainWindow,
@@ -168,6 +168,19 @@ class MainWindow(QMainWindow):
         # Playlist management
         self.track_list.add_to_playlist_requested.connect(self._on_add_to_playlist)
         self.track_list.create_playlist_requested.connect(self._on_create_playlist_and_add)
+
+        # Après un tri, restaurer la sélection du morceau en cours de lecture
+        self.track_list.track_model.layoutChanged.connect(self._restore_playing_selection)
+
+    def _restore_playing_selection(self) -> None:
+        """Restaure la sélection sur le morceau en cours après un tri.
+
+        Différé via QTimer pour éviter un SIGSEGV : selectRow ne doit pas
+        être appelé pendant le traitement de layoutChanged par Qt.
+        """
+        if self.player.current_file:
+            filepath = self.player.current_file
+            QTimer.singleShot(0, lambda: self.track_list.select_track_by_filepath(filepath))
 
     def _register_shortcuts(self) -> None:
         """Register default keyboard shortcuts."""
@@ -465,7 +478,7 @@ class MainWindow(QMainWindow):
             return
         self._on_add_to_playlist(filepath, playlist_id)  # type: ignore[arg-type]
         # Refresh context menu playlists
-        for plugin in self.plugin_manager.plugins:
+        for plugin in self.plugin_manager.plugins.values():
             if hasattr(plugin, "_update_context_menu"):
                 plugin._update_context_menu()
 
@@ -506,7 +519,7 @@ class MainWindow(QMainWindow):
         self.database.conn.commit()
         logger.info("Added track %s to playlist %d", filepath.name, playlist_id)
         self.event_bus.emit(Events.PLAYLIST_CHANGED)
-        for plugin in self.plugin_manager.plugins:
+        for plugin in self.plugin_manager.plugins.values():
             if hasattr(plugin, "_update_context_menu"):
                 plugin._update_context_menu()
 

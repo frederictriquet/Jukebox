@@ -18,7 +18,7 @@ def show_tags(filepath: str) -> None:
         sys.exit(1)
 
     try:
-        from mutagen import File
+        from mutagen._file import File  # type: ignore[import-untyped]
 
         audio = File(filepath)
 

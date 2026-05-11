@@ -25,7 +25,7 @@ class LoopPlayerPlugin(SettingsSyncMixin):
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: PluginContextProtocol | None = None
+        self.context: PluginContextProtocol = None  # type: ignore[assignment]
         self.loop_button: QPushButton | None = None
         self.loop_active: bool = False
         self.loop_start: float = 0.0  # Position in seconds

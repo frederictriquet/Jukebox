@@ -71,7 +71,7 @@ class TestMetadataExtractor:
         mock_audio.info.length = 0  # Zero duration indicates empty file
 
         with (
-            patch("mutagen.File", return_value=mock_audio),
+            patch("jukebox.utils.metadata.MutagenFile", return_value=mock_audio),
             pytest.raises(ValueError, match="Empty audio file"),
         ):
             MetadataExtractor.extract(test_file)
@@ -86,7 +86,7 @@ class TestMetadataExtractor:
         del mock_audio.info.length  # No duration attribute
 
         with (
-            patch("mutagen.File", return_value=mock_audio),
+            patch("jukebox.utils.metadata.MutagenFile", return_value=mock_audio),
             pytest.raises(ValueError, match="Cannot determine duration"),
         ):
             MetadataExtractor.extract(test_file)
@@ -98,7 +98,7 @@ class TestMetadataExtractor:
 
         # Mock mutagen to return None (invalid file)
         with (
-            patch("mutagen.File", return_value=None),
+            patch("jukebox.utils.metadata.MutagenFile", return_value=None),
             pytest.raises(ValueError, match="Invalid audio file"),
         ):
             MetadataExtractor.extract(test_file)

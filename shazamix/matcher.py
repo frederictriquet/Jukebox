@@ -35,6 +35,7 @@ import math
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -456,7 +457,7 @@ class Matcher:
         slide_step: int,
         min_overlap: int,
         feature_type: str,
-        log: callable | None = None,
+        log: Callable[..., Any] | None = None,
         log_every: int = 10,
     ) -> list[tuple[int, int, float]]:
         """Re-rank candidates by full-alignment sustained similarity.
@@ -553,7 +554,9 @@ class Matcher:
                 if max_run_this > 0:
                     results.append((track_id, max_run_this, avg_at_best))
 
-            except Exception:
+            except Exception as exc:
+                logger = logging.getLogger(__name__)
+                logger.warning("[Matcher] _alignment_rerank: erreur sur track_id=%s : %s", track_id, exc)
                 continue
 
             if log and (idx + 1) % log_every == 0:
@@ -836,9 +839,9 @@ class Matcher:
 
     def precompute_audio_features(
         self,
-        progress_callback: callable | None = None,
+        progress_callback: Callable[..., Any] | None = None,
         max_workers: int = 1,
-        cancelled: callable | None = None,
+        cancelled: Callable[..., Any] | None = None,
     ) -> int:
         """Compute and store MFCC and chroma summaries for all indexed tracks.
 
@@ -912,8 +915,10 @@ class Matcher:
                     self.db.store_audio_features(tid, "chroma_summary", chroma_summary)
 
                 computed += 1
-            except Exception:
-                pass  # Skip tracks that can't be loaded
+            except Exception as exc:
+                logging.getLogger(__name__).warning(
+                    "[Matcher] precompute_audio_features: impossible de traiter %s : %s", filepath, exc
+                )
 
             if (i + 1) % 50 == 0 or i + 1 == total:
                 log(i + 1, total, f"Computed {computed}/{i + 1} feature sets…")
@@ -926,9 +931,9 @@ class Matcher:
         mix_path: str,
         segment_duration_sec: float = 30.0,
         overlap_sec: float = 15.0,
-        progress_callback: callable | None = None,
+        progress_callback: Callable[..., Any] | None = None,
         max_workers: int = 4,
-        cancelled: callable | None = None,
+        cancelled: Callable[..., Any] | None = None,
         precomputed_fingerprints: list[list[Fingerprint]] | None = None,
     ) -> tuple[list[Match], list[list[Fingerprint]]]:
         """Analyze a mix file to identify all tracks used.
@@ -1074,7 +1079,7 @@ class Matcher:
     def _match_global(
         self,
         segment_fps_list: list[list[Fingerprint]],
-        progress_callback: callable | None = None,
+        progress_callback: Callable[..., Any] | None = None,
         stretch_ratios: np.ndarray | None = None,
     ) -> list[Match]:
         """Match all segments globally with tempo-aware search.
@@ -1260,7 +1265,7 @@ class Matcher:
     def _match_segments(
         self,
         segment_fps_list: list[list[Fingerprint]],
-        progress_callback: callable | None = None,
+        progress_callback: Callable[..., Any] | None = None,
     ) -> list[Match]:
         """Match each segment's fingerprints independently against the database.
 
@@ -1326,6 +1331,64 @@ class Matcher:
                 progress_callback(i + 1, total, f"Matching {i + 1}/{total}")
 
         logger.info("[Matcher] Total: %d raw matches from %d segments", len(all_matches), total)
+        return all_matches
+
+    def _match_fingerprints(self, query_fps: list[Fingerprint]) -> list[Match]:
+        """Wrapper : requête DB puis matching temporel sur un seul jeu de fingerprints.
+
+        Args:
+            query_fps: Fingerprints à matcher contre la base.
+
+        Returns:
+            Liste de matches triée par confiance décroissante.
+        """
+        from collections import defaultdict
+
+        if not query_fps:
+            return []
+
+        unique_hashes = list({fp.hash for fp in query_fps})
+        raw = self.db.query_fingerprints(unique_hashes)
+        if not raw:
+            return []
+
+        db_by_hash: dict[int, list[tuple[int, int]]] = defaultdict(list)
+        for track_id, time_offset_ms, hash_val in raw:
+            db_by_hash[hash_val].append((track_id, time_offset_ms))
+
+        matches = self._match_fingerprints_with_db(query_fps, db_by_hash)
+        matches.sort(key=lambda m: -m.confidence)
+        return matches
+
+    def _match_chunked(
+        self,
+        query_fps: list[Fingerprint],
+        chunk_duration_ms: int = 60_000,
+    ) -> list[Match]:
+        """Découpe les fingerprints en fenêtres temporelles et matche chaque chunk.
+
+        Args:
+            query_fps: Fingerprints sur toute la durée du mix.
+            chunk_duration_ms: Durée de chaque fenêtre en ms.
+
+        Returns:
+            Liste de matches (tous chunks confondus, non dédupliqués).
+        """
+        if not query_fps:
+            return []
+
+        min_t = min(fp.time_offset_ms for fp in query_fps)
+        max_t = max(fp.time_offset_ms for fp in query_fps)
+
+        all_matches: list[Match] = []
+        start = min_t
+        while start <= max_t:
+            end = start + chunk_duration_ms
+            chunk = [fp for fp in query_fps if start <= fp.time_offset_ms < end]
+            if len(chunk) >= self.min_matches:
+                all_matches.extend(self._match_fingerprints(chunk))
+            start = end
+
         return all_matches
 
     def _match_fingerprints_with_db(

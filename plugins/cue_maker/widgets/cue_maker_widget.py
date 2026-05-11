@@ -23,6 +23,7 @@ from PySide6.QtGui import (
     QColor,
     QDragEnterEvent,
     QDropEvent,
+    QMouseEvent,
     QPainter,
     QPen,
     QPolygon,
@@ -65,6 +66,7 @@ from plugins.cue_maker.table_model import CueTableModel
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol
     from plugins.cue_maker.model import CueEntry
+    from plugins.waveform_visualizer import WaveformWidget
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +215,7 @@ class CueTimingBar(QWidget):
 
     # -- Mouse interaction --
 
-    def mousePressEvent(self, event: QEvent) -> None:  # noqa: N802
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if not self._has_entry or event.button() != Qt.MouseButton.LeftButton:
             return
         x = event.position().x()
@@ -223,7 +225,7 @@ class CueTimingBar(QWidget):
             self._drag_offset_ms = self._x_to_ms(x) - self._start_ms
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
 
-    def mouseMoveEvent(self, event: QEvent) -> None:  # noqa: N802
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if self._dragging is None:
             # Update cursor hint
             if self._has_entry:
@@ -265,7 +267,7 @@ class CueTimingBar(QWidget):
                 self.update()
                 self.region_changed.emit(new_start, new_end)
 
-    def mouseReleaseEvent(self, event: QEvent) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if self._dragging == "region":
             self.setCursor(Qt.CursorShape.OpenHandCursor)
         self._dragging = None
@@ -305,13 +307,13 @@ class ActionsDelegate(QStyledItemDelegate):
                 # Only show import button for manual entries
                 model = index.model()
                 if model is not None:
-                    entry = model.get_entry(index.row())
+                    entry = model.get_entry(index.row())  # type: ignore[attr-defined]
                     if entry is None or entry.status != EntryStatus.MANUAL:
                         continue
             actions.append((icon, tooltip, i))
         return actions
 
-    def paint(
+    def paint(  # type: ignore[override]
         self,
         painter: QPainter,
         option: QStyleOptionViewItem,
@@ -322,19 +324,19 @@ class ActionsDelegate(QStyledItemDelegate):
         painter.setRenderHint(painter.RenderHint.Antialiasing)
 
         # Draw selection/alternate background
-        if option.state & QStyle.StateFlag.State_Selected:
-            painter.fillRect(option.rect, option.palette.highlight())
-            painter.setPen(option.palette.highlightedText().color())
+        if option.state & QStyle.StateFlag.State_Selected:  # type: ignore[attr-defined]
+            painter.fillRect(option.rect, option.palette.highlight())  # type: ignore[attr-defined]
+            painter.setPen(option.palette.highlightedText().color())  # type: ignore[attr-defined]
         else:
-            painter.setPen(option.palette.text().color())
+            painter.setPen(option.palette.text().color())  # type: ignore[attr-defined]
 
         font = painter.font()
         font.setPointSize(11)
         painter.setFont(font)
 
-        x = option.rect.left() + 2
-        y = option.rect.top()
-        h = option.rect.height()
+        x = option.rect.left() + 2  # type: ignore[attr-defined]
+        y = option.rect.top()  # type: ignore[attr-defined]
+        h = option.rect.height()  # type: ignore[attr-defined]
 
         for icon, _tooltip, _gi in self._actions_for_index(index):
             icon_rect = QRect(x, y, _ACTION_ICON_WIDTH, h)
@@ -343,7 +345,7 @@ class ActionsDelegate(QStyledItemDelegate):
 
         painter.restore()
 
-    def editorEvent(  # noqa: N802
+    def editorEvent(  # type: ignore[override]  # noqa: N802
         self,
         event: QEvent,
         model: QAbstractTableModel,
@@ -355,7 +357,7 @@ class ActionsDelegate(QStyledItemDelegate):
             return False
 
         actions = self._actions_for_index(index)
-        x_click = event.position().x() - option.rect.left() - 2  # type: ignore[union-attr]
+        x_click = event.position().x() - option.rect.left() - 2  # type: ignore[union-attr,attr-defined]
         visual_idx = int(x_click // _ACTION_ICON_WIDTH)
 
         if 0 <= visual_idx < len(actions):
@@ -364,7 +366,7 @@ class ActionsDelegate(QStyledItemDelegate):
             return True
         return False
 
-    def helpEvent(  # noqa: N802
+    def helpEvent(  # type: ignore[override]  # noqa: N802
         self,
         event: QEvent,
         view: QTableView,
@@ -373,10 +375,10 @@ class ActionsDelegate(QStyledItemDelegate):
     ) -> bool:
         """Show tooltip for action icon under the cursor."""
         if event.type() != QEvent.Type.ToolTip:
-            return super().helpEvent(event, view, option, index)
+            return super().helpEvent(event, view, option, index)  # type: ignore[arg-type]
 
         actions = self._actions_for_index(index)
-        x_hover = event.pos().x() - option.rect.left() - 2  # type: ignore[union-attr]
+        x_hover = event.pos().x() - option.rect.left() - 2  # type: ignore[union-attr,attr-defined]
         visual_idx = int(x_hover // _ACTION_ICON_WIDTH)
 
         if 0 <= visual_idx < len(actions):
@@ -388,12 +390,12 @@ class ActionsDelegate(QStyledItemDelegate):
                 view,
             )
             return True
-        return super().helpEvent(event, view, option, index)
+        return super().helpEvent(event, view, option, index)  # type: ignore[arg-type]
 
-    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:  # noqa: N802
+    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:  # type: ignore[override]  # noqa: N802
         """Return size hint based on number of actions."""
         width = len(_ACTIONS) * _ACTION_ICON_WIDTH + 4
-        return QSize(width, option.rect.height() if option.rect.height() > 0 else 24)
+        return QSize(width, option.rect.height() if option.rect.height() > 0 else 24)  # type: ignore[attr-defined]
 
 
 class CueMakerWidget(QWidget):
@@ -447,7 +449,7 @@ class CueMakerWidget(QWidget):
         layout.addWidget(self._create_mix_controls())
 
         # --- Waveform ---
-        self.waveform_widget = self._create_waveform()
+        self.waveform_widget: WaveformWidget = self._create_waveform()
         layout.addWidget(self.waveform_widget)
 
         # --- Timing bar (full width, aligned with waveform) ---
@@ -523,7 +525,7 @@ class CueMakerWidget(QWidget):
         group.setLayout(h)
         return group
 
-    def _create_waveform(self) -> QWidget:
+    def _create_waveform(self) -> WaveformWidget:
         """Create the waveform display widget for the loaded mix."""
         from plugins.waveform_visualizer import WaveformWidget
 
@@ -591,22 +593,22 @@ class CueMakerWidget(QWidget):
     def connect_player_events(self) -> None:
         """Connect to player and event bus for mix playback."""
         self.context.player.state_changed.connect(self._on_player_state_changed)
-        self.context.event_bus.subscribe(Events.TRACK_LOADED, self._on_track_loaded_from_library)
-        self.context.event_bus.subscribe(Events.MIX_POSITION_UPDATE, self._on_mix_position_update)
+        self.context.event_bus.subscribe(Events.TRACK_LOADED, self._on_track_loaded_from_library)  # type: ignore[union-attr]
+        self.context.event_bus.subscribe(Events.MIX_POSITION_UPDATE, self._on_mix_position_update)  # type: ignore[union-attr]
         self.waveform_widget.position_clicked.connect(self._on_waveform_seek)
 
     def disconnect_player_events(self) -> None:
         """Disconnect player and event bus subscriptions for mix playback."""
         try:
             self.context.player.state_changed.disconnect(self._on_player_state_changed)
-        except RuntimeError:
-            pass
-        self.context.event_bus.unsubscribe(Events.TRACK_LOADED, self._on_track_loaded_from_library)
-        self.context.event_bus.unsubscribe(Events.MIX_POSITION_UPDATE, self._on_mix_position_update)
+        except RuntimeError as e:
+            logger.debug("[CueMakerWidget] Signal déjà déconnecté : %s", e)
+        self.context.event_bus.unsubscribe(Events.TRACK_LOADED, self._on_track_loaded_from_library)  # type: ignore[union-attr]
+        self.context.event_bus.unsubscribe(Events.MIX_POSITION_UPDATE, self._on_mix_position_update)  # type: ignore[union-attr]
         try:
             self.waveform_widget.position_clicked.disconnect(self._on_waveform_seek)
-        except RuntimeError:
-            pass
+        except RuntimeError as e:
+            logger.debug("[CueMakerWidget] Signal déjà déconnecté : %s", e)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # type: ignore  # noqa: N802
         """Accept drag events for audio files."""
@@ -1122,7 +1124,7 @@ class CueMakerWidget(QWidget):
             return
 
         cursor_x = position * expected_length
-        inside = region_range[0] <= cursor_x <= region_range[1]
+        inside = region_range[0] <= cursor_x <= region_range[1]  # type: ignore[operator]
 
         if inside != self._cursor_inside_region:
             self._cursor_inside_region = inside

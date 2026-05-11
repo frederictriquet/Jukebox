@@ -3,9 +3,9 @@
 import logging
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
-from PySide6.QtCore import QObject, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, QThread, QTimer, Signal  # type: ignore[import]
 
 from jukebox.core.constants import StatusColors
 from jukebox.core.event_bus import Events
@@ -45,9 +45,11 @@ class BatchProcessor(QObject):
         """Start the periodic cleanup timer if not already running."""
         if cls._cleanup_timer is None:
             cls._cleanup_timer = QTimer()
-            cls._cleanup_timer.timeout.connect(cls._cleanup_orphan_workers)
-        if not cls._cleanup_timer.isActive():
-            cls._cleanup_timer.start(ORPHAN_CLEANUP_INTERVAL_MS)
+        # cast pour que pyright réduise le type de QTimer | None à QTimer
+        timer = cast(QTimer, cls._cleanup_timer)
+        timer.timeout.connect(cls._cleanup_orphan_workers)
+        if not timer.isActive():
+            timer.start(ORPHAN_CLEANUP_INTERVAL_MS)
             logging.debug("[BatchProcessor] Started orphan worker cleanup timer")
 
     @classmethod
@@ -81,7 +83,7 @@ class BatchProcessor(QObject):
     def __init__(
         self,
         name: str,
-        worker_factory: Callable[[Any], QThread],
+        worker_factory: Callable[[Any], Any],
         context: Any,
         parent: QObject | None = None,
     ):
@@ -104,8 +106,8 @@ class BatchProcessor(QObject):
         self.total_items = 0
         self.completed_count = 0
 
-        # Worker management
-        self.current_worker: QThread | None = None
+        # Worker management — Any pour accéder aux signaux custom (complete, error, progress_update)
+        self.current_worker: Any | None = None
 
         # State
         self.is_running = False
@@ -229,18 +231,17 @@ class BatchProcessor(QObject):
 
         # Create worker
         try:
-            self.current_worker = self.worker_factory(item)
+            worker = self.worker_factory(item)
+            self.current_worker = worker
 
-            # Connect signals (worker must emit 'complete' or 'error')
-            if hasattr(self.current_worker, "complete"):
-                self.current_worker.complete.connect(
-                    lambda result: self._on_item_complete(item, result)
-                )
-            if hasattr(self.current_worker, "error"):
-                self.current_worker.error.connect(lambda error: self._on_item_error(item, error))
+            # Connect signals (worker must emit 'complete' ou 'error')
+            if hasattr(worker, "complete"):
+                worker.complete.connect(lambda result: self._on_item_complete(item, result))
+            if hasattr(worker, "error"):
+                worker.error.connect(lambda error: self._on_item_error(item, error))
 
             # Start worker
-            self.current_worker.start()
+            worker.start()
 
         except Exception as e:
             logging.error(f"[{self.name}] Failed to create worker: {e}", exc_info=True)

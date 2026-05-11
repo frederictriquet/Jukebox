@@ -25,7 +25,7 @@ class PlaybackNavigationPlugin(SettingsSyncMixin):
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: PluginContextProtocol | None = None
+        self.context: PluginContextProtocol = None  # type: ignore[assignment]
         self.last_seek_time: float = 0.0
         self.seek_multiplier: int = 1
         self.auto_play_next: bool = True

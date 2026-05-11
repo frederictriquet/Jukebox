@@ -46,7 +46,7 @@ class ConfManagerPlugin:
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: PluginContextProtocol | None = None
+        self.context: PluginContextProtocol = None  # type: ignore[assignment]
         self.conf_dialog: ConfigDialog | None = None
 
     def initialize(self, context: PluginContextProtocol) -> None:

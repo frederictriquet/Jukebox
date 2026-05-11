@@ -100,7 +100,7 @@ class MetadataEditorPlugin:
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: PluginContextProtocol | None = None
+        self.context: PluginContextProtocol = None  # type: ignore[assignment]
         self.editor_widget: MetadataEditorWidget | None = None
         self.tab_event_filter: TabEventFilter | None = None
         self.current_track_id: int | None = None
@@ -213,6 +213,13 @@ class MetadataEditorPlugin:
             logging.info("Saved metadata for track %d", self.current_track_id)
         else:
             logging.error("Failed to save file tags: %s", filepath)
+            # Retour visuel dans la status bar en cas d'échec de sauvegarde
+            from jukebox.core.event_bus import Events
+
+            self.context.emit(
+                Events.STATUS_MESSAGE,
+                message=f"Erreur : impossible de sauvegarder les métadonnées dans {Path(filepath).name}",
+            )
 
         # Note: We don't emit TRACKS_ADDED here to avoid reloading the entire track list
         # The track list display will update on next full reload

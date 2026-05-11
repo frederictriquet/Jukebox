@@ -31,7 +31,7 @@ class PlaylistsPlugin:
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: PluginContextProtocol | None = None
+        self.context: PluginContextProtocol = None  # type: ignore[assignment]
 
     def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""

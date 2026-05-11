@@ -38,7 +38,7 @@ class WaveformVisualizerPlugin(SettingsSyncMixin):
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: PluginContextProtocol | None = None
+        self.context: PluginContextProtocol = None  # type: ignore[assignment]
         self.waveform_widget: WaveformWidget | None = None
         self.current_track_id: int | None = None  # Currently displayed track
         self._current_track_filepath: str | None = None  # Filepath of displayed track
@@ -164,8 +164,8 @@ class WaveformVisualizerPlugin(SettingsSyncMixin):
             try:
                 waveform = pickle.loads(cached_data)
                 self.waveform_widget.display_waveform(waveform)
-            except Exception:
-                # Corrupted cache, clear
+            except Exception as e:
+                logging.warning("[WaveformVisualizer] Cache corrompu, effacement : %s", e)
                 self.waveform_widget.clear_waveform()
         else:
             # Not in cache - add to priority queue if batch is running
@@ -358,8 +358,8 @@ class WaveformVisualizerPlugin(SettingsSyncMixin):
             try:
                 WaveformVisualizerPlugin._batch_processor.item_complete.disconnect()
                 WaveformVisualizerPlugin._batch_processor.item_error.disconnect()
-            except (RuntimeError, TypeError):
-                pass
+            except (RuntimeError, TypeError) as e:
+                logging.debug("[WaveformVisualizer] Signaux déjà déconnectés : %s", e)
         # Don't set to None - keep it alive so orphan workers can finish
 
     _config_attr = "waveform"
@@ -432,18 +432,18 @@ class WaveformWidget(QWidget):
 
         # Remove all padding/margins
         self.plot_widget.setContentsMargins(0, 0, 0, 0)
-        self.plot_widget.plotItem.setContentsMargins(0, 0, 0, 0)
+        self.plot_widget.plotItem.setContentsMargins(0, 0, 0, 0)  # type: ignore[attr-defined]
 
         # Disable auto-range padding
-        self.plot_widget.plotItem.vb.setDefaultPadding(0)
-        self.plot_widget.plotItem.vb.enableAutoRange(enable=False)
+        self.plot_widget.plotItem.vb.setDefaultPadding(0)  # type: ignore[attr-defined]
+        self.plot_widget.plotItem.vb.enableAutoRange(enable=False)  # type: ignore[attr-defined]
 
         height = waveform_config.height if waveform_config else 120
         self.plot_widget.setMaximumHeight(height)
         self.plot_widget.setMinimumHeight(height)
 
         # Click to seek
-        self.plot_widget.scene().sigMouseClicked.connect(self._on_click)
+        self.plot_widget.scene().sigMouseClicked.connect(self._on_click)  # type: ignore[attr-defined]
 
         layout.addWidget(self.plot_widget)
         self.setLayout(layout)
@@ -457,8 +457,8 @@ class WaveformWidget(QWidget):
         self.plot_widget.addItem(self.cursor_line)
 
         # Set initial viewport range with no padding
-        self.plot_widget.setXRange(0, 100, padding=0)
-        self.plot_widget.setYRange(0, 1, padding=0)
+        self.plot_widget.setXRange(0, 100, padding=0)  # type: ignore[call-arg]
+        self.plot_widget.setYRange(0, 1, padding=0)  # type: ignore[call-arg]
 
     def display_waveform(self, waveform: Any) -> None:
         """Display waveform data with 3 colors stacked (Engine DJ style)."""
@@ -506,8 +506,8 @@ class WaveformWidget(QWidget):
             )
 
             # Set range to fit data exactly
-            self.plot_widget.setXRange(0, len(bass), padding=0)
-            self.plot_widget.setYRange(0, np.max(treble_total) * 1.05, padding=0)
+            self.plot_widget.setXRange(0, len(bass), padding=0)  # type: ignore[call-arg]
+            self.plot_widget.setYRange(0, np.max(treble_total) * 1.05, padding=0)  # type: ignore[call-arg]
 
         # Re-add cursor line after clear (cleared removes it)
         if self.cursor_line:
@@ -543,7 +543,7 @@ class WaveformWidget(QWidget):
             return
 
         # Get click position
-        mouse_point = self.plot_widget.plotItem.vb.mapSceneToView(event.scenePos())
+        mouse_point = self.plot_widget.plotItem.vb.mapSceneToView(event.scenePos())  # type: ignore[union-attr]
         x = mouse_point.x()
 
         # Convert to position (0.0-1.0)

@@ -157,8 +157,8 @@ class UIBuilder:
             # Remove widget from its parent layout first
             if widget.parent():
                 parent = widget.parent()
-                if hasattr(parent, "layout") and parent.layout():
-                    parent.layout().removeWidget(widget)
+                if hasattr(parent, "layout") and parent.layout():  # type: ignore[attr-defined]
+                    parent.layout().removeWidget(widget)  # type: ignore[attr-defined]
 
             # Hide widget immediately before deletion
             widget.hide()

@@ -96,6 +96,11 @@ class GenreSuggesterPlugin:
         except FileNotFoundError:
             self.model = None
             logger.warning("[genre_suggester] Model not found at %s", MODEL_PATH)
+        except ImportError as e:
+            # Dépendances ML optionnelles non installées (pandas, sklearn…)
+            # Installer avec : uv sync --all-extras
+            self.model = None
+            logger.warning("[genre_suggester] ML deps not available, suggestions disabled (%s)", e)
         except Exception:
             self.model = None
             logger.exception("[genre_suggester] Failed to load model")

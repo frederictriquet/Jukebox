@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QSortFilterProxyModel, Qt
-from PySide6.QtWidgets import QSplitter, QVBoxLayout, QWidget
+from PySide6.QtCore import QSortFilterProxyModel, Qt  # type: ignore[import-untyped]
+from PySide6.QtWidgets import QSplitter, QVBoxLayout, QWidget  # type: ignore[import-untyped]
 
 from jukebox.core.constants import WORKER_WAIT_TIMEOUT_MS
 from plugins.cue_maker.widgets.bottom_drawer import BottomDrawer
@@ -39,7 +39,7 @@ class CueMakerPlugin:
 
     def __init__(self) -> None:
         """Initialize plugin state."""
-        self.context: PluginContextProtocol | None = None
+        self.context: PluginContextProtocol = None  # type: ignore[assignment]
         self._ui_builder: UIBuilderProtocol | None = None
         self.main_widget: CueMakerWidget | None = None
         self._analyzer: AnalyzeWorker | None = None
@@ -79,7 +79,6 @@ class CueMakerPlugin:
         """
         from plugins.cue_maker.widgets.cue_maker_widget import CueMakerWidget
 
-        assert self.context is not None
         self._ui_builder = ui_builder
         self.main_widget = CueMakerWidget(self.context)
         ui_builder.add_bottom_widget(self.main_widget)
@@ -103,7 +102,6 @@ class CueMakerPlugin:
             mode: Mode being activated (should be "cue_maker")
         """
         self._active = True
-        assert self.context is not None
 
         app = self.context.app
         nav_plugin = app.plugin_manager.plugins.get("directory_navigator")
@@ -186,7 +184,7 @@ class CueMakerPlugin:
                 drawer_genres = search_filter_plugin.get_drawer_genre_buttons_container()
             else:
                 # Fallback: create a simple container
-                from PySide6.QtWidgets import QHBoxLayout, QLabel
+                from PySide6.QtWidgets import QHBoxLayout, QLabel  # type: ignore[import-untyped]
 
                 drawer_genres = QWidget()
                 layout = QHBoxLayout(drawer_genres)
@@ -230,10 +228,8 @@ class CueMakerPlugin:
             waveform_widget.setVisible(True)
             dc_layout.addWidget(waveform_widget, stretch=0)
             # Remove from saved widgets to avoid adding it twice in deactivate()
-            try:
+            if waveform_widget in self._saved_bottom_widgets:
                 self._saved_bottom_widgets.remove(waveform_widget)
-            except ValueError:
-                pass
 
         self._drawer.set_content(drawer_content)
         v_layout.addWidget(self._drawer)
@@ -268,7 +264,6 @@ class CueMakerPlugin:
             mode: Mode being deactivated
         """
         self._active = False
-        assert self.context is not None
 
         app = self.context.app
 
@@ -281,8 +276,8 @@ class CueMakerPlugin:
                 self.main_widget.import_requested.disconnect(self._on_import_from_library)
                 self.main_widget.search_requested.disconnect(self._on_search_in_library)
                 self.main_widget.targeted_match_requested.disconnect(self._on_targeted_match)
-            except RuntimeError:
-                pass
+            except RuntimeError as e:
+                logger.debug("[CueMaker] Signaux déjà déconnectés : %s", e)
 
         # Stop any running targeted match worker
         if self._targeted_worker is not None and self._targeted_worker.isRunning():
@@ -355,12 +350,10 @@ class CueMakerPlugin:
 
         # Remove context menu action
         if self._ui_builder and self._cue_context_action is not None:
-            try:
+            if self._cue_context_action in self._ui_builder.track_context_actions:  # type: ignore[attr-defined]
                 self._ui_builder.track_context_actions.remove(  # type: ignore[attr-defined]
                     self._cue_context_action
                 )
-            except ValueError:
-                pass
             self._cue_context_action = None
 
         logger.debug("[Cue Maker] Deactivated for %s mode", mode)
@@ -387,7 +380,7 @@ class CueMakerPlugin:
             from jukebox.core.event_bus import Events
 
             self.context.event_bus.unsubscribe(Events.CUE_ADD_TRACK, self._on_cue_add_track)
-        self.context = None
+        self.context = None  # type: ignore[assignment]
         logger.info("[Cue Maker] Plugin shut down")
 
     # --- Analysis ---
@@ -411,7 +404,7 @@ class CueMakerPlugin:
         db_path = str(cue_config.shazamix_db_path.expanduser()) if cue_config else ""
         if not db_path:
             logger.warning("[Cue Maker] No shazamix database path configured")
-            from PySide6.QtWidgets import QMessageBox
+            from PySide6.QtWidgets import QMessageBox  # type: ignore[import-untyped]
 
             QMessageBox.warning(
                 self.main_widget,
@@ -481,7 +474,7 @@ class CueMakerPlugin:
         cue_config = getattr(self.context.config, "cue_maker", None)
         db_path = str(cue_config.shazamix_db_path.expanduser()) if cue_config else ""
         if not db_path:
-            from PySide6.QtWidgets import QMessageBox
+            from PySide6.QtWidgets import QMessageBox  # type: ignore[import-untyped]
 
             QMessageBox.warning(
                 self.main_widget,

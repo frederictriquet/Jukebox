@@ -26,7 +26,7 @@ class GenreEditorPlugin(SettingsSyncMixin, ShortcutMixin):
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: PluginContextProtocol | None = None
+        self.context: PluginContextProtocol = None  # type: ignore[assignment]
         self.current_track_id: int | None = None
         self.current_genre: str = ""
         self._init_shortcut_mixin()
@@ -46,7 +46,8 @@ class GenreEditorPlugin(SettingsSyncMixin, ShortcutMixin):
 
     def _register_plugin_shortcuts(self) -> None:
         """Register genre code shortcuts."""
-        # Get genre codes from config
+        if self.context is None:
+            return
         genre_config = self.context.config.genre_editor
 
         for code_config in genre_config.codes:
@@ -66,6 +67,8 @@ class GenreEditorPlugin(SettingsSyncMixin, ShortcutMixin):
     def _on_track_loaded(self, track_id: int) -> None:
         """Load current genre when track loads."""
         self.current_track_id = track_id
+        if self.context is None:
+            return
 
         # Get genre from database
         track = self.context.database.tracks.get_by_id(track_id)
@@ -94,7 +97,16 @@ class GenreEditorPlugin(SettingsSyncMixin, ShortcutMixin):
 
     def _reload_plugin_config(self) -> None:
         """Reload genre_editor config from database."""
+        if self.context is None:
+            return
+        # Conserver les hashtags du YAML avant que le sync DB ne les écrase
+        # (la DB ne stocke pas les hashtags car ils ne sont pas exposés dans l'UI de settings)
+        yaml_hashtags = {gc.code: gc.hashtags for gc in self.context.config.genre_editor.codes}
         self._sync_settings_from_db()
+        # Restaurer les hashtags si la DB a des codes sans hashtags
+        for gc in self.context.config.genre_editor.codes:
+            if not gc.hashtags and gc.code in yaml_hashtags:
+                gc.hashtags = yaml_hashtags[gc.code]
 
     def _toggle_code(self, code: str) -> None:
         """Toggle a genre code in the current genre."""
@@ -157,7 +169,7 @@ class GenreEditorPlugin(SettingsSyncMixin, ShortcutMixin):
 
     def _save_genre(self, new_genre: str) -> None:
         """Save genre to database and file tags."""
-        if self.current_track_id is None:
+        if self.current_track_id is None or self.context is None:
             return
 
         self.current_genre = new_genre
@@ -184,6 +196,11 @@ class GenreEditorPlugin(SettingsSyncMixin, ShortcutMixin):
             logging.info(f"Saved genre '{new_genre}' for track {self.current_track_id}")
         else:
             logging.error(f"Failed to save genre to file: {filepath}")
+            # Retour visuel dans la status bar en cas d'échec de sauvegarde
+            self.context.emit(
+                Events.STATUS_MESSAGE,
+                message=f"Erreur : impossible de sauvegarder le genre dans {Path(filepath).name}",
+            )
 
         # Note: We don't emit TRACKS_ADDED here to avoid reloading the entire track list
         # The track list display will update on next full reload
@@ -208,6 +225,8 @@ class GenreEditorPlugin(SettingsSyncMixin, ShortcutMixin):
         Returns:
             Dict mapping setting keys to their configuration
         """
+        if self.context is None:
+            return {}
         return {
             "genre_codes": {
                 "label": "Genre Codes",

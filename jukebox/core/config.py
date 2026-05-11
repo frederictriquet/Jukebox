@@ -209,6 +209,10 @@ class VideoExporterConfig(BaseModel):
     ffmpeg_pixel_format: str = "yuv420p"
     ffmpeg_audio_codec: str = "aac"
     ffmpeg_audio_bitrate: str = "192k"
+    # Constrained CRF pour respecter le débit minimum Instagram Reels (3500 kbps)
+    ffmpeg_min_video_bitrate: str = "3500k"
+    ffmpeg_max_video_bitrate: str = "5000k"
+    ffmpeg_bufsize: str = "7000k"
     # VJing simultaneous effects (how many effects are visible at once)
     vjing_simultaneous_effects: int = Field(ge=1, le=10, default=1)
 

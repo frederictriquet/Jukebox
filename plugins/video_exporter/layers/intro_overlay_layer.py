@@ -71,14 +71,12 @@ class IntroOverlayLayer(BaseVisualLayer):
             return
 
         if not self.video_path.exists():
-            logging.warning(f"[Intro Overlay] Video file not found: {self.video_path}")
-            return
+            raise FileNotFoundError(f"Vidéo d'intro introuvable : {self.video_path}")
 
         if self.video_path.suffix.lower() not in self.VIDEO_EXTENSIONS:
-            logging.warning(
-                f"[Intro Overlay] Unsupported video format: {self.video_path.suffix}"
+            raise ValueError(
+                f"Format vidéo non supporté pour l'intro : {self.video_path.suffix}"
             )
-            return
 
         logging.info(f"[Intro Overlay] Loading video: {self.video_path}")
 
@@ -89,9 +87,11 @@ class IntroOverlayLayer(BaseVisualLayer):
         """Pre-load all frames from the intro video."""
         try:
             import cv2
-        except ImportError:
-            logging.warning("[Intro Overlay] OpenCV not available, cannot load video")
-            return
+        except ImportError as e:
+            raise ImportError(
+                "OpenCV (cv2) est requis pour la vidéo d'intro. "
+                "Installe-le avec : uv sync --extra video"
+            ) from e
 
         try:
             cap = cv2.VideoCapture(str(self.video_path))
@@ -148,7 +148,7 @@ class IntroOverlayLayer(BaseVisualLayer):
             )
 
         except Exception as e:
-            logging.error(f"[Intro Overlay] Error loading video: {e}")
+            raise RuntimeError(f"Échec du chargement de la vidéo d'intro : {e}") from e
 
     def _resize_with_aspect_ratio(
         self, frame: np.ndarray, target_width: int, target_height: int
@@ -220,7 +220,7 @@ class IntroOverlayLayer(BaseVisualLayer):
 
         return frame
 
-    def render(self, frame_idx: int, _time_pos: float) -> Image.Image:
+    def render(self, frame_idx: int, time_pos: float) -> Image.Image:  # noqa: ARG002
         """Render intro overlay frame.
 
         Thread-safe: Only reads from pre-loaded frames.

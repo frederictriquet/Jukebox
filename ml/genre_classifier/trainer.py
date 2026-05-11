@@ -17,7 +17,7 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import train_test_split
 
-from .data_loader import ML_FEATURE_COLUMNS, load_training_data, load_track_features
+from .data_loader import ML_FEATURE_COLUMNS, load_training_data
 from .feature_engineering import FeaturePreprocessor, MultiLabelGenreEncoder
 from .models import BaseGenreClassifier, get_all_models, get_model
 
@@ -101,8 +101,8 @@ class GenreClassifierTrainer:
         self.preprocessor = FeaturePreprocessor()
         self.label_encoder = MultiLabelGenreEncoder()
 
-        self.X_train: np.ndarray | None = None
-        self.X_test: np.ndarray | None = None
+        self.X_train: np.ndarray | None = None  # noqa: N803
+        self.X_test: np.ndarray | None = None  # noqa: N803
         self.y_train: np.ndarray | None = None
         self.y_test: np.ndarray | None = None
         self.genres: list[str] = []
@@ -121,11 +121,11 @@ class GenreClassifierTrainer:
         Returns:
             Tuple of (n_samples, n_features, n_genres)
         """
-        kwargs = {"min_samples_per_genre": min_samples_per_genre}
+        kwargs: dict[str, Any] = {"min_samples_per_genre": min_samples_per_genre}
         if db_path:
             kwargs["db_path"] = db_path
 
-        X, y, genres = load_training_data(**kwargs)
+        x_raw, y, genres = load_training_data(**kwargs)  # type: ignore[call-arg]
 
         self.genres = genres
         self.label_encoder.fit(genres)
@@ -134,65 +134,69 @@ class GenreClassifierTrainer:
         y_array = y.values
 
         # Split data (stratified split not available for multi-label, use random)
-        X_train_raw, X_test_raw, self.y_train, self.y_test = train_test_split(
-            X,
+        split_result = train_test_split(
+            x_raw,
             y_array,
             test_size=self.test_size,
             random_state=self.random_state,
         )
+        x_train_raw: pd.DataFrame = split_result[0]  # type: ignore[assignment]
+        x_test_raw: pd.DataFrame = split_result[1]  # type: ignore[assignment]
+        self.y_train = np.asarray(split_result[2])
+        self.y_test = np.asarray(split_result[3])
 
         # Preprocess features
-        self.X_train = self.preprocessor.fit_transform(X_train_raw)
-        self.X_test = self.preprocessor.transform(X_test_raw)
+        self.X_train = self.preprocessor.fit_transform(x_train_raw)  # noqa: N803
+        self.X_test = self.preprocessor.transform(x_test_raw)  # noqa: N803
 
         return len(y), len(ML_FEATURE_COLUMNS), len(genres)
 
     def evaluate_model(
         self,
         model: BaseGenreClassifier,
-        X: np.ndarray,
-        y: np.ndarray,
+        features: np.ndarray,
+        labels: np.ndarray,
     ) -> MultiLabelMetrics:
         """Evaluate a model on given data.
 
         Args:
             model: Trained model
-            X: Features
-            y: True labels (binary matrix)
+            features: Feature matrix
+            labels: True labels (binary matrix)
 
         Returns:
             Multi-label evaluation metrics
         """
-        y_pred = model.predict(X)
+        y_pred = model.predict(features)
 
         # Overall metrics
-        h_loss = hamming_loss(y, y_pred)
-        subset_acc = accuracy_score(y, y_pred)  # Exact match
+        h_loss = hamming_loss(labels, y_pred)
+        subset_acc = accuracy_score(labels, y_pred)  # Exact match
 
-        f1_micro = f1_score(y, y_pred, average="micro", zero_division=0)
-        f1_macro = f1_score(y, y_pred, average="macro", zero_division=0)
-        f1_weighted = f1_score(y, y_pred, average="weighted", zero_division=0)
-        f1_samples = f1_score(y, y_pred, average="samples", zero_division=0)
+        f1_micro = f1_score(labels, y_pred, average="micro", zero_division=0)  # type: ignore[arg-type]
+        f1_macro = f1_score(labels, y_pred, average="macro", zero_division=0)  # type: ignore[arg-type]
+        f1_weighted = f1_score(labels, y_pred, average="weighted", zero_division=0)  # type: ignore[arg-type]
+        f1_samples = f1_score(labels, y_pred, average="samples", zero_division=0)  # type: ignore[arg-type]
 
-        precision_micro = precision_score(y, y_pred, average="micro", zero_division=0)
-        recall_micro = recall_score(y, y_pred, average="micro", zero_division=0)
+        precision_micro = precision_score(labels, y_pred, average="micro", zero_division=0)  # type: ignore[arg-type]
+        recall_micro = recall_score(labels, y_pred, average="micro", zero_division=0)  # type: ignore[arg-type]
 
         # Per-genre metrics
         per_genre = {}
         for i, genre in enumerate(self.genres):
-            y_true_genre = y[:, i]
+            y_true_genre = labels[:, i]
             y_pred_genre = y_pred[:, i]
             support = int(y_true_genre.sum())
 
             if support > 0:
                 per_genre[genre] = {
                     "precision": precision_score(
-                        y_true_genre, y_pred_genre, zero_division=0
+                        y_true_genre, y_pred_genre, zero_division=0  # type: ignore[arg-type]
                     ),
                     "recall": recall_score(
-                        y_true_genre, y_pred_genre, zero_division=0
+                        y_true_genre, y_pred_genre, zero_division=0  # type: ignore[arg-type]
                     ),
-                    "f1": f1_score(y_true_genre, y_pred_genre, zero_division=0),
+                    "f1": f1_score(y_true_genre, y_pred_genre, zero_division=0),  # type: ignore[arg-type]
                     "support": support,
                 }
 
@@ -222,18 +226,20 @@ class GenreClassifierTrainer:
         """
         import time
 
-        if self.X_train is None:
+        if self.X_train is None or self.X_test is None:  # noqa: N803
+            raise RuntimeError("Data not loaded. Call load_data() first.")
+        if self.y_train is None or self.y_test is None:
             raise RuntimeError("Data not loaded. Call load_data() first.")
 
         start_time = time.time()
 
         # Train model
-        model.fit(self.X_train, self.y_train)
+        model.fit(self.X_train, self.y_train)  # noqa: N803
 
         training_time = time.time() - start_time
 
         # Evaluate on test set
-        metrics = self.evaluate_model(model, self.X_test, self.y_test)
+        metrics = self.evaluate_model(model, self.X_test, self.y_test)  # noqa: N803
 
         # Feature importance
         feature_importance = None
@@ -250,7 +256,7 @@ class GenreClassifierTrainer:
             feature_importance=feature_importance,
             training_time=training_time,
             n_samples=len(self.y_train) + len(self.y_test),
-            n_features=self.X_train.shape[1],
+            n_features=self.X_train.shape[1],  # noqa: N803
             n_genres=len(self.genres),
             genres=self.genres,
         )
@@ -322,8 +328,8 @@ class TrainedModel:
         Returns:
             Set of predicted genre strings
         """
-        X = self.preprocessor.transform(features)
-        y_proba = self.model.predict_proba(X)
+        x = self.preprocessor.transform(features)
+        y_proba = self.model.predict_proba(x)
         return self.label_encoder.decode_single(y_proba[0], threshold)
 
     def predict_proba(self, features: pd.DataFrame) -> dict[str, float]:
@@ -335,11 +341,11 @@ class TrainedModel:
         Returns:
             Dictionary mapping genre to probability
         """
-        X = self.preprocessor.transform(features)
-        proba = self.model.predict_proba(X)[0]
+        x = self.preprocessor.transform(features)
+        proba = self.model.predict_proba(x)[0]
         return {
             genre: float(prob)
-            for genre, prob in zip(self.label_encoder.classes_, proba)
+            for genre, prob in zip(self.label_encoder.classes_, proba, strict=False)
         }
 
     def predict_top_n(
@@ -414,7 +420,7 @@ def train_best_model(
     model_name: str = "random_forest",
     save_path: Path | str | None = None,
     min_samples_per_genre: int = 5,
-    **model_kwargs,
+    **model_kwargs: Any,
 ) -> tuple[TrainedModel, TrainingResult]:
     """Train a model and optionally save it.
 

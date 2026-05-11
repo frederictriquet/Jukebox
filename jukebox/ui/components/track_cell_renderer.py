@@ -1,5 +1,6 @@
 """Cell renderer for track list columns."""
 
+import logging
 from collections import OrderedDict
 from typing import Any, TypeVar
 
@@ -67,6 +68,7 @@ class CellRenderer:
             "genre": GenreStyler(genre_names or {}),
             "rating": RatingStyler(),
             "duration": DurationStyler(),
+            "path": PathStyler(),
         }
 
     def set_mode(self, mode: str) -> None:
@@ -257,7 +259,7 @@ class GenreStyler(Styler):
         # Map codes to full names
         full_names = [self.genre_names.get(code, code) for code in codes]
 
-        return " - ".join(full_names) if full_names else None
+        return " - ".join(n for n in full_names if n is not None) if full_names else None
 
     def decoration(self, data: Any, track: dict[str, Any]) -> QColor | None:
         """Red if no genre or invalid genre."""
@@ -288,7 +290,11 @@ class RatingStyler(Styler):
             try:
                 rating = int(rating_str)
                 return "* " * rating
-            except ValueError:
+            except ValueError as e:
+                # La chaîne de notation extraite n'est pas un entier valide
+                logging.debug(
+                    f"[RatingStyler] Valeur de notation invalide '{rating_str}' dans le genre '{genre}': {e}"
+                )
                 return ""
 
         return ""
@@ -513,3 +519,21 @@ class DuplicateStatusStyler(Styler):
     def alignment(self, data: Any, track: dict[str, Any]) -> Qt.AlignmentFlag:
         """Center-align the dot."""
         return Qt.AlignmentFlag.AlignCenter
+
+
+class PathStyler(Styler):
+    """Styler pour la colonne path : affiche le répertoire parent du fichier."""
+
+    def display(self, data: Any, track: dict[str, Any]) -> str:
+        """Affiche le répertoire parent."""
+        filepath = track.get("filepath")
+        if filepath is None:
+            return ""
+        return str(filepath.parent)
+
+    def tooltip(self, data: Any, track: dict[str, Any]) -> str | None:
+        """Affiche le chemin complet en tooltip."""
+        filepath = track.get("filepath")
+        if filepath is None:
+            return None
+        return str(filepath)

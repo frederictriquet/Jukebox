@@ -8,9 +8,8 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import numpy as np
-
 if TYPE_CHECKING:
+    import numpy as np
     from numpy.typing import NDArray
 
 
@@ -34,6 +33,9 @@ class FFmpegEncoder:
         pixel_format: str = "yuv420p",
         audio_codec: str = "aac",
         audio_bitrate: str = "192k",
+        min_video_bitrate: str = "3500k",
+        max_video_bitrate: str = "5000k",
+        bufsize: str = "7000k",
     ) -> None:
         """Initialize FFmpeg encoder.
 
@@ -52,6 +54,9 @@ class FFmpegEncoder:
             pixel_format: FFmpeg pixel format (default: yuv420p).
             audio_codec: FFmpeg audio codec (default: aac).
             audio_bitrate: FFmpeg audio bitrate (default: 192k).
+            min_video_bitrate: Débit vidéo minimum pour le constrained CRF (default: 3500k).
+            max_video_bitrate: Débit vidéo maximum pour le constrained CRF (default: 5000k).
+            bufsize: Taille du buffer VBV pour le constrained CRF (default: 7000k).
 
         Raises:
             RuntimeError: If FFmpeg is not found.
@@ -70,21 +75,26 @@ class FFmpegEncoder:
         self.pixel_format = pixel_format
         self.audio_codec = audio_codec
         self.audio_bitrate = audio_bitrate
+        # Paramètres de constrained CRF pour garantir le débit minimum Instagram Reels
+        self.min_video_bitrate = min_video_bitrate
+        self.max_video_bitrate = max_video_bitrate
+        self.bufsize = bufsize
         self.process: subprocess.Popen | None = None
         self._frame_count = 0
 
-        # Check FFmpeg availability
-        self.ffmpeg_path = shutil.which("ffmpeg")
-        if not self.ffmpeg_path:
+        # Vérification de la disponibilité de FFmpeg
+        ffmpeg_path = shutil.which("ffmpeg")
+        if not ffmpeg_path:
             raise RuntimeError("FFmpeg not found. Please install FFmpeg.")
+        self.ffmpeg_path: str = ffmpeg_path
 
     def start(self) -> None:
         """Start the FFmpeg process."""
         # Ensure output directory exists
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Build FFmpeg command
-        cmd = [
+        # Construction de la commande FFmpeg
+        cmd: list[str] = [
             self.ffmpeg_path,
             "-y",  # Overwrite output file
             # Video input from pipe
@@ -125,7 +135,7 @@ class FFmpegEncoder:
             cmd.extend(["-vf", video_filter])
             cmd.extend(["-af", audio_filter])
 
-        # Output settings
+        # Paramètres de sortie : constrained CRF pour garantir le débit minimum Instagram Reels
         cmd.extend([
             "-c:v",
             self.video_codec,
@@ -133,19 +143,26 @@ class FFmpegEncoder:
             self.preset,
             "-crf",
             self.crf,
+            # Constrained CRF : impose un débit plancher sans abandonner le CRF
+            "-b:v",
+            self.min_video_bitrate,
+            "-maxrate",
+            self.max_video_bitrate,
+            "-bufsize",
+            self.bufsize,
             "-pix_fmt",
             self.pixel_format,
             "-c:a",
             self.audio_codec,
             "-b:a",
             self.audio_bitrate,
-            "-shortest",  # End when shortest stream ends
+            "-shortest",  # Fin quand le flux le plus court se termine
             str(self.output_path),
         ])
 
         logging.info(f"[FFmpeg] Starting encoder: {' '.join(cmd)}")
 
-        self.process = subprocess.Popen(
+        self.process = subprocess.Popen(  # noqa: S603
             cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -225,12 +242,12 @@ class FFmpegEncoder:
         if self.process.stdin:
             try:
                 self.process.stdin.flush()
-            except (BrokenPipeError, ValueError, OSError):
-                pass  # Already closed or broken
+            except (BrokenPipeError, ValueError, OSError) as e:
+                logging.debug("[FFmpegEncoder] stdin flush ignoré (pipe fermé) : %s", e)
             try:
                 self.process.stdin.close()
-            except (BrokenPipeError, ValueError, OSError):
-                pass
+            except (BrokenPipeError, ValueError, OSError) as e:
+                logging.debug("[FFmpegEncoder] stdin close ignoré (pipe fermé) : %s", e)
             # Set to None so communicate() doesn't try to flush it
             self.process.stdin = None
 

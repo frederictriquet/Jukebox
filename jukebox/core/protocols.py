@@ -8,8 +8,8 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from PySide6.QtGui import QShortcut
-from PySide6.QtWidgets import QWidget
+from PySide6.QtGui import QShortcut  # type: ignore[import-untyped]
+from PySide6.QtWidgets import QWidget  # type: ignore[import-untyped]
 
 # ============================================================================
 # Database Protocols
@@ -68,6 +68,11 @@ class SettingsRepositoryProtocol(Protocol):
 class DatabaseProtocol(Protocol):
     """Protocol for database operations used by plugins."""
 
+    # Connexion SQLite brute (utilisée par certains plugins legacy)
+    conn: Any
+    # Chemin vers le fichier de base de données
+    db_path: Path
+
     @property
     def tracks(self) -> TrackRepositoryProtocol: ...
 
@@ -105,6 +110,12 @@ class EventBusProtocol(Protocol):
 @runtime_checkable
 class AudioPlayerProtocol(Protocol):
     """Protocol for audio player operations used by plugins."""
+
+    # Signaux Qt émis par AudioPlayer
+    track_finished: Any
+    state_changed: Any
+    position_changed: Any
+    volume_changed: Any
 
     @property
     def current_file(self) -> Path | None: ...
@@ -147,19 +158,25 @@ class ShortcutManagerProtocol(Protocol):
 class WaveformConfigProtocol(Protocol):
     """Protocol for waveform configuration."""
 
+    bass_color: str
+    mid_color: str
+    treble_color: str
+    cursor_color: str
+    height: int
     chunk_duration: float
 
 
 class AudioAnalysisConfigProtocol(Protocol):
     """Protocol for audio analysis configuration."""
 
-    tempo_range: tuple[int, int]
+    enable_ml_features: bool
 
 
 class FileManagerConfigProtocol(Protocol):
     """Protocol for file manager configuration."""
 
     trash_directory: str
+    trash_key: str
     destinations: list[Any]
 
 
@@ -189,6 +206,7 @@ class GenreEditorConfigProtocol(Protocol):
     """Protocol for genre editor configuration."""
 
     codes: list[Any]
+    rating_key: str
 
 
 class VideoExporterConfigProtocol(Protocol):
@@ -210,13 +228,49 @@ class VideoExporterConfigProtocol(Protocol):
     waveform_treble_color: str
     waveform_cursor_color: str
     vjing_mappings: list[Any]
+    vjing_presets: list[Any]
+    ffmpeg_video_codec: str
+
+    ffmpeg_preset: str
+    ffmpeg_crf: str
+    ffmpeg_pixel_format: str
+    ffmpeg_audio_codec: str
+    ffmpeg_audio_bitrate: str
+
+
+class PlaybackNavigationConfigProtocol(Protocol):
+    """Protocol pour la configuration de navigation de lecture."""
+
+    seek_amount: float
+    rapid_press_threshold: float
+    max_seek_multiplier: int
+
+
+class DirectoryNavigatorConfigProtocol(Protocol):
+    """Protocol pour la configuration du navigateur de répertoires."""
+
+    default_directory: str
 
 
 class ShortcutsConfigProtocol(Protocol):
     """Protocol for shortcuts configuration."""
 
+    play_pause: str
+    pause: str
+    stop: str
+    volume_up: str
+    volume_down: str
+    quit: str
+    focus_search: str
     seek_forward: str
     seek_backward: str
+    next_track: str
+    previous_track: str
+    skip_to_next: str
+    jump_20: str
+    jump_40: str
+    jump_60: str
+    jump_80: str
 
 
 class EngineDJConfigProtocol(Protocol):
@@ -239,6 +293,8 @@ class JukeboxConfigProtocol(Protocol):
     shortcuts: ShortcutsConfigProtocol
     video_exporter: VideoExporterConfigProtocol
     engine_dj: EngineDJConfigProtocol
+    playback_navigation: PlaybackNavigationConfigProtocol
+    directory_navigator: DirectoryNavigatorConfigProtocol
 
 
 # ============================================================================

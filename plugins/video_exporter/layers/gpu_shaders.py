@@ -10,22 +10,21 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import TYPE_CHECKING
+from typing import Any
 
-import numpy as np
-from PIL import Image
+import numpy as np  # type: ignore[import-untyped]
+from PIL import Image  # type: ignore[import-untyped]
 
 # Try to import moderngl, fallback gracefully if not available
 try:
-    import moderngl
+    import moderngl  # type: ignore[import-untyped]
 
     MODERNGL_AVAILABLE = True
+    _TRIANGLE_STRIP: Any = moderngl.TRIANGLE_STRIP  # type: ignore[attr-defined]
 except ImportError:
     MODERNGL_AVAILABLE = False
+    _TRIANGLE_STRIP = None
     logging.warning("[GPU Shaders] moderngl not installed, GPU effects disabled")
-
-if TYPE_CHECKING:
-    pass  # Reserved for future type hints
 
 # Global lock for thread-safe GPU access (OpenGL contexts are NOT thread-safe)
 _gpu_lock = threading.Lock()
@@ -331,10 +330,10 @@ class GPUShaderRenderer:
         """
         self.width = width
         self.height = height
-        self._ctx: moderngl.Context | None = None
-        self._programs: dict[str, moderngl.Program] = {}
-        self._vao: moderngl.VertexArray | None = None
-        self._fbo: moderngl.Framebuffer | None = None
+        self._ctx: Any = None
+        self._programs: dict[str, Any] = {}
+        self._vao: Any = None
+        self._fbo: Any = None
         self._initialized = False
         # Track creator thread - OpenGL context can only be used from this thread
         self._creator_thread_id: int | None = None
@@ -355,7 +354,7 @@ class GPUShaderRenderer:
     def _init_context(self) -> None:
         """Initialize OpenGL context and resources."""
         # Create standalone context (headless)
-        self._ctx = moderngl.create_standalone_context()
+        self._ctx = moderngl.create_standalone_context()  # type: ignore[union-attr]
 
         # Create vertex buffer for fullscreen quad
         vertices = np.array(
@@ -498,13 +497,13 @@ class GPUShaderRenderer:
                 # Render to framebuffer
                 self._fbo.use()
                 self._ctx.clear(0.0, 0.0, 0.0, 0.0)
-                program.vao.render(moderngl.TRIANGLE_STRIP)
+                program.vao.render(_TRIANGLE_STRIP)  # type: ignore[attr-defined]
 
                 # Read pixels
                 data = self._fbo.read(components=4)
                 img = Image.frombytes("RGBA", (self.width, self.height), data)
                 # Flip vertically (OpenGL origin is bottom-left)
-                img = img.transpose(Image.FLIP_TOP_BOTTOM)
+                img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
 
                 return img
 

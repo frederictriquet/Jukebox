@@ -26,7 +26,7 @@ class TrackInfoPlugin:
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: PluginContextProtocol | None = None
+        self.context: PluginContextProtocol = None  # type: ignore[assignment]
         self.info_widget: TrackInfoWidget | None = None
 
     def initialize(self, context: PluginContextProtocol) -> None:

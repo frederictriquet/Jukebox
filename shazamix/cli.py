@@ -332,8 +332,8 @@ def main() -> int:
     index_parser.add_argument(
         "--workers", "-w",
         type=int,
-        default=max(1, os.cpu_count() - 1),
-        help=f"Number of parallel workers (default: {max(1, os.cpu_count() - 1)})",
+        default=max(1, (os.cpu_count() or 2) - 1),
+        help=f"Number of parallel workers (default: {max(1, (os.cpu_count() or 2) - 1)})",
     )
     index_parser.add_argument(
         "--verbose", "-v",

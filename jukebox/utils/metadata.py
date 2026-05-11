@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-import mutagen
+from mutagen import File as MutagenFile  # type: ignore[import]
 
 
 class MetadataExtractor:
@@ -24,7 +24,7 @@ class MetadataExtractor:
             ValueError: If audio file is empty or invalid
         """
         try:
-            audio = mutagen.File(filepath)
+            audio = MutagenFile(filepath)
             if audio is None:
                 logging.warning(f"Mutagen returned None for {filepath}")
                 raise ValueError(f"Invalid audio file: {filepath}")
@@ -92,8 +92,8 @@ class MetadataExtractor:
         if year_str:
             try:
                 tags["year"] = int(str(year_str)[:4])
-            except (ValueError, TypeError):
-                pass  # noqa: SIM105
+            except (ValueError, TypeError) as e:
+                logging.debug("[Metadata] Année non parseable '%s' : %s", year_str, e)
 
         # Track number
         track_str = MetadataExtractor._get_tag(audio, ["TRCK", "tracknumber", "trkn"])
@@ -101,8 +101,8 @@ class MetadataExtractor:
             try:
                 track_num = str(track_str).split("/")[0]
                 tags["track_number"] = int(track_num)
-            except (ValueError, TypeError):
-                pass  # noqa: SIM105
+            except (ValueError, TypeError) as e:
+                logging.debug("[Metadata] Numéro de piste non parseable '%s' : %s", track_str, e)
 
         # Comment — ID3 COMM keys have variable suffixes (e.g. "COMM::eng")
         comment = MetadataExtractor._get_tag(audio, ["comment", "\xa9cmt"])

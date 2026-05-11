@@ -1,11 +1,12 @@
 """Audio player wrapper for python-vlc."""
 
+import logging
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
-import vlc
-from PySide6.QtCore import QObject, Signal
+import vlc  # type: ignore[import]
+from PySide6.QtCore import QObject, Signal  # type: ignore[import]
 
 
 class PlayerState(Enum):
@@ -28,13 +29,13 @@ class AudioPlayer(QObject):
     def __init__(self) -> None:
         """Initialize audio player."""
         super().__init__()
-        self._instance = vlc.Instance()
-        self._player = self._instance.media_player_new()
+        self._instance: Any = vlc.Instance()
+        self._player: Any = self._instance.media_player_new()
         self._current_file: Path | None = None
 
         # Setup event manager for track end detection
         event_manager = self._player.event_manager()
-        event_manager.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_end_reached)
+        event_manager.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_end_reached)  # type: ignore[attr-defined]
 
     def load(self, filepath: Path) -> bool:
         """Load an audio file.
@@ -53,7 +54,8 @@ class AudioPlayer(QObject):
             self._player.set_media(media)
             self._current_file = filepath
             return True
-        except Exception:
+        except Exception as e:
+            logging.error(f"[AudioPlayer] Impossible de charger le fichier {filepath} : {e}")
             return False
 
     def play(self) -> None:

@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Any, Iterator
+from typing import TYPE_CHECKING, Any, Iterator
+
+if TYPE_CHECKING:
+    import numpy as np
 
 from .fingerprint import Fingerprint
 
@@ -40,7 +43,7 @@ class FingerprintDB:
     def _get_connection(self) -> sqlite3.Connection:
         """Get a database connection."""
         conn = sqlite3.connect(self.db_path)
-        conn.row_factory = _dict_factory
+        conn.row_factory = _dict_factory  # type: ignore[assignment]
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
 

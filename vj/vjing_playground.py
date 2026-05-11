@@ -11,6 +11,10 @@ import logging
 import sys
 from collections import deque
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 # Add project root to path so we can import jukebox/plugins modules
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -54,7 +58,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from video_exporter.layers.vjing_layer import VJingLayer
+from video_exporter.layers.vjing_layer import VJingLayer  # type: ignore[import]
 
 from jukebox.core.config import load_config
 from jukebox.core.database import Database
@@ -117,7 +121,7 @@ class MicrophoneSource:
         # Ring buffer: 4 blocks (~370 ms at 22050 Hz)
         self._buffer = np.zeros(block_size * 4, dtype=np.float32)
         self._lock = threading.Lock()
-        self._stream: sd.InputStream | None = None
+        self._stream: Any = None  # sd.InputStream | None
 
         # Beat detection state
         self._last_beat_frame = -100
@@ -142,7 +146,7 @@ class MicrophoneSource:
     def start(self) -> None:
         if not HAS_SOUNDDEVICE:
             raise RuntimeError("sounddevice is not installed (pip install sounddevice)")
-        self._stream = sd.InputStream(
+        self._stream = sd.InputStream(  # type: ignore[union-attr]
             samplerate=self.sr,
             channels=1,
             blocksize=self.block_size,
@@ -255,7 +259,7 @@ class LiveVJingLayer(VJingLayer):
         if self._pending_gpu_init:
             self._init_gpu_renderer()
 
-    def render(self, frame_idx: int, time_pos: float) -> "Image.Image":  # type: ignore[name-defined] # noqa: F821
+    def render(self, frame_idx: int, time_pos: float) -> Image.Image:
         """Inject live audio context then delegate to parent render."""
         if self.live_ctx is not None:
             safe = min(frame_idx, self.total_frames - 1)
@@ -299,7 +303,7 @@ class VJingPlayground(QMainWindow):
 
         # VLC
         self._vlc_instance = vlc.Instance("--no-video", "--quiet")
-        self._vlc_player: vlc.MediaPlayer = self._vlc_instance.media_player_new()
+        self._vlc_player: vlc.MediaPlayer = self._vlc_instance.media_player_new()  # type: ignore[union-attr]
 
         # All tracks cache (for genre filtering in memory)
         self._all_tracks: list[dict] = []
@@ -883,7 +887,7 @@ class VJingPlayground(QMainWindow):
 
     _ESP32_CHUNK_SIZE = 1024
 
-    def _send_frame_to_esp32(self, led_rgb_image: "Image.Image") -> None:  # noqa: F821
+    def _send_frame_to_esp32(self, led_rgb_image: Image.Image) -> None:
         if self._esp32_socket is None or not self._esp32_ip:
             return
         try:

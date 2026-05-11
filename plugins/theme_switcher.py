@@ -24,7 +24,7 @@ class ThemeSwitcherPlugin:
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: PluginContextProtocol | None = None
+        self.context: PluginContextProtocol = None  # type: ignore[assignment]
         self.current_theme: str = "dark"
 
     def initialize(self, context: PluginContextProtocol) -> None:

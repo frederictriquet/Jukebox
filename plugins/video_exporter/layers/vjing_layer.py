@@ -4,24 +4,30 @@ from __future__ import annotations
 
 import logging
 import math
-import random
+from random import Random
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
-from PIL import Image, ImageDraw
+import numpy as np  # type: ignore[import-untyped]
+from PIL import Image, ImageDraw  # type: ignore[import-untyped]
 
 from plugins.video_exporter.layers.base import BaseVisualLayer
 
 # Try to import noise library, fallback to pseudo-noise if not available
 try:
-    from noise import pnoise2, snoise2
+    from noise import pnoise2, snoise2  # type: ignore[import-untyped]
 
     NOISE_AVAILABLE = True
 except ImportError:
     NOISE_AVAILABLE = False
     logging.warning("[VJingLayer] noise library not installed, using pseudo-noise fallback")
+
+    def pnoise2(x: float, y: float, **_: Any) -> float:  # type: ignore[misc]
+        return 0.0
+
+    def snoise2(x: float, y: float, **_: Any) -> float:  # type: ignore[misc]
+        return 0.0
 
 # Try to import GPU shaders
 try:
@@ -37,10 +43,10 @@ except ImportError:
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from numpy.typing import NDArray
+    from numpy.typing import NDArray  # type: ignore[import-untyped]
 
 
-def vj_effect(display_name: str, category: str, pass_type: str = "generator") -> Callable:
+def vj_effect(display_name: str, category: str, pass_type: str = "generator") -> Callable:  # noqa: S107
     """Decorator to register VJing effect metadata on _render_* methods.
 
     Args:
@@ -90,7 +96,7 @@ class LFO:
     offset: float = 0.0
     _random_value: float = 0.0
     _last_random_time: float = -1.0
-    _rng: random.Random = None  # type: ignore[assignment]
+    _rng: Random = None  # type: ignore[assignment]
 
     def value(self, time_pos: float) -> float:
         """Get LFO value at given time.
@@ -117,7 +123,7 @@ class LFO:
             period = 1.0 / self.frequency if self.frequency > 0 else 1.0
             current_period = int(time_pos / period)
             if current_period != int(self._last_random_time / period):
-                rng = self._rng or random.Random()
+                rng = self._rng or Random()  # noqa: S311
                 self._random_value = rng.uniform(-1, 1)
                 self._last_random_time = time_pos
             v = self._random_value
@@ -336,9 +342,9 @@ class VJingLayer(BaseVisualLayer):
             display_name, category, pass_type = meta
             effects.append(effect_id)
             catalog[effect_id] = (display_name, category)
-            if pass_type == "post_processing":
+            if pass_type == "post_processing":  # noqa: S105
                 post_processing.add(effect_id)
-            elif pass_type == "final_pass":
+            elif pass_type == "final_pass":  # noqa: S105
                 final_pass.add(effect_id)
 
         cls.AVAILABLE_EFFECTS = effects
@@ -474,7 +480,7 @@ class VJingLayer(BaseVisualLayer):
             rng_seed: Seed for deterministic random number generation.
             **kwargs: Additional parameters.
         """
-        self._rng = random.Random(rng_seed)
+        self._rng = Random(rng_seed)  # noqa: S311
         self._np_rng = np.random.default_rng(rng_seed)
         self.genre = genre
         self.effect_intensities = effect_intensities or {}
@@ -500,7 +506,7 @@ class VJingLayer(BaseVisualLayer):
         self.use_all_effects = use_all_effects
         self.enabled_post_processing: set[str] = set(enabled_post_processing or [])
         self.use_gpu = use_gpu
-        self._gpu_renderer: GPUShaderRenderer | None = None
+        self._gpu_renderer: GPUShaderRenderer | None = None  # type: ignore[valid-type]
         # Cache for pre-rendered GPU frames: {frame_idx: {effect_name: Image}}
         self._gpu_frame_cache: dict[int, dict[str, Image.Image]] = {}
 
@@ -844,9 +850,9 @@ class VJingLayer(BaseVisualLayer):
 
         # Normalize
         def normalize(arr: list) -> NDArray:
-            arr = np.array(arr)
+            arr = np.array(arr)  # type: ignore[assignment]
             max_val = np.max(arr) if np.max(arr) > 0 else 1.0
-            return arr / max_val
+            return arr / max_val  # type: ignore[operator]
 
         self.energy = normalize(self.energy)
         self.bass_energy = normalize(self.bass_energy)
@@ -1580,7 +1586,7 @@ class VJingLayer(BaseVisualLayer):
                         "vx": math.cos(angle) * speed,
                         "vy": math.sin(angle) * speed,
                         "size": (self._rng.random() * 5 + 2) * s,
-                        "color": self._get_random_palette_color(),
+                        "color": self._get_random_palette_color(),  # type: ignore[arg-type]
                         "life": 40 + self._rng.random() * 20,
                     }
                 )
@@ -1607,7 +1613,7 @@ class VJingLayer(BaseVisualLayer):
                     if 0 <= x < self.width and 0 <= y < self.height:
                         draw.ellipse(
                             [x - size, y - size, x + size, y + size],
-                            fill=(*p["color"], alpha),
+                            fill=(*p["color"], alpha),  # type: ignore[arg-type]
                         )
 
     # ========================================================================
@@ -1899,7 +1905,7 @@ class VJingLayer(BaseVisualLayer):
         angle = math.sin(time_pos) * 2
 
         # Transform feedback buffer
-        rotated = self.feedback_buffer.rotate(
+        rotated = self.feedback_buffer.rotate(  # type: ignore[union-attr]
             angle, center=(self.width // 2, self.height // 2), expand=False
         )
 
@@ -2100,7 +2106,7 @@ class VJingLayer(BaseVisualLayer):
                 new_ripples.append(ripple)
 
                 # Get ripple color from palette
-                color = colors[ripple.get("color_idx", 0) % len(colors)]
+                color = colors[ripple.get("color_idx", 0) % len(colors)]  # type: ignore[index]
 
                 # Draw concentric circles - increased alpha from 100 to 200
                 alpha = int(200 * (ripple["life"] / 60) * self._current_intensity)
@@ -2385,19 +2391,20 @@ class VJingLayer(BaseVisualLayer):
         z = x_rot + 1j * y_rot
         c = complex(c_real, c_imag)
 
-        # Compute Julia set with vectorized operations (pre-allocated scratch)
+        # Tableaux locaux par frame : évite les conflits entre workers parallèles
+        # (self._fractal_mask partagé causait une race condition)
         max_iter = 50
-        iterations = self._fractal_iters
-        mask = self._fractal_mask
-        iterations[:] = 0
-        mask[:] = True
+        iterations = np.zeros((self.fractal_height, self.fractal_width), dtype=np.int32)
+        mask = np.ones((self.fractal_height, self.fractal_width), dtype=bool)
 
         for i in range(max_iter):
-            z[mask] = z[mask] ** 2 + c
+            # np.where évite l'assignation par indexation booléenne
+            # (z[mask] = z[mask]**2+c est instable quand mask est modifié entre lecture et écriture)
+            z = np.where(mask, z ** 2 + c, z)
             escaped = np.abs(z) > 4
             new_escaped = escaped & mask
             iterations[new_escaped] = i
-            mask[escaped] = False
+            mask[new_escaped] = False
             if not np.any(mask):
                 break
 
@@ -3201,7 +3208,7 @@ class VJingLayer(BaseVisualLayer):
         """Render smoke/mist effect with Perlin turbulence.
 
         Particles rise and dissipate with turbulent motion.
-        Spawn rate and movement react to audio.
+        Taux et mouvement constants, sans réactivité audio.
 
         Args:
             img: Image to draw on.
@@ -3210,23 +3217,13 @@ class VJingLayer(BaseVisualLayer):
             ctx: Audio context dict.
         """
         draw = ImageDraw.Draw(img)
-        energy = ctx["energy"]
-        bass = ctx["bass"]
-        is_beat = ctx["is_beat"]
         s = min(self.width, self.height) / 512
 
-        # Spawn new particles based on energy
-        spawn_rate = int(3 + energy * 8)
+        # Taux de spawn constant — sans réactivité audio
+        spawn_rate = 5
         for _ in range(spawn_rate):
-            # Spawn across bottom, more in center
             x = self.width / 2 + (self._rng.random() - 0.5) * self.width * 0.6
-            self._spawn_smoke_particle(x, energy)
-
-        # Extra burst on beat
-        if is_beat:
-            for _ in range(5):
-                x = self.width / 2 + (self._rng.random() - 0.5) * self.width * 0.4
-                self._spawn_smoke_particle(x, bass)
+            self._spawn_smoke_particle(x)
 
         # Get palette colors
         colors = self.color_palette
@@ -3254,7 +3251,7 @@ class VJingLayer(BaseVisualLayer):
             )
 
             # Update position
-            p["x"] += p["vx"] + turb_x + (self._rng.random() - 0.5) * energy * s
+            p["x"] += p["vx"] + turb_x
             p["y"] += p["vy"] + turb_y
             p["vy"] *= 0.99  # Slow down rising
 
@@ -3274,7 +3271,7 @@ class VJingLayer(BaseVisualLayer):
                 continue
 
             # Use palette color based on particle index with desaturation for smoke
-            base_color = colors[p.get("color_idx", 0) % len(colors)]
+            base_color = colors[p.get("color_idx", 0) % len(colors)]  # type: ignore[index]
             # Desaturate: blend toward gray for smoke effect
             gray = (base_color[0] + base_color[1] + base_color[2]) // 3
             desaturate = 0.6  # 60% toward gray
@@ -4383,7 +4380,7 @@ class VJingLayer(BaseVisualLayer):
                 if la > 3:
                     color = self._get_palette_color(int(self._swarm_color_idx[ii]))
                     draw.line(
-                        [(xs[ii], ys[ii]), (xs[jj], ys[jj])],
+                        [(xs[ii], ys[ii]), (xs[jj], ys[jj])],  # type: ignore[arg-type]
                         fill=(*color, la),
                         width=line_w,
                     )
@@ -4640,7 +4637,7 @@ class VJingLayer(BaseVisualLayer):
         like real neon signs radiating light.  Uses three blur passes at
         different scales and composites via screen blending for maximum impact.
         """
-        from PIL import ImageFilter
+        from PIL import ImageFilter  # type: ignore[import-untyped]
 
         treble = ctx["treble"]
         energy = ctx["energy"]
@@ -4673,18 +4670,18 @@ class VJingLayer(BaseVisualLayer):
 
         # --- Pass 2: Medium glow via 1/2 downscale ---
         half_w, half_h = max(4, w // 2), max(4, h // 2)
-        half_img = source_img.resize((half_w, half_h), Image.BILINEAR)
+        half_img = source_img.resize((half_w, half_h), Image.BILINEAR)  # type: ignore[attr-defined]
         r2 = max(3, int(15 * half_w / 256))
         glow2 = np.array(
-            half_img.filter(ImageFilter.GaussianBlur(radius=r2)).resize((w, h), Image.BILINEAR)
+            half_img.filter(ImageFilter.GaussianBlur(radius=r2)).resize((w, h), Image.BILINEAR)  # type: ignore[attr-defined]
         ).astype(np.float32)
 
         # --- Pass 3: Wide atmospheric glow via 1/4 downscale ---
         quarter_w, quarter_h = max(4, w // 4), max(4, h // 4)
-        quarter_img = source_img.resize((quarter_w, quarter_h), Image.BILINEAR)
+        quarter_img = source_img.resize((quarter_w, quarter_h), Image.BILINEAR)  # type: ignore[attr-defined]
         r3 = max(3, int(12 * quarter_w / 128 + energy * 6))
         glow3 = np.array(
-            quarter_img.filter(ImageFilter.GaussianBlur(radius=r3)).resize((w, h), Image.BILINEAR)
+            quarter_img.filter(ImageFilter.GaussianBlur(radius=r3)).resize((w, h), Image.BILINEAR)  # type: ignore[attr-defined]
         ).astype(np.float32)
 
         # Combine all passes with resolution-adaptive weights
@@ -4909,7 +4906,7 @@ class VJingLayer(BaseVisualLayer):
         c_arr = np.sin(time_pos + i_arr * i_arr)
         pos = c_arr > 0
         lut_idx = (c_arr[pos] * 511.0).clip(0, 511).astype(np.int32)
-        colors = self._emission_lut[lut_idx]  # (N_pos, 3) float32
+        colors = self._emission_lut[lut_idx]  # (N_pos, 3) float32  # type: ignore[index]
 
         # Max-blend: bright regions accumulate without clamping
         np.maximum.at(buf[:, :, 0], (py[pos], px[pos]), colors[:, 0])
@@ -5088,7 +5085,6 @@ class VJingLayer(BaseVisualLayer):
         Colours cycle through the active palette by particle index.
         """
         energy = ctx["energy"]
-        bass = ctx["bass"]
         w, h = self.width, self.height
 
         N = 2000

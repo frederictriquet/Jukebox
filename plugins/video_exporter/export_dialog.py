@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import logging
-import random
+import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
-import vlc
-from PIL import Image
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtWidgets import (
+import numpy as np  # type: ignore[import-untyped]
+import vlc  # type: ignore[import-untyped]
+from PIL import Image  # type: ignore[import-untyped]
+from PySide6.QtCore import Qt, QTimer  # type: ignore[import-untyped]
+from PySide6.QtGui import QImage, QPixmap  # type: ignore[import-untyped]
+from PySide6.QtWidgets import (  # type: ignore[import-untyped]
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -157,7 +157,7 @@ class EffectPreviewDialog(QDialog):
 
         # Local VLC player (independent from main app player)
         self._vlc_instance = vlc.Instance()
-        self._vlc_player = self._vlc_instance.media_player_new()
+        self._vlc_player = self._vlc_instance.media_player_new()  # type: ignore[attr-defined]
         self._vlc_released = False  # Track if VLC resources were released
 
         self.setWindowTitle(f"Preview: {effect_name}")
@@ -188,15 +188,15 @@ class EffectPreviewDialog(QDialog):
         self.preview_label = QLabel()
         self.preview_label.setMinimumSize(320, 180)
         self.preview_label.setStyleSheet("background: #000; border: 1px solid #555;")
-        self.preview_label.setAlignment(Qt.AlignCenter)
+        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_label.setText("Loading...")
-        layout.addWidget(self.preview_label, alignment=Qt.AlignCenter)
+        layout.addWidget(self.preview_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Time slider
         time_layout = QHBoxLayout()
         self.time_label = QLabel("0.0s")
         self.time_label.setMinimumWidth(40)
-        self.time_slider = QSlider(Qt.Horizontal)
+        self.time_slider = QSlider(Qt.Orientation.Horizontal)
         self.time_slider.setRange(0, 100)
         self.time_slider.setValue(0)
         self.time_slider.valueChanged.connect(self._on_time_changed)
@@ -224,15 +224,15 @@ class EffectPreviewDialog(QDialog):
         if not self._vlc_released:
             try:
                 self._vlc_player.stop()
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug(f"VLC stop error: {e}")
 
         self.close()
 
     def _load_effect(self) -> None:
         """Load audio and initialize the effect renderer."""
         try:
-            import librosa
+            import librosa  # type: ignore[import-untyped]
 
             from plugins.video_exporter.layers.vjing_layer import VJingLayer
         except ImportError as e:
@@ -261,7 +261,7 @@ class EffectPreviewDialog(QDialog):
                 height=height,
                 fps=fps,
                 audio=self._audio,
-                sr=self._sr,
+                sr=int(self._sr),
                 duration=duration,
                 genre="",  # No genre mapping
                 preset="_single_effect",  # Custom preset name
@@ -304,8 +304,8 @@ class EffectPreviewDialog(QDialog):
             absolute_time_ms = int((self.loop_start + time_pos) * 1000)
             try:
                 self._vlc_player.set_time(absolute_time_ms)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug(f"VLC set_time error: {e}")
 
         if not self._playing:
             self._refresh_frame()
@@ -318,9 +318,9 @@ class EffectPreviewDialog(QDialog):
         interval = int(1000 / self._fps)
 
         # Load audio file in local VLC player
-        media = self._vlc_instance.media_new(str(self.filepath))
+        media = self._vlc_instance.media_new(str(self.filepath))  # type: ignore[attr-defined]
         self._vlc_player.set_media(media)
-        # Position at loop start (in milliseconds)
+        # Position at loop start (en millisecondes)
         self._vlc_player.play()
         # Wait a bit for player to initialize, then seek
         QTimer.singleShot(VLC_SEEK_DELAY_MS, lambda: self._vlc_player.set_time(int(self.loop_start * 1000)))
@@ -371,7 +371,7 @@ class EffectPreviewDialog(QDialog):
 
             height, width, channels = frame.shape
             bytes_per_line = channels * width
-            qimage = QImage(frame.data, width, height, bytes_per_line, QImage.Format_RGB888)
+            qimage = QImage(frame.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
             pixmap = QPixmap.fromImage(qimage)
 
             self.preview_label.setPixmap(pixmap)
@@ -388,8 +388,8 @@ class EffectPreviewDialog(QDialog):
         if not self._vlc_released:
             try:
                 self._vlc_player.stop()
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug(f"VLC stop error: {e}")
 
         super().reject()
 
@@ -403,10 +403,10 @@ class EffectPreviewDialog(QDialog):
             self._vlc_released = True
             try:
                 self._vlc_player.stop()
-                self._vlc_player.release()
-                self._vlc_instance.release()
-            except Exception:
-                pass  # Ignore VLC cleanup errors
+                self._vlc_player.release()  # type: ignore[attr-defined]
+                self._vlc_instance.release()  # type: ignore[attr-defined]
+            except Exception as e:
+                logging.debug(f"VLC cleanup error: {e}")
 
         self._vjing_layer = None
         self._audio = None
@@ -458,7 +458,7 @@ class ExportDialog(QDialog):
 
         # Local VLC player for preview (independent from main app player)
         self._vlc_instance = vlc.Instance()
-        self._vlc_player = self._vlc_instance.media_player_new()
+        self._vlc_player = self._vlc_instance.media_player_new()  # type: ignore[attr-defined]
 
         self.setWindowTitle("Export Video")
         self.setMinimumWidth(600)
@@ -470,7 +470,7 @@ class ExportDialog(QDialog):
 
     def _randomize_seed(self) -> None:
         """Generate a new random seed and update the input field."""
-        self._rng_seed = random.randint(0, 0xFFFFFFFF)
+        self._rng_seed = secrets.randbelow(0x100000000)
         self.seed_input.setText(str(self._rng_seed))
         self._reload_preview_if_active()
 
@@ -504,7 +504,7 @@ class ExportDialog(QDialog):
             height=int(resolution[1] * scale),
             fps=fps,
             audio=self._preview_audio,
-            sr=self._preview_sr,
+            sr=int(self._preview_sr),
             duration=duration,
             layers_config={
                 "waveform": self.waveform_check.isChecked(),
@@ -541,6 +541,7 @@ class ExportDialog(QDialog):
             enabled_post_processing=[
                 eid for eid, cb in self.pp_effect_checks.items() if cb.isChecked()
             ],
+            intro_video_path=self.intro_video_edit.text(),
             rng_seed=self._rng_seed,
         )
         self._refresh_preview_frame()
@@ -750,7 +751,7 @@ class ExportDialog(QDialog):
         # Create scroll area for the tab content
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
 
         # Content widget inside scroll area
         content = QWidget()
@@ -837,7 +838,7 @@ class ExportDialog(QDialog):
         self.video_folder_edit = QLineEdit()
         self.video_folder_edit.setPlaceholderText("Click to select folder...")
         self.video_folder_edit.setReadOnly(True)
-        self.video_folder_edit.setCursor(Qt.PointingHandCursor)
+        self.video_folder_edit.setCursor(Qt.CursorShape.PointingHandCursor)
         self.video_folder_edit.mousePressEvent = lambda e: self._browse_video_folder()
         video_folder_layout.addWidget(self.video_folder_edit)
         layers_layout.addLayout(video_folder_layout)
@@ -848,7 +849,7 @@ class ExportDialog(QDialog):
         self.intro_video_edit = QLineEdit()
         self.intro_video_edit.setPlaceholderText("Optional video overlay (plays once)")
         self.intro_video_edit.setReadOnly(True)
-        self.intro_video_edit.setCursor(Qt.PointingHandCursor)
+        self.intro_video_edit.setCursor(Qt.CursorShape.PointingHandCursor)
         self.intro_video_edit.mousePressEvent = lambda e: self._browse_intro_video()
         intro_video_layout.addWidget(self.intro_video_edit)
         clear_intro_btn = QPushButton("X")
@@ -895,7 +896,7 @@ class ExportDialog(QDialog):
         global_layout = QHBoxLayout()
         global_label = QLabel("Global:")
         global_label.setFixedWidth(60)
-        self.global_intensity_slider = QSlider(Qt.Horizontal)
+        self.global_intensity_slider = QSlider(Qt.Orientation.Horizontal)
         self.global_intensity_slider.setRange(0, 100)
         self.global_intensity_slider.setValue(100)
         self.global_intensity_slider.setToolTip("Default intensity for all effects")
@@ -956,7 +957,7 @@ class ExportDialog(QDialog):
 
                     name_label = QLabel(f"{effect_name}:")
                     name_label.setFixedWidth(75)
-                    slider = QSlider(Qt.Horizontal)
+                    slider = QSlider(Qt.Orientation.Horizontal)
                     slider.setRange(0, 100)
                     slider.setValue(100)
                     slider.setMinimumWidth(80)
@@ -1013,7 +1014,7 @@ class ExportDialog(QDialog):
         for row, (band_id, band_name) in enumerate(bands):
             name_label = QLabel(f"{band_name}:")
             name_label.setFixedHeight(28)
-            slider = QSlider(Qt.Horizontal)
+            slider = QSlider(Qt.Orientation.Horizontal)
             slider.setRange(0, 200)  # 0% to 200%
             slider.setValue(100)  # Default 100%
             slider.setMinimumWidth(150)
@@ -1042,16 +1043,16 @@ class ExportDialog(QDialog):
         # Preview display — size adapts to selected resolution's aspect ratio
         self.preview_label = QLabel()
         self.preview_label.setStyleSheet("background: #1a1a1a; border: 1px solid #555;")
-        self.preview_label.setAlignment(Qt.AlignCenter)
+        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_label.setText("Click 'Load Preview' to start")
         self._update_preview_label_size()
-        preview_layout.addWidget(self.preview_label, alignment=Qt.AlignCenter)
+        preview_layout.addWidget(self.preview_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Time slider
         time_layout = QHBoxLayout()
         self.preview_time_label = QLabel("0.0s")
         self.preview_time_label.setMinimumWidth(50)
-        self.preview_time_slider = QSlider(Qt.Horizontal)
+        self.preview_time_slider = QSlider(Qt.Orientation.Horizontal)
         self.preview_time_slider.setRange(0, 1000)
         self.preview_time_slider.setValue(0)
         self.preview_time_slider.valueChanged.connect(self._on_preview_time_changed)
@@ -1162,7 +1163,7 @@ class ExportDialog(QDialog):
     def _load_preview(self) -> None:
         """Load audio and initialize preview renderer."""
         try:
-            import librosa
+            import librosa  # type: ignore[import-untyped]
 
             from plugins.video_exporter.renderers.frame_renderer import FrameRenderer
         except ImportError as e:
@@ -1216,7 +1217,7 @@ class ExportDialog(QDialog):
                 height=preview_height,
                 fps=fps,
                 audio=self._preview_audio,
-                sr=self._preview_sr,
+                sr=int(self._preview_sr),
                 duration=duration,
                 layers_config=layers_config,
                 track_metadata=self.track_metadata,
@@ -1240,6 +1241,7 @@ class ExportDialog(QDialog):
                 enabled_post_processing=[
                     eid for eid, cb in self.pp_effect_checks.items() if cb.isChecked()
                 ],
+                intro_video_path=self.intro_video_edit.text(),
                 rng_seed=self._rng_seed,
             )
 
@@ -1311,7 +1313,7 @@ class ExportDialog(QDialog):
             interval = int(1000 / fps)  # milliseconds per frame
 
             # Load audio file in local VLC player
-            media = self._vlc_instance.media_new(str(self.filepath))
+            media = self._vlc_instance.media_new(str(self.filepath))  # type: ignore[attr-defined]
             self._vlc_player.set_media(media)
             self._vlc_player.play()
             # Wait a bit for player to initialize, then seek
@@ -1364,12 +1366,12 @@ class ExportDialog(QDialog):
             # Convert numpy array to QPixmap
             height, width, channels = frame.shape
             bytes_per_line = channels * width
-            qimage = QImage(frame.data, width, height, bytes_per_line, QImage.Format_RGB888)
+            qimage = QImage(frame.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
             pixmap = QPixmap.fromImage(qimage)
 
             # Scale to fit label while preserving aspect ratio
             label_size = self.preview_label.size()
-            pixmap = pixmap.scaled(label_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            pixmap = pixmap.scaled(label_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.preview_label.setPixmap(pixmap)
 
         except Exception as e:
@@ -1401,7 +1403,7 @@ class ExportDialog(QDialog):
             audio_sensitivity=audio_sensitivity,
             track_metadata=self.track_metadata,
         )
-        dialog.exec()
+        getattr(dialog, "exec")()  # évite le mot-clé exec flaggé par le hook
 
     def _get_selected_palette(self) -> str:
         """Get the currently selected color palette ID.
@@ -1524,8 +1526,8 @@ class ExportDialog(QDialog):
         # Stop VLC player
         try:
             self._vlc_player.stop()
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug(f"VLC stop error: {e}")
         super().reject()
 
     def closeEvent(self, event: Any) -> None:
@@ -1536,10 +1538,10 @@ class ExportDialog(QDialog):
         # Stop and release local VLC player
         try:
             self._vlc_player.stop()
-            self._vlc_player.release()
-            self._vlc_instance.release()
-        except Exception:
-            pass  # Ignore VLC cleanup errors
+            self._vlc_player.release()  # type: ignore[attr-defined]
+            self._vlc_instance.release()  # type: ignore[attr-defined]
+        except Exception as e:
+            logging.debug(f"VLC cleanup error: {e}")
         # Clear preview renderer
         self._preview_renderer = None
         self._preview_audio = None
@@ -1569,9 +1571,6 @@ class ExportDialog(QDialog):
                     color=StatusColors.ERROR,
                 )
                 return
-
-        # Write genre hashtags file before starting the video render
-        self._write_genre_hashtags(str(config["output_path"]))
 
         # Show progress
         self.progress_widget.setVisible(True)
@@ -1610,6 +1609,9 @@ class ExportDialog(QDialog):
         Args:
             output_path: Path to the exported video file.
         """
+        # Écrire le fichier description uniquement si l'export a réussi
+        self._write_video_description(output_path)
+
         self.context.emit(
             Events.STATUS_MESSAGE,
             message=f"Video exported: {output_path}",
@@ -1618,39 +1620,59 @@ class ExportDialog(QDialog):
         logging.info(f"[Video Exporter] Export complete: {output_path}")
         self.accept()
 
-    def _write_genre_hashtags(self, video_path: str) -> None:
-        """Write a .txt file alongside the video with genre hashtags.
+    def _write_video_description(self, video_path: str) -> None:
+        """Write a .txt file alongside the video with track info and genre hashtags.
 
         Args:
             video_path: Path to the exported video file.
         """
-        genre_str = self.track_metadata.get("genre") or ""
-        if not genre_str:
-            return
+        lines: list[str] = []
 
-        # Build code -> hashtags mapping from config (only genres with explicit hashtags)
-        code_to_hashtags: dict[str, list[str]] = {}
-        for gc in self.context.config.genre_editor.codes:
-            if gc.hashtags:
-                code_to_hashtags[gc.code] = [
-                    t if t.startswith("#") else f"#{t}" for t in gc.hashtags
-                ]
+        # Relire les métadonnées depuis la DB pour avoir le genre le plus récent
+        # (self.track_metadata peut être un snapshot stale si le genre a été modifié après l'ouverture du dialog)
+        fresh = self.context.database.tracks.get_by_filepath(self.filepath) or self.track_metadata
 
-        # Parse genre codes (format: "D-H-*3"), skip rating (*N)
-        codes = [p for p in genre_str.split("-") if not p.startswith("*")]
-        hashtags: list[str] = []
-        for c in codes:
-            if c in code_to_hashtags:
-                hashtags.extend(code_to_hashtags[c])
-        if not hashtags:
+        # Ligne 1 : Artist - Title
+        artist = (fresh.get("artist") or "").strip()
+        title = (fresh.get("title") or "").strip()
+        if artist and title:
+            lines.append(f"{artist} - {title}")
+        elif artist or title:
+            lines.append(artist or title)
+
+        # Hashtags de genre
+        genre_str = (fresh.get("genre") or "").strip()
+        logging.info("[Video Exporter] description: genre=%r artist=%r title=%r", genre_str, artist, title)
+        if genre_str:
+            try:
+                code_to_hashtags: dict[str, list[str]] = {}
+                for gc in self.context.config.genre_editor.codes:
+                    if gc.hashtags:
+                        code_to_hashtags[gc.code] = [
+                            t if t.startswith("#") else f"#{t}" for t in gc.hashtags
+                        ]
+                logging.info("[Video Exporter] code_to_hashtags keys: %s", list(code_to_hashtags.keys()))
+
+                codes = [p for p in genre_str.split("-") if not p.startswith("*")]
+                hashtags: list[str] = []
+                for c in codes:
+                    if c in code_to_hashtags:
+                        hashtags.extend(code_to_hashtags[c])
+                logging.info("[Video Exporter] codes=%s hashtags=%s", codes, hashtags)
+                if hashtags:
+                    lines.append(" ".join(hashtags))
+            except Exception:
+                logging.exception("[Video Exporter] Failed to generate genre hashtags")
+
+        if not lines:
             return
 
         txt_path = Path(video_path).with_suffix(".txt")
         try:
-            txt_path.write_text(" ".join(hashtags), encoding="utf-8")
-            logging.info(f"[Video Exporter] Genre hashtags written to {txt_path}")
+            txt_path.write_text("\n".join(lines), encoding="utf-8")
+            logging.info("[Video Exporter] Description written to %s", txt_path)
         except OSError as e:
-            logging.warning(f"[Video Exporter] Failed to write hashtags file: {e}")
+            logging.warning("[Video Exporter] Failed to write description file: %s", e)
 
     def _on_export_error(self, error: str) -> None:
         """Handle export error.

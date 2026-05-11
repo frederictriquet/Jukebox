@@ -29,7 +29,7 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: PluginContextProtocol | None = None
+        self.context: PluginContextProtocol = None  # type: ignore[assignment]
         self.current_track_id: int | None = None
         self.current_filepath: Path | None = None
         self.remove_button: QPushButton | None = None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -54,7 +55,7 @@ class Database:
         """Connect to database and enable foreign keys."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(str(self.db_path))
-        self.conn.row_factory = _dict_factory
+        self.conn.row_factory = _dict_factory  # type: ignore[assignment]
         self.conn.execute("PRAGMA foreign_keys = ON")
 
     # ========== Repository Properties ==========
@@ -369,9 +370,8 @@ class Database:
                     self.conn.execute(
                         f"ALTER TABLE audio_analysis ADD COLUMN {column_name} {column_type}"
                     )
-                except sqlite3.OperationalError:
-                    # Column might already exist (concurrent migration)
-                    pass
+                except sqlite3.OperationalError as e:
+                    logging.debug("[Database] Colonne '%s' déjà existante (migration concurrente) : %s", column_name, e)
 
         self.conn.commit()
 

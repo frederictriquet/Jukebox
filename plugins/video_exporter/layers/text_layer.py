@@ -120,7 +120,10 @@ class TextLayer(BaseVisualLayer):
 
         # Calculate text positions
         margin = 40
-        text_y = margin + y_offset
+        # Marge supérieure étendue à 110 px pour respecter la safe zone Instagram Reels
+        # (l'UI Instagram masque les ~100 px du haut)
+        margin_top = 110
+        text_y = margin_top + y_offset
 
         # Get text bounding boxes
         title_bbox = draw.textbbox((0, 0), self.title, font=self.title_font)

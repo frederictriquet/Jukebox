@@ -29,7 +29,7 @@ class ModeSwitcherPlugin:
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: PluginContextProtocol | None = None
+        self.context: PluginContextProtocol = None  # type: ignore[assignment]
         self.mode_manager: ModeManager | None = None
         self.jukebox_action: Any = None
         self.curating_action: Any = None

@@ -103,7 +103,7 @@ class AudioAnalyzerPlugin:
 
     def __init__(self) -> None:
         """Initialize plugin."""
-        self.context: PluginContextProtocol | None = None
+        self.context: PluginContextProtocol = None  # type: ignore[assignment]
         self.analysis_widget: AnalysisWidget | None = None
         self.current_track_id: int | None = None
         self._single_worker: QThread | None = None  # For single track regeneration
@@ -353,8 +353,8 @@ class AudioAnalyzerPlugin:
             try:
                 AudioAnalyzerPlugin._batch_processor.item_complete.disconnect()
                 AudioAnalyzerPlugin._batch_processor.item_error.disconnect()
-            except (RuntimeError, TypeError):
-                pass
+            except (RuntimeError, TypeError) as e:
+                logging.debug("[AudioAnalyzer] Signaux déjà déconnectés : %s", e)
         # Don't set to None - keep it alive so orphan workers can finish
 
     def get_settings_schema(self) -> dict[str, Any]:

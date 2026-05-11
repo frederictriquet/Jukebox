@@ -35,7 +35,7 @@ from jukebox.ui.components.track_cell_renderer import CellRenderer
 
 # Column configuration per mode
 COLUMNS_JUKEBOX = ["waveform", "artist", "title", "genre", "rating", "duration", "stats"]
-COLUMNS_CURATING = ["waveform", "filename", "genre", "rating", "duration", "stats", "duplicate"]
+COLUMNS_CURATING = ["waveform", "filename", "genre", "rating", "duration", "stats", "duplicate", "path"]
 COLUMNS = COLUMNS_CURATING  # default (overridden by mode)
 
 # Column widths (in pixels)
@@ -49,6 +49,7 @@ COLUMN_WIDTHS = {
     "duration": 80,
     "stats": 30,  # Small icon column
     "duplicate": 30,  # Duplicate status indicator (curating only)
+    "path": 300,  # Répertoire parent (curating only)
 }
 
 # Row height
@@ -405,11 +406,15 @@ class TrackListModel(QAbstractTableModel):
             "genre": lambda t: (t.get("genre") or "").lower(),
             "duration": lambda t: t.get("duration_seconds") or 0.0,
             "rating": lambda t: (t.get("genre") or "").lower(),
+            "path": lambda t: str(t.get("filepath", "").parent).lower(),
         }
 
         if column == -1 or column >= len(columns) or columns[column] not in sort_key_map:
-            # Reset to date_added DESC (insertion order)
-            key_fn: Any = lambda t: t.get("date_added") or ""
+            # Tri par défaut : date_added DESC (ordre d'insertion)
+            def _default_key(t: dict[str, Any]) -> str:
+                return t.get("date_added") or ""
+
+            key_fn: Any = _default_key
             reverse = True
         else:
             key_fn = sort_key_map[columns[column]]
@@ -602,7 +607,11 @@ class TrackListModel(QAbstractTableModel):
 
         try:
             dup_col = self.cell_renderer.columns.index("duplicate")
-        except ValueError:
+        except ValueError as e:
+            # Colonne 'duplicate' absente des colonnes du renderer — mise à jour UI ignorée
+            logging.debug(
+                f"[TrackListModel] Colonne 'duplicate' absente des colonnes du renderer: {e}"
+            )
             return
         top_left = self.index(0, dup_col)
         bottom_right = self.index(len(self.tracks) - 1, dup_col)
@@ -909,7 +918,7 @@ class TrackList(QTableView):
             # Add plugin context menu actions
             main_window = self.window()
             if hasattr(main_window, "ui_builder"):
-                plugin_actions = main_window.ui_builder.get_track_context_actions()
+                plugin_actions = main_window.ui_builder.get_track_context_actions()  # type: ignore[attr-defined]
                 if plugin_actions:
                     menu.addSeparator()
                     # Get track info from database for plugin callbacks
@@ -939,22 +948,17 @@ class TrackList(QTableView):
         remove_action.triggered.connect(lambda: self._remove_track(filepath))
         menu.addAction(remove_action)
 
-        menu.exec(self.mapToGlobal(position))
+        menu.exec_(self.mapToGlobal(position))
 
     def _show_in_file_manager(self, filepath: Path) -> None:
-        """Open the platform file manager and select the file."""
-        import subprocess
-        import sys
+        """Ouvre le gestionnaire de fichiers de la plateforme et sélectionne le fichier."""
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
 
-        filepath_str = str(filepath) if isinstance(filepath, Path) else filepath
-        if sys.platform == "darwin":
-            subprocess.run(["open", "-R", filepath_str])
-        elif sys.platform == "win32":
-            subprocess.run(["explorer", "/select,", filepath_str])
-        else:
-            # Linux: open the containing directory
-            parent_dir = str(Path(filepath_str).parent)
-            subprocess.run(["xdg-open", parent_dir])
+        # QDesktopServices ouvre le répertoire parent sur toutes les plateformes
+        parent_dir = filepath.parent if isinstance(filepath, Path) else Path(filepath).parent
+        url = QUrl.fromLocalFile(str(parent_dir))
+        QDesktopServices.openUrl(url)
 
     def _copy_path_to_clipboard(self, filepath: Path) -> None:
         """Copy file path to clipboard."""
@@ -975,7 +979,7 @@ class TrackList(QTableView):
         """
         main_window = self.window()
         if hasattr(main_window, "database"):
-            track = main_window.database.get_track_by_filepath(str(filepath))
+            track = main_window.database.get_track_by_filepath(str(filepath))  # type: ignore[attr-defined]
             if track:
                 return dict(track)
 
@@ -990,7 +994,7 @@ class TrackList(QTableView):
         # Delete from database if present
         main_window = self.window()
         if hasattr(main_window, "database"):
-            main_window.database.tracks.delete_by_filepath(str(filepath))
+            main_window.database.tracks.delete_by_filepath(str(filepath))  # type: ignore[attr-defined]
 
         # Emit TRACK_DELETED so the model removes the row
         event_bus = self._track_model.event_bus
@@ -1043,7 +1047,7 @@ class TrackList(QTableView):
 
         dialog.setLayout(layout)
 
-        if dialog.exec() != QDialog.DialogCode.Accepted:
+        if dialog.exec_() != QDialog.DialogCode.Accepted:
             return
 
         new_artist = artist_input.text().strip()
@@ -1065,7 +1069,7 @@ class TrackList(QTableView):
         if new_title != (track_dict.get("title") or ""):
             updates["title"] = new_title
 
-        main_window.database.tracks.update_metadata(track_dict["id"], updates)
+        main_window.database.tracks.update_metadata(track_dict["id"], updates)  # type: ignore[attr-defined]
 
         # Update file tags
         from jukebox.utils.tag_writer import save_audio_tags

@@ -34,8 +34,8 @@ from collections.abc import Callable
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QSortFilterProxyModel, Qt
-from PySide6.QtWidgets import (
+from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QSortFilterProxyModel, Qt  # pyright: ignore[reportMissingImports]
+from PySide6.QtWidgets import (  # pyright: ignore[reportMissingImports]
     QComboBox,
     QFrame,
     QHBoxLayout,
@@ -133,7 +133,7 @@ def _parse_not(stream: _TokenStream, valid: set[str]) -> GenreEval:
 
 def _parse_atom(stream: _TokenStream, valid: set[str]) -> GenreEval:
     token = stream.peek()
-    if token == "(":
+    if token == "(":  # noqa: S105
         stream.consume()
         result = _parse_or(stream, valid)
         stream.consume(")")
@@ -339,7 +339,7 @@ class SearchAndFilterPlugin:
     _EXPR_KEY = "_expr"  # key used in preset dicts for expression presets
 
     def __init__(self) -> None:
-        self.context: PluginContextProtocol | None = None
+        self.context: PluginContextProtocol = None  # type: ignore[assignment]
         self.proxy: GenreFilterProxyModel | None = None
 
         # Toolbar button set
@@ -645,8 +645,8 @@ class SearchAndFilterPlugin:
                 btn.blockSignals(True)
                 btn.setChecked(active)
                 btn.blockSignals(False)
-            except RuntimeError:
-                pass
+            except RuntimeError as e:
+                logging.debug("[Search & Filter] Widget détruit : %s", e)
 
         if apply:
             if active:
@@ -664,8 +664,8 @@ class SearchAndFilterPlugin:
                     inp.blockSignals(True)
                     inp.setText(expr)
                     inp.blockSignals(False)
-                except RuntimeError:
-                    pass
+                except RuntimeError as e:
+                    logging.debug("[Search & Filter] Widget détruit : %s", e)
         self._set_advanced_mode(True)
 
     def _set_advanced_rows_visible(self, visible: bool) -> None:
@@ -673,13 +673,13 @@ class SearchAndFilterPlugin:
             if row is not None:
                 try:
                     row.setVisible(visible)
-                except RuntimeError:
-                    pass
+                except RuntimeError as e:
+                    logging.debug("[Search & Filter] Widget détruit : %s", e)
         if self._genre_area is not None:
             try:
                 self._genre_area.setFixedHeight(60 if visible else 30)
-            except RuntimeError:
-                pass
+            except RuntimeError as e:
+                logging.debug("[Search & Filter] Widget détruit : %s", e)
 
     def _on_advanced_text_changed(self, text: str) -> None:
         """Apply expression and sync the other input (toolbar ↔ drawer)."""
@@ -692,8 +692,8 @@ class SearchAndFilterPlugin:
                     inp.blockSignals(True)
                     inp.setText(text)
                     inp.blockSignals(False)
-            except RuntimeError:
-                pass
+            except RuntimeError as e:
+                logging.debug("[Search & Filter] Widget détruit : %s", e)
 
     def _apply_advanced_expr(self, expr: str) -> None:
         """Compile *expr* and push it to the proxy; update status indicators."""
@@ -735,14 +735,14 @@ class SearchAndFilterPlugin:
             if inp is not None:
                 try:
                     inp.setStyleSheet(style)
-                except RuntimeError:
-                    pass
+                except RuntimeError as e:
+                    logging.debug("[Search & Filter] Widget détruit : %s", e)
             if lbl is not None:
                 try:
                     lbl.setText(icon)
                     lbl.setToolTip(tooltip)
-                except RuntimeError:
-                    pass
+                except RuntimeError as e:
+                    logging.debug("[Search & Filter] Widget détruit : %s", e)
 
     @staticmethod
     def _build_genre_sets(buttons: list[GenreFilterButton]) -> tuple[set[str], set[str]]:
@@ -774,7 +774,8 @@ class SearchAndFilterPlugin:
             raw = self.context.database.settings.get("search_and_filter", "genre_presets")
             if raw:
                 self._presets = json.loads(raw)
-        except Exception:
+        except Exception as e:
+            logging.warning("[Search & Filter] Échec du chargement des présets : %s", e)
             self._presets = {}
 
     def _save_presets_to_db(self) -> None:
@@ -804,8 +805,8 @@ class SearchAndFilterPlugin:
                 continue
             try:
                 self._populate_preset_combo(combo)
-            except RuntimeError:
-                pass
+            except RuntimeError as e:
+                logging.debug("[Search & Filter] Widget détruit : %s", e)
 
     def _on_preset_activated(self, combo: QComboBox) -> None:
         name = combo.currentText()
@@ -848,8 +849,8 @@ class SearchAndFilterPlugin:
                     inp.blockSignals(True)
                     inp.setText("")
                     inp.blockSignals(False)
-                except RuntimeError:
-                    pass
+                except RuntimeError as e:
+                    logging.debug("[Search & Filter] Widget détruit : %s", e)
         self._set_expr_status(None, "")
 
     def _on_save_preset(self, combo: QComboBox) -> None:
@@ -868,8 +869,8 @@ class SearchAndFilterPlugin:
         if idx >= 0:
             try:
                 combo.setCurrentIndex(idx)
-            except RuntimeError:
-                pass
+            except RuntimeError as e:
+                logging.debug("[Search & Filter] Widget détruit : %s", e)
         logging.info("[Search & Filter] Preset '%s' saved", name)
 
     def _on_delete_preset(self, combo: QComboBox) -> None:
