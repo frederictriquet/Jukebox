@@ -1181,8 +1181,8 @@ class ExportDialog(QDialog):
         resolution = RESOLUTION_PRESETS[self.resolution_combo.currentText()]
         # Use smaller resolution for preview (max 480p)
         scale = min(1.0, 480 / resolution[1])
-        preview_width = int(resolution[0] * scale)
-        preview_height = int(resolution[1] * scale)
+        preview_width = int(resolution[0] * scale) // 4 * 4
+        preview_height = int(resolution[1] * scale) // 4 * 4
 
         try:
             # Load audio
@@ -1201,6 +1201,10 @@ class ExportDialog(QDialog):
                 "dynamics": self.dynamics_check.isChecked(),
                 "vjing": self.vjing_check.isChecked(),
                 "video_background": self.video_bg_check.isChecked(),
+                "milkdrop_enabled": self.context.config.video_exporter.milkdrop_enabled,
+                "milkdrop_preset_path": self.context.config.video_exporter.milkdrop_preset_path,
+                "milkdrop_preset_duration": self.context.config.video_exporter.milkdrop_preset_duration,
+                "milkdrop_hard_cut_on_beat": self.context.config.video_exporter.milkdrop_hard_cut_on_beat,
             }
 
             waveform_config = {
@@ -1260,6 +1264,9 @@ class ExportDialog(QDialog):
             self.preview_info_label.setText(
                 f"Preview ready: {preview_width}x{preview_height} @ {fps}fps"
             )
+
+            # Chauffe projectM pour que les effets soient visibles dès frame 0
+            self._preview_renderer.warmup_gpu()
 
             # Render first frame
             self._refresh_preview_frame()
@@ -1473,6 +1480,10 @@ class ExportDialog(QDialog):
                 "dynamics": self.dynamics_check.isChecked(),
                 "vjing": self.vjing_check.isChecked(),
                 "video_background": self.video_bg_check.isChecked(),
+                "milkdrop_enabled": self.context.config.video_exporter.milkdrop_enabled,
+                "milkdrop_preset_path": self.context.config.video_exporter.milkdrop_preset_path,
+                "milkdrop_preset_duration": self.context.config.video_exporter.milkdrop_preset_duration,
+                "milkdrop_hard_cut_on_beat": self.context.config.video_exporter.milkdrop_hard_cut_on_beat,
             },
             "video_clips_folder": self.video_folder_edit.text(),
             "vjing_mappings": {

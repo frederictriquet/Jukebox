@@ -183,6 +183,10 @@ class VideoExporterConfig(BaseModel):
     dynamics_enabled: bool = True
     vjing_enabled: bool = False
     video_background_enabled: bool = False
+    milkdrop_enabled: bool = False
+    milkdrop_preset_path: str = ""
+    milkdrop_preset_duration: float = Field(ge=1.0, le=60.0, default=8.0)
+    milkdrop_hard_cut_on_beat: bool = True
     # Waveform layer settings
     waveform_height_ratio: float = Field(ge=0.1, le=0.8, default=0.3)
     waveform_bass_color: str = "#0066FF"  # Blue

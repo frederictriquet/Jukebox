@@ -219,6 +219,23 @@ class FrameRenderer:
             except Exception as e:
                 logging.warning(f"[Frame Renderer] Failed to init text layer: {e}")
 
+        # Couche MilkDrop (projectM v4)
+        if layers_config.get("milkdrop_enabled", False):
+            logging.info("[Frame Renderer] initializing MilkDrop layer...")
+            from plugins.video_exporter.layers.milkdrop_layer import (  # pyright: ignore[reportMissingImports]
+                MilkDropLayer,
+            )
+
+            layer = MilkDropLayer(
+                **common_kwargs,
+                preset_path=layers_config.get("milkdrop_preset_path", ""),
+                preset_duration=layers_config.get("milkdrop_preset_duration", 8.0),
+                hard_cut_on_beat=layers_config.get("milkdrop_hard_cut_on_beat", True),
+                rng_seed=self.rng_seed,
+            )
+            self.layers.append(layer)
+            logging.info("[Frame Renderer] MilkDrop layer enabled")
+
         # Intro overlay layer (plays once on top of everything)
         if self.intro_video_path:
             from plugins.video_exporter.layers.intro_overlay_layer import IntroOverlayLayer
@@ -245,10 +262,17 @@ class FrameRenderer:
         """
         total_prerendered = 0
         for layer in self.layers:
-            if hasattr(layer, "prerender_gpu_frames"):
-                count = layer.prerender_gpu_frames()
-                total_prerendered += count
+            total_prerendered += layer.prerender_gpu_frames()
         return total_prerendered
+
+    def warmup_gpu(self) -> None:
+        """Chauffe les couches GPU sans pré-calculer toutes les frames.
+
+        Appeler depuis le thread principal avant la preview pour que les
+        effets GPU (MilkDrop) soient visibles dès le premier frame.
+        """
+        for layer in self.layers:
+            layer.warmup_gpu_frames()
 
     def render_frame(self, frame_idx: int, time_pos: float) -> NDArray[np.uint8]:
         """Render a single frame by compositing all layers.
@@ -265,13 +289,10 @@ class FrameRenderer:
 
         # Render and composite each layer
         for layer in self.layers:
-            try:
-                layer_image = layer.render(frame_idx, time_pos)
-                if layer_image.mode != "RGBA":
-                    layer_image = layer_image.convert("RGBA")
-                composite = Image.alpha_composite(composite, layer_image)
-            except Exception as e:
-                logging.warning(f"[Frame Renderer] Layer {layer.__class__.__name__} failed: {e}")
+            layer_image = layer.render(frame_idx, time_pos)
+            if layer_image.mode != "RGBA":
+                layer_image = layer_image.convert("RGBA")
+            composite = Image.alpha_composite(composite, layer_image)
 
         # Convert to RGB numpy array
         rgb = composite.convert("RGB")

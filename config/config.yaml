@@ -145,11 +145,15 @@ video_exporter:
   output_directory: "~/Videos/Jukebox"
   video_clips_folder: "/Users/fred/Movies/Insta-Templates/effects"
   intro_video_path: "/Users/fred/Movies/Insta-Templates/intro/dj__frezz.mp4"
-  waveform_enabled: true
+  waveform_enabled: false
   text_enabled: true
   dynamics_enabled: true
   vjing_enabled: true
   video_background_enabled: false
+  milkdrop_enabled: true
+  milkdrop_preset_path: "/Users/fred/Tools/presets-cream-of-the-crop"  # Chemin vers un fichier .milk ou un répertoire de presets
+  milkdrop_preset_duration: 8.0  # Durée en secondes avant de passer au preset suivant
+  milkdrop_hard_cut_on_beat: true  # Changement de preset sur le beat (coupe franche)
   # Encodage FFmpeg : constrained CRF pour respecter le débit minimum Instagram Reels (3500 kbps)
   ffmpeg_min_video_bitrate: "3500k"
   ffmpeg_max_video_bitrate: "5000k"

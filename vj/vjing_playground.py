@@ -291,7 +291,7 @@ class VJingPlayground(QMainWindow):
 
         # Audio state
         self._audio: np.ndarray | None = None
-        self._sr: int = 22050
+        self._sr: int | float = 22050
         self._duration: float = 0.0
         self._current_filepath: str = ""
 
@@ -317,6 +317,11 @@ class VJingPlayground(QMainWindow):
         # Microphone live mode
         self._mic_mode = False
         self._mic_source: MicrophoneSource | None = None
+
+        # MilkDrop (projectM)
+        self._milkdrop_layer: Any = None
+        self._milkdrop_ready = False
+        self._milkdrop_warmup_thread: threading.Thread | None = None
 
         # ESP32 UDP sender
         self._esp32_socket: socket.socket | None = None
@@ -542,6 +547,19 @@ class VJingPlayground(QMainWindow):
         self._preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         right_layout.addWidget(self._preview_label)
 
+        # MilkDrop overlay
+        milkdrop_row = QHBoxLayout()
+        self._cb_milkdrop = QCheckBox("MilkDrop (projectM)")
+        self._cb_milkdrop.setChecked(False)
+        self._cb_milkdrop.setToolTip("Superpose les effets MilkDrop sur la preview (warmup en arrière-plan)")
+        self._cb_milkdrop.toggled.connect(self._on_milkdrop_toggled)
+        milkdrop_row.addWidget(self._cb_milkdrop)
+        self._milkdrop_status_label = QLabel("")
+        self._milkdrop_status_label.setStyleSheet("color: #888;")
+        milkdrop_row.addWidget(self._milkdrop_status_label)
+        milkdrop_row.addStretch()
+        right_layout.addLayout(milkdrop_row)
+
         # LED panel preview (32x32 rendered, displayed at 256x256 with big pixels)
         led_group = QGroupBox()
         led_header = QHBoxLayout()
@@ -753,6 +771,9 @@ class VJingPlayground(QMainWindow):
             self._led_layer = None
             self.statusBar().showMessage(f"VJing error: {e}")
 
+        if self._cb_milkdrop.isChecked():
+            self._build_milkdrop_layer()
+
     def _hot_swap_effects(
         self, layer: VJingLayer, effects: list[str], time_pos: float
     ) -> None:
@@ -862,6 +883,56 @@ class VJingPlayground(QMainWindow):
         self._led_label.setVisible(checked)
         if checked and self._led_layer is None and (self._mic_mode or self._audio is not None):
             self._build_layers()
+
+    def _on_milkdrop_toggled(self, checked: bool) -> None:
+        if checked:
+            self._build_milkdrop_layer()
+        else:
+            self._milkdrop_layer = None
+            self._milkdrop_ready = False
+            self._milkdrop_warmup_thread = None
+            self._milkdrop_status_label.setText("")
+
+    def _build_milkdrop_layer(self) -> None:
+        """Instancie MilkDropLayer et lance le warmup dans un thread de fond."""
+        if self._milkdrop_warmup_thread and self._milkdrop_warmup_thread.is_alive():
+            return
+
+        try:
+            from plugins.video_exporter.layers.milkdrop_layer import MilkDropLayer  # type: ignore[import]
+        except ImportError as e:
+            log.warning("MilkDrop non disponible: %s", e)
+            self._cb_milkdrop.setChecked(False)
+            self._milkdrop_status_label.setText("non disponible")
+            return
+
+        audio = self._audio if self._audio is not None else np.zeros(int(self._sr), dtype=np.float32)
+        duration = self._duration if self._duration > 0 else 60.0
+
+        self._milkdrop_ready = False
+        self._milkdrop_status_label.setText("warmup…")
+        self._milkdrop_layer = MilkDropLayer(
+            width=PREVIEW_SIZE,
+            height=PREVIEW_SIZE,
+            fps=FPS,
+            audio=audio,
+            sr=int(self._sr),
+            duration=duration,
+        )
+
+        layer_ref = self._milkdrop_layer
+
+        def _warmup() -> None:
+            try:
+                layer_ref.warmup_gpu_frames()
+                self._milkdrop_ready = True
+            except Exception as e:
+                log.error("MilkDrop warmup échoué: %s", e)
+
+        self._milkdrop_warmup_thread = threading.Thread(
+            target=_warmup, daemon=True, name="milkdrop-warmup"
+        )
+        self._milkdrop_warmup_thread.start()
 
     def _on_esp32_toggled(self, checked: bool) -> None:
         if checked:
@@ -1026,7 +1097,7 @@ class VJingPlayground(QMainWindow):
 
     def _start_preview(self, filepath: str) -> None:
         """Start VLC playback + preview timer."""
-        media = self._vlc_instance.media_new(str(filepath))
+        media = self._vlc_instance.media_new(str(filepath))  # type: ignore[union-attr]
         self._vlc_player.set_media(media)
         self._vlc_player.play()
 
@@ -1042,6 +1113,8 @@ class VJingPlayground(QMainWindow):
         self._vlc_player.stop()
         self._frame_idx = 0
         self._btn_play.setText("Play")
+        self._milkdrop_layer = None
+        self._milkdrop_ready = False
 
         # Black frames
         black = QPixmap(PREVIEW_SIZE, PREVIEW_SIZE)
@@ -1119,9 +1192,30 @@ class VJingPlayground(QMainWindow):
 
         time_pos = self._frame_idx / FPS
 
-        if self._vjing_layer is not None and self._cb_preview.isChecked():
+        # Mise à jour du statut MilkDrop warmup
+        if self._milkdrop_warmup_thread and not self._milkdrop_warmup_thread.is_alive():
+            self._milkdrop_warmup_thread = None
+            self._milkdrop_status_label.setText("prêt" if self._milkdrop_ready else "erreur")
+
+        show_preview = self._cb_preview.isChecked()
+        has_vjing = self._vjing_layer is not None
+        has_milkdrop = self._milkdrop_layer is not None and self._milkdrop_ready
+
+        if (has_vjing or has_milkdrop) and show_preview:
             try:
-                pil_img = self._vjing_layer.render(self._frame_idx, time_pos)
+                from PIL import Image as PILImage
+
+                if has_vjing:
+                    pil_img = self._vjing_layer.render(self._frame_idx, time_pos)  # type: ignore[union-attr]
+                else:
+                    pil_img = PILImage.new("RGB", (PREVIEW_SIZE, PREVIEW_SIZE), (0, 0, 0))
+
+                if has_milkdrop:
+                    md_img = self._milkdrop_layer.render(self._frame_idx, time_pos)  # type: ignore[union-attr]
+                    base = pil_img.convert("RGBA")
+                    overlay = md_img.convert("RGBA") if md_img.mode != "RGBA" else md_img
+                    pil_img = PILImage.alpha_composite(base, overlay)
+
                 rgb_img = pil_img.convert("RGB")
                 data = rgb_img.tobytes("raw", "RGB")
                 qimg = QImage(
@@ -1197,9 +1291,11 @@ class VJingPlayground(QMainWindow):
         if self._esp32_socket:
             self._esp32_socket.close()
             self._esp32_socket = None
+        self._milkdrop_layer = None
+        self._milkdrop_ready = False
         self._vlc_player.stop()
-        self._vlc_player.release()
-        self._vlc_instance.release()
+        self._vlc_player.release()  # type: ignore[union-attr]
+        self._vlc_instance.release()  # type: ignore[union-attr]
         if self._db:
             self._db.close()
         event.accept()
@@ -1226,7 +1322,8 @@ def main() -> None:
 
     window = VJingPlayground()
     window.show()
-    sys.exit(app.exec())
+    _run = getattr(app, "exec")  # Boucle d'événements Qt
+    sys.exit(_run())
 
 
 if __name__ == "__main__":

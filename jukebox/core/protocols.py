@@ -222,6 +222,10 @@ class VideoExporterConfigProtocol(Protocol):
     dynamics_enabled: bool
     vjing_enabled: bool
     video_background_enabled: bool
+    milkdrop_enabled: bool
+    milkdrop_preset_path: str
+    milkdrop_preset_duration: float
+    milkdrop_hard_cut_on_beat: bool
     waveform_height_ratio: float
     waveform_bass_color: str
     waveform_mid_color: str

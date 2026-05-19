@@ -29,6 +29,44 @@ except ImportError:
 # Global lock for thread-safe GPU access (OpenGL contexts are NOT thread-safe)
 _gpu_lock = threading.Lock()
 
+# Contexte ModernGL par thread : sur macOS, NSOpenGLContext/CGL est lié au thread créateur.
+# Quand ce thread se termine, ModernGL invalide le contexte (classe → InvalidObject).
+# Un threading.local() garantit que chaque thread (preview, export…) a son propre contexte.
+_thread_local_gl = threading.local()
+
+
+def _is_gl_context_valid(ctx: Any) -> bool:
+    """Vérifie que ctx.mglo n'est pas un InvalidObject ModernGL."""
+    if ctx is None:
+        return False
+    try:
+        _ = ctx.version_code  # lit ctx.mglo.version_code ; lève AttributeError si mglo invalide
+        return True
+    except AttributeError:
+        return False
+
+
+def get_shared_gl_context() -> Any:
+    """Retourne le contexte ModernGL du thread courant, le crée si nécessaire.
+
+    Tous les layers GPU (VJing, MilkDrop, etc.) du même thread partagent ce contexte
+    pour éviter les collisions de contexte OpenGL courant entre layers.
+    Doit être appelée depuis l'intérieur de _gpu_lock.
+    """
+    ctx = getattr(_thread_local_gl, "ctx", None)
+    if not _is_gl_context_valid(ctx):
+        if ctx is not None:
+            logging.warning("[GPU Shaders] Contexte GL invalide (mglo = InvalidObject), recréation")
+        if not MODERNGL_AVAILABLE:
+            raise RuntimeError("moderngl absent — installer avec : uv sync --extra video")
+        import moderngl as _mgl  # type: ignore[import-untyped]
+
+        new_ctx = _mgl.create_standalone_context()
+        if not _is_gl_context_valid(new_ctx):
+            raise RuntimeError("mgl.create_standalone_context() a retourné un contexte invalide")
+        _thread_local_gl.ctx = new_ctx
+    return _thread_local_gl.ctx
+
 
 # =============================================================================
 # Shader Programs (GLSL)
@@ -353,8 +391,7 @@ class GPUShaderRenderer:
 
     def _init_context(self) -> None:
         """Initialize OpenGL context and resources."""
-        # Create standalone context (headless)
-        self._ctx = moderngl.create_standalone_context()  # type: ignore[union-attr]
+        self._ctx = get_shared_gl_context()
 
         # Create vertex buffer for fullscreen quad
         vertices = np.array(
