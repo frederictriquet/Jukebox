@@ -190,7 +190,8 @@ class VideoExporterPlugin(SettingsSyncMixin):
             track_metadata=track,
         )
 
-        if dialog.exec():
+        _run_dialog = getattr(dialog, "exec")  # Boucle modale Qt
+        if _run_dialog():
             # Dialog handles the export via worker
             logging.info("[Video Exporter] Export initiated from dialog")
 
@@ -205,13 +206,13 @@ class VideoExporterPlugin(SettingsSyncMixin):
                 "label": "Default Resolution",
                 "type": "choice",
                 "options": [
+                    "reels_9x16 (1080×1920)",
+                    "feed_4x5 (1080×1350)",
+                    "feed_3x4 (1080×1440)",
                     "1080p",
                     "720p",
                     "square_1080",
                     "square_720",
-                    "vertical",
-                    "instagram",
-                    "instagram_full",
                 ],
                 "default": self.context.config.video_exporter.default_resolution,
             },
