@@ -49,9 +49,9 @@ RESOLUTION_PRESETS: dict[str, tuple[int, int]] = {
     "720p": (1280, 720),
     "square_1080": (1080, 1080),
     "square_720": (720, 720),
-    "vertical": (1080, 1920),
-    "instagram": (1080, 1350),
-    "instagram_full": (1080, 1440),
+    "reels_9x16 (1080×1920)": (1080, 1920),       # Reels / Stories — boostable
+    "feed_4x5 (1080×1350)": (1080, 1350),          # Feed portrait standard
+    "feed_3x4 (1080×1440)": (1080, 1440),          # Feed portrait élargi
 }
 
 # Palette display names for tooltips

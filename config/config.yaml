@@ -140,7 +140,7 @@ file_manager:
   trash_key: "Delete"
 
 video_exporter:
-  default_resolution: "vertical"  # Format par défaut : Instagram Reels (1080×1920)
+  default_resolution: "reels_9x16 (1080×1920)"  # Format par défaut : Instagram Reels boostable
   default_fps: 30
   output_directory: "~/Videos/Jukebox"
   video_clips_folder: "/Users/fred/Movies/Insta-Templates/effects"
