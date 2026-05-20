@@ -405,7 +405,10 @@ class TrackListModel(QAbstractTableModel):
             "filename": lambda t: (t.get("filename") or "").lower(),
             "genre": lambda t: (t.get("genre") or "").lower(),
             "duration": lambda t: t.get("duration_seconds") or 0.0,
-            "rating": lambda t: (t.get("genre") or "").lower(),
+            "rating": lambda t: next(
+                (int(p[1:]) for p in (t.get("genre") or "").split("-") if p.startswith("*") and p[1:].isdigit()),
+                0,
+            ),
             "path": lambda t: str(t.get("filepath", "").parent).lower(),
         }
 

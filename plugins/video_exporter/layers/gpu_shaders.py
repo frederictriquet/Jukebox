@@ -36,12 +36,16 @@ _thread_local_gl = threading.local()
 
 
 def _is_gl_context_valid(ctx: Any) -> bool:
-    """Vérifie que ctx.mglo n'est pas un InvalidObject ModernGL."""
+    """Vérifie que ctx.mglo n'est pas un InvalidObject ModernGL.
+
+    version_code est stocké comme entier Python sur le Context à la création :
+    ctx.version_code reste accessible même après ctx.release(). On inspecte
+    directement le type de ctx.mglo pour détecter les contextes libérés.
+    """
     if ctx is None:
         return False
     try:
-        _ = ctx.version_code  # lit ctx.mglo.version_code ; lève AttributeError si mglo invalide
-        return True
+        return type(ctx.mglo).__name__ != "InvalidObject"
     except AttributeError:
         return False
 
@@ -549,38 +553,58 @@ class GPUShaderRenderer:
                 return None
 
     def cleanup(self) -> None:
-        """Release GPU resources."""
-        if self._ctx:
-            self._ctx.release()
-            self._ctx = None
-            self._initialized = False
-            logging.debug("[GPU Renderer] Cleaned up")
+        """Libère les ressources GPU propres à ce renderer.
+
+        Ne libère PAS le contexte GL partagé — il est géré par
+        get_shared_gl_context() / _thread_local_gl.
+        """
+        if self._fbo:
+            try:
+                self._fbo.release()
+            except Exception:
+                logging.debug("[GPU Renderer] cleanup: FBO release ignoré (contexte déjà libéré)")
+            self._fbo = None
+        if self._vbo:
+            try:
+                self._vbo.release()
+            except Exception:
+                logging.debug("[GPU Renderer] cleanup: VBO release ignoré (contexte déjà libéré)")
+            self._vbo = None
+        for prog in self._programs.values():
+            try:
+                prog.release()
+            except Exception:
+                logging.debug("[GPU Renderer] cleanup: program release ignoré (contexte déjà libéré)")
+        self._programs.clear()
+        self._ctx = None
+        self._initialized = False
+        logging.debug("[GPU Renderer] Cleaned up")
 
 
-# Global renderer instance (lazy initialization)
-_gpu_renderer: GPUShaderRenderer | None = None
+# Renderer GPU par thread : chaque thread (main, export worker…) a son propre renderer
+# pour éviter tout accès GL cross-thread (= SIGSEGV sur macOS/CGL).
+_gpu_renderer_local = threading.local()
 
 
 def get_gpu_renderer(width: int, height: int) -> GPUShaderRenderer | None:
-    """Get or create GPU renderer instance.
+    """Retourne le renderer GPU du thread courant, le crée/reconfigure si nécessaire.
 
     Args:
         width: Output width.
         height: Output height.
 
     Returns:
-        GPUShaderRenderer instance or None if unavailable.
+        GPUShaderRenderer instance ou None si indisponible.
     """
-    global _gpu_renderer
-
     if not MODERNGL_AVAILABLE:
         return None
 
-    # Serialize access to prevent race conditions during initialization
-    with _gpu_lock:
-        if _gpu_renderer is None or _gpu_renderer.width != width or _gpu_renderer.height != height:
-            if _gpu_renderer:
-                _gpu_renderer.cleanup()
-            _gpu_renderer = GPUShaderRenderer(width, height)
+    renderer: GPUShaderRenderer | None = getattr(_gpu_renderer_local, "renderer", None)
+    if renderer is None or renderer.width != width or renderer.height != height:
+        if renderer is not None:
+            # cleanup() est appelé depuis le thread créateur → sûr
+            renderer.cleanup()
+        renderer = GPUShaderRenderer(width, height)
+        _gpu_renderer_local.renderer = renderer
 
-        return _gpu_renderer if _gpu_renderer.available else None
+    return renderer if renderer.available else None

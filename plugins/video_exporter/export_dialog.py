@@ -828,6 +828,10 @@ class ExportDialog(QDialog):
         simultaneous_layout.addStretch()
         layers_layout.addLayout(simultaneous_layout)
 
+        self.milkdrop_check = QCheckBox("MilkDrop (projectM)")
+        self.milkdrop_check.setToolTip("Effets MilkDrop — ajoute ~30s de warmup avant l'export")
+        layers_layout.addWidget(self.milkdrop_check)
+
         self.video_bg_check = QCheckBox("Video Background")
         layers_layout.addWidget(self.video_bg_check)
 
@@ -1107,6 +1111,7 @@ class ExportDialog(QDialog):
         self.dynamics_check.setChecked(config.dynamics_enabled)
         self.vjing_check.setChecked(config.vjing_enabled)
         self.video_bg_check.setChecked(config.video_background_enabled)
+        self.milkdrop_check.setChecked(config.milkdrop_enabled)
 
     def _generate_default_filename(self) -> None:
         """Generate a default filename based on track metadata."""
@@ -1201,7 +1206,7 @@ class ExportDialog(QDialog):
                 "dynamics": self.dynamics_check.isChecked(),
                 "vjing": self.vjing_check.isChecked(),
                 "video_background": self.video_bg_check.isChecked(),
-                "milkdrop_enabled": self.context.config.video_exporter.milkdrop_enabled,
+                "milkdrop_enabled": self.milkdrop_check.isChecked(),
                 "milkdrop_preset_path": self.context.config.video_exporter.milkdrop_preset_path,
                 "milkdrop_preset_duration": self.context.config.video_exporter.milkdrop_preset_duration,
                 "milkdrop_hard_cut_on_beat": self.context.config.video_exporter.milkdrop_hard_cut_on_beat,
@@ -1264,9 +1269,6 @@ class ExportDialog(QDialog):
             self.preview_info_label.setText(
                 f"Preview ready: {preview_width}x{preview_height} @ {fps}fps"
             )
-
-            # Chauffe projectM pour que les effets soient visibles dès frame 0
-            self._preview_renderer.warmup_gpu()
 
             # Render first frame
             self._refresh_preview_frame()
@@ -1381,8 +1383,8 @@ class ExportDialog(QDialog):
             pixmap = pixmap.scaled(label_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.preview_label.setPixmap(pixmap)
 
-        except Exception as e:
-            logging.warning(f"[Export Dialog] Preview render failed: {e}")
+        except Exception:
+            logging.exception("[Export Dialog] Preview render failed")
 
     def _preview_single_effect(self, effect_id: str, effect_name: str) -> None:
         """Open a preview dialog for a single effect.
@@ -1480,7 +1482,7 @@ class ExportDialog(QDialog):
                 "dynamics": self.dynamics_check.isChecked(),
                 "vjing": self.vjing_check.isChecked(),
                 "video_background": self.video_bg_check.isChecked(),
-                "milkdrop_enabled": self.context.config.video_exporter.milkdrop_enabled,
+                "milkdrop_enabled": self.milkdrop_check.isChecked(),
                 "milkdrop_preset_path": self.context.config.video_exporter.milkdrop_preset_path,
                 "milkdrop_preset_duration": self.context.config.video_exporter.milkdrop_preset_duration,
                 "milkdrop_hard_cut_on_beat": self.context.config.video_exporter.milkdrop_hard_cut_on_beat,

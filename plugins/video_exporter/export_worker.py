@@ -43,8 +43,14 @@ class VideoExportWorker(QThread):
         self.config = config
         self.context = context
         self._cancelled = False
-        # Number of parallel render threads (use CPU count, max 8)
-        self._num_workers = min(os.cpu_count() or 4, 8)
+        # MilkDrop exige un rendu séquentiel : le pré-rendu full-résolution
+        # cacherait des Go de frames PIL et crasherait projectM (SIGSEGV).
+        # L'ordre des presets dépend aussi du séquencement des frames.
+        milkdrop_active = config.get("layers", {}).get("milkdrop_enabled", False)
+        if milkdrop_active:
+            self._num_workers = 1
+        else:
+            self._num_workers = min(os.cpu_count() or 4, 8)
 
     def run(self) -> None:
         """Run the export process."""

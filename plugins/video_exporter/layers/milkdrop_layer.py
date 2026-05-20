@@ -167,7 +167,11 @@ class MilkDropLayer(BaseVisualLayer):
             return [str(preset_path)]
 
         if preset_path.is_dir():
-            presets = sorted(str(p) for p in preset_path.rglob("*.milk"))
+            all_presets = sorted(str(p) for p in preset_path.rglob("*.milk"))
+            # Exclure les presets de transition (noirs, non visuels)
+            presets = [p for p in all_presets if "transition" not in p.lower()]
+            if not presets:
+                presets = all_presets  # fallback si tout était des transitions
             if not presets:
                 logger.warning(
                     "[MilkDropLayer] Aucun fichier .milk trouvé dans : %s", self._preset_path
@@ -205,6 +209,7 @@ class MilkDropLayer(BaseVisualLayer):
         Doit être appelée depuis l'intérieur de _gpu_lock.
         Détruit les ressources précédentes si elles existent.
         """
+        logger.debug("[MilkDropLayer] _init_gl: destruction ressources précédentes")
         if self._handle is not None and self._lib is not None:
             self._lib.projectm_destroy(self._handle)  # type: ignore[union-attr]
             self._handle = None
@@ -213,9 +218,12 @@ class MilkDropLayer(BaseVisualLayer):
             self._fbo = None
 
         self._presets = self._collect_presets()
+        logger.debug("[MilkDropLayer] _init_gl: get_shared_gl_context()")
         self._ctx = get_shared_gl_context()
-        
+        logger.info("[MilkDropLayer] _init_gl: ctx type=%s", type(self._ctx).__name__)
+
         # Création texture couleur
+        logger.debug("[MilkDropLayer] _init_gl: création texture %dx%d", self.width, self.height)
         texture = self._ctx.texture((self.width, self.height), 4)  # type: ignore[union-attr]
         # Ajout d'un depth buffer : certains presets MilkDrop complexes en ont besoin
         depth_attachment = self._ctx.depth_renderbuffer((self.width, self.height))  # type: ignore[union-attr]
@@ -224,29 +232,22 @@ class MilkDropLayer(BaseVisualLayer):
             color_attachments=[texture],
             depth_attachment=depth_attachment
         )
-        
+        logger.debug("[MilkDropLayer] _init_gl: FBO créé")
+
         self._handle = self._lib.projectm_create(None, self.width, self.height)  # type: ignore[union-attr]
         self._lib.projectm_set_window_size(self._handle, self.width, self.height)  # type: ignore[union-attr]
-        
+
         if self._presets:
             logger.info("[MilkDropLayer] Chargement du premier preset : %s", self._presets[0])
             self._lib.projectm_load_preset_file(  # type: ignore[union-attr]
                 self._handle, self._presets[0].encode(), False
             )
-            
+
         self._fbo.use()  # type: ignore[union-attr]
         self._ctx.clear(0.0, 0.0, 0.0, 1.0)  # type: ignore[union-attr]
         self._live_preset_idx = 0
         self._live_frames_since_cut = 0
-
-    def _ensure_gl_ready(self) -> None:
-        """Initialise le contexte GL si pas encore fait (idempotent)."""
-        if self._handle is not None:
-            return
-        with _gpu_lock:
-            if self._handle is not None:
-                return
-            self._init_gl()
+        logger.debug("[MilkDropLayer] _init_gl: terminé")
 
     def _render_one_frame(self, frame_idx: int) -> Image.Image:
         """Rend un seul frame MilkDrop et retourne l'image RGBA.
@@ -287,9 +288,9 @@ class MilkDropLayer(BaseVisualLayer):
             return
 
         samples_per_frame = max(1, self.sr // self.fps)
-        # Warmup intensif pour forcer la convergence visuelle.
-        # On passe à 2500 frames pour être absolument sûr.
-        warmup_count = 2500
+        # Warmup réduit : les presets Transition sont exclus de la liste,
+        # le shuffle garantit un preset visuel dès le départ.
+        warmup_count = 500
         warmup_audio_len = min(len(self.audio), int(3.0 * self.sr))
         if warmup_audio_len == 0:
             logger.warning("[MilkDropLayer] Audio de warmup vide !")
@@ -434,10 +435,20 @@ class MilkDropLayer(BaseVisualLayer):
             return cached
 
         # Rendu à la demande — mode preview (pas de pré-rendu)
-        if self._handle is None:
-            self._ensure_gl_ready()
-
         with _gpu_lock:
+            # Vérifier la validité du contexte GL à l'intérieur du lock.
+            # Sur macOS/CGL, le contexte créé sur le thread de warmup devient
+            # InvalidObject quand ce thread se termine. On le recrée ici sur le
+            # thread courant (main thread) pour garantir un rendu fonctionnel.
+            ctx_valid = self._ctx is not None
+            if ctx_valid:
+                try:
+                    _ = self._ctx.version_code  # type: ignore[union-attr]
+                except AttributeError:
+                    ctx_valid = False
+            if self._handle is None or not ctx_valid:
+                self._init_gl()
+
             # Rotation de preset par durée (fondu)
             if self._presets and self._live_frames_since_cut >= int(
                 self._preset_duration * self.fps
