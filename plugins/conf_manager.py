@@ -69,7 +69,7 @@ class ConfManagerPlugin:
             self.conf_dialog = ConfigDialog(self.context)
 
         self.conf_dialog.load_settings()
-        self.conf_dialog.exec()
+        self.conf_dialog.exec_()
 
     def activate(self, mode: str) -> None:
         """Activate plugin for this mode."""
@@ -555,17 +555,43 @@ class ConfigDialog(QDialog):
                         if index >= 0:
                             input_widget.setCurrentIndex(index)
                 elif isinstance(input_widget, QCheckBox):
-                    # Parse boolean
-                    bool_value = value.lower() in ("true", "1", "yes") if value else False
-                    input_widget.setChecked(bool_value)
+                    input_widget.setChecked(
+                        self._coerce_setting_value(value, setting_config, bool)
+                    )
                 elif isinstance(input_widget, (DirectoryInput, ShortcutInput)):
                     input_widget.setText(value)
                 elif isinstance(input_widget, QDoubleSpinBox):
-                    input_widget.setValue(float(value) if value else 0.0)
+                    input_widget.setValue(
+                        self._coerce_setting_value(value, setting_config, float)
+                    )
                 elif isinstance(input_widget, QSpinBox):
-                    input_widget.setValue(int(float(value)) if value else 0)
+                    input_widget.setValue(
+                        self._coerce_setting_value(value, setting_config, int)
+                    )
                 elif isinstance(input_widget, QLineEdit):
                     input_widget.setText(value)
+
+    @staticmethod
+    def _coerce_setting_value(raw: str, setting_config: dict[str, Any], target_type: type) -> Any:
+        """Valide et convertit une valeur brute via Pydantic TypeAdapter.
+
+        Retourne le défaut du schema si la valeur est invalide pour le type attendu.
+        """
+        from pydantic import TypeAdapter, ValidationError  # type: ignore[import]
+
+        default = setting_config.get(
+            "default", 0 if target_type in (int, float) else False
+        )
+        if not raw:
+            return default
+        try:
+            return TypeAdapter(target_type).validate_python(raw)
+        except (ValidationError, ValueError, TypeError):
+            logging.warning(
+                "[ConfManager] Valeur invalide %r pour le type %s — défaut utilisé : %r",
+                raw, target_type.__name__, default,
+            )
+            return default
 
     def _get_setting(self, plugin_name: str, setting_key: str) -> str | None:
         """Get setting from database."""

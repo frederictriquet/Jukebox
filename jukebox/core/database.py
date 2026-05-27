@@ -54,7 +54,11 @@ class Database:
     def connect(self) -> None:
         """Connect to database and enable foreign keys."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.db_path))
+        # isolation_level=None : mode autocommit — chaque DML s'exécute seul,
+        # sauf si encadré d'un BEGIN explicite (géré par transaction()).
+        # Évite le conflit "cannot start a transaction within a transaction"
+        # causé par les BEGIN implicites du module sqlite3 avec isolation_level par défaut.
+        self.conn = sqlite3.connect(str(self.db_path), isolation_level=None)
         self.conn.row_factory = _dict_factory  # type: ignore[assignment]
         self.conn.execute("PRAGMA foreign_keys = ON")
 
@@ -66,7 +70,7 @@ class Database:
         if self._tracks is None:
             from jukebox.core.repositories import TrackRepository
 
-            self._tracks = TrackRepository(self)
+            self._tracks = TrackRepository(self)  # type: ignore[arg-type]
         return self._tracks
 
     @property
@@ -75,7 +79,7 @@ class Database:
         if self._waveforms is None:
             from jukebox.core.repositories import WaveformRepository
 
-            self._waveforms = WaveformRepository(self)
+            self._waveforms = WaveformRepository(self)  # type: ignore[arg-type]
         return self._waveforms
 
     @property
@@ -84,7 +88,7 @@ class Database:
         if self._analysis is None:
             from jukebox.core.repositories import AnalysisRepository
 
-            self._analysis = AnalysisRepository(self)
+            self._analysis = AnalysisRepository(self)  # type: ignore[arg-type]
         return self._analysis
 
     @property
@@ -93,7 +97,7 @@ class Database:
         if self._settings is None:
             from jukebox.core.repositories import PluginSettingsRepository
 
-            self._settings = PluginSettingsRepository(self)
+            self._settings = PluginSettingsRepository(self)  # type: ignore[arg-type]
         return self._settings
 
     # ========== Transaction Management ==========

@@ -375,6 +375,8 @@ class GPUShaderRenderer:
         self._ctx: Any = None
         self._programs: dict[str, Any] = {}
         self._vao: Any = None
+        self._vbo: Any = None
+        self._texture: Any = None
         self._fbo: Any = None
         self._initialized = False
         # Track creator thread - OpenGL context can only be used from this thread
@@ -391,7 +393,8 @@ class GPUShaderRenderer:
             logging.info(f"[GPU Renderer] Initialized {width}x{height}")
         except Exception as e:
             logging.warning(f"[GPU Renderer] Failed to initialize: {e}")
-            self._initialized = False
+            # Libère toute ressource GL allouée avant l'échec
+            self.cleanup()
 
     def _init_context(self) -> None:
         """Initialize OpenGL context and resources."""
@@ -564,6 +567,12 @@ class GPUShaderRenderer:
             except Exception:
                 logging.debug("[GPU Renderer] cleanup: FBO release ignoré (contexte déjà libéré)")
             self._fbo = None
+        if self._texture:
+            try:
+                self._texture.release()
+            except Exception:
+                logging.debug("[GPU Renderer] cleanup: texture release ignoré (contexte déjà libéré)")
+            self._texture = None
         if self._vbo:
             try:
                 self._vbo.release()
@@ -571,6 +580,10 @@ class GPUShaderRenderer:
                 logging.debug("[GPU Renderer] cleanup: VBO release ignoré (contexte déjà libéré)")
             self._vbo = None
         for prog in self._programs.values():
+            try:
+                prog.vao.release()
+            except Exception:
+                logging.debug("[GPU Renderer] cleanup: VAO release ignoré")
             try:
                 prog.release()
             except Exception:

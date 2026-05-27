@@ -28,6 +28,7 @@ class TrackInfoPlugin:
         """Initialize plugin."""
         self.context: PluginContextProtocol = None  # type: ignore[assignment]
         self.info_widget: TrackInfoWidget | None = None
+        self._current_duration_seconds: float | None = None
 
     def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
@@ -59,27 +60,20 @@ class TrackInfoPlugin:
         track = self.context.database.tracks.get_by_id(track_id)
 
         if track:
-            duration_str = self._format_duration(track["duration_seconds"] or 0)
+            self._current_duration_seconds = float(track["duration_seconds"] or 0)
+            duration_str = self._format_duration(self._current_duration_seconds)
             bitrate_str = f"{track['bitrate'] // 1000}kbps" if track["bitrate"] else "N/A"
             size_str = self._format_size(track["file_size"] or 0)
-
             self.info_widget.set_track_info(
                 duration=duration_str, bitrate=bitrate_str, filesize=size_str
             )
 
     def _on_position_update(self, position: float) -> None:
-        """Handle position update."""
-        if not self.info_widget:
+        """Handle position update — utilise la durée mise en cache, sans requête DB."""
+        if not self.info_widget or self._current_duration_seconds is None:
             return
-
-        # Get current track duration
-        current_file = self.context.player.current_file
-        if current_file:
-            track = self.context.database.tracks.get_by_filepath(current_file)
-
-            if track and track["duration_seconds"]:
-                current_time = position * track["duration_seconds"]
-                self.info_widget.set_position(self._format_duration(current_time))
+        current_time = position * self._current_duration_seconds
+        self.info_widget.set_position(self._format_duration(current_time))
 
     def _format_duration(self, seconds: float) -> str:
         """Format duration as MM:SS."""

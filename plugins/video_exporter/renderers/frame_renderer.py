@@ -222,30 +222,44 @@ class FrameRenderer:
         # Couche MilkDrop (projectM v4)
         if layers_config.get("milkdrop_enabled", False):
             logging.info("[Frame Renderer] initializing MilkDrop layer...")
-            from plugins.video_exporter.layers.milkdrop_layer import (  # pyright: ignore[reportMissingImports]
-                MilkDropLayer,
-            )
+            try:
+                from plugins.video_exporter.layers.milkdrop_layer import (  # pyright: ignore[reportMissingImports]
+                    MilkDropLayer,
+                )
 
-            layer = MilkDropLayer(
-                **common_kwargs,
-                preset_path=layers_config.get("milkdrop_preset_path", ""),
-                preset_duration=layers_config.get("milkdrop_preset_duration", 8.0),
-                hard_cut_on_beat=layers_config.get("milkdrop_hard_cut_on_beat", True),
-                rng_seed=self.rng_seed,
-            )
-            self.layers.append(layer)
-            logging.info("[Frame Renderer] MilkDrop layer enabled")
+                layer = MilkDropLayer(
+                    **common_kwargs,
+                    preset_path=layers_config.get("milkdrop_preset_path", ""),
+                    preset_duration=layers_config.get("milkdrop_preset_duration", 8.0),
+                    hard_cut_on_beat=layers_config.get("milkdrop_hard_cut_on_beat", True),
+                    rng_seed=self.rng_seed,
+                )
+                self.layers.append(layer)
+                logging.info("[Frame Renderer] MilkDrop layer enabled")
+            except Exception as e:
+                logging.exception("[Frame Renderer] Échec d'initialisation MilkDrop")
+                raise RuntimeError(
+                    f"Impossible d'initialiser la couche MilkDrop : {e}\n"
+                    "Vérifiez que libprojectM est installé et que le chemin des presets est valide."
+                ) from e
 
         # Intro overlay layer (plays once on top of everything)
         if self.intro_video_path:
-            from plugins.video_exporter.layers.intro_overlay_layer import IntroOverlayLayer
+            logging.info("[Frame Renderer] initializing intro overlay layer...")
+            try:
+                from plugins.video_exporter.layers.intro_overlay_layer import IntroOverlayLayer
 
-            layer = IntroOverlayLayer(
-                **common_kwargs,
-                video_path=self.intro_video_path,
-            )
-            self.layers.append(layer)
-            logging.info("[Frame Renderer] Intro overlay layer enabled")
+                layer = IntroOverlayLayer(
+                    **common_kwargs,
+                    video_path=self.intro_video_path,
+                )
+                self.layers.append(layer)
+                logging.info("[Frame Renderer] Intro overlay layer enabled")
+            except Exception as e:
+                logging.exception("[Frame Renderer] Échec d'initialisation de la vidéo d'intro")
+                raise RuntimeError(
+                    f"Impossible de charger la vidéo d'intro '{self.intro_video_path}' : {e}"
+                ) from e
 
         # Sort by z-index
         self.layers.sort(key=lambda layer: layer.z_index)

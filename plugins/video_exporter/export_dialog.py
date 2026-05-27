@@ -1532,11 +1532,12 @@ class ExportDialog(QDialog):
         }
 
     def reject(self) -> None:
-        """Handle Escape key - stop playback before closing."""
-        # Stop preview timer
+        """Handle Escape key / close button — annule l'export si actif."""
+        if self.worker and self.worker.isRunning():
+            self._on_cancel()
+            return
         if self._preview_timer.isActive():
             self._preview_timer.stop()
-        # Stop VLC player
         try:
             self._vlc_player.stop()
         except Exception as e:
@@ -1545,17 +1546,19 @@ class ExportDialog(QDialog):
 
     def closeEvent(self, event: Any) -> None:
         """Clean up resources when dialog is closed."""
-        # Stop preview timer
+        if self.worker and self.worker.isRunning():
+            # Bloquer la fermeture et déléguer à _on_cancel qui attend la fin du worker
+            event.ignore()
+            self._on_cancel()
+            return
         if self._preview_timer.isActive():
             self._preview_timer.stop()
-        # Stop and release local VLC player
         try:
             self._vlc_player.stop()
             self._vlc_player.release()  # type: ignore[attr-defined]
             self._vlc_instance.release()  # type: ignore[attr-defined]
         except Exception as e:
             logging.debug(f"VLC cleanup error: {e}")
-        # Clear preview renderer
         self._preview_renderer = None
         self._preview_audio = None
         super().closeEvent(event)

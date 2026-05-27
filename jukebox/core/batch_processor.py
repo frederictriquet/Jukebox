@@ -45,9 +45,10 @@ class BatchProcessor(QObject):
         """Start the periodic cleanup timer if not already running."""
         if cls._cleanup_timer is None:
             cls._cleanup_timer = QTimer()
+            # Connexion unique à la création — évite N slots connectés après N appels
+            cls._cleanup_timer.timeout.connect(cls._cleanup_orphan_workers)
         # cast pour que pyright réduise le type de QTimer | None à QTimer
         timer = cast(QTimer, cls._cleanup_timer)
-        timer.timeout.connect(cls._cleanup_orphan_workers)
         if not timer.isActive():
             timer.start(ORPHAN_CLEANUP_INTERVAL_MS)
             logging.debug("[BatchProcessor] Started orphan worker cleanup timer")

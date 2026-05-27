@@ -585,7 +585,9 @@ class TrackListModel(QAbstractTableModel):
         track_dicts = [dict(t) for t in self.tracks]
 
         worker = BackgroundCheckWorker(self._duplicate_checker, track_dicts)
-        worker.results.connect(self._on_duplicate_check_results)
+        # QueuedConnection explicite : le slot s'exécute dans le thread Qt principal
+        # même si le signal est émis depuis run() du worker thread.
+        worker.results.connect(self._on_duplicate_check_results, Qt.ConnectionType.QueuedConnection)
         self._bg_worker = worker
         worker.start()
         logging.debug(
