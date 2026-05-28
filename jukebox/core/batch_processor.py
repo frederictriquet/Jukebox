@@ -74,6 +74,35 @@ class BatchProcessor(QObject):
             cls._cleanup_timer.stop()
             logging.debug("[BatchProcessor] Stopped orphan worker cleanup timer (no orphans)")
 
+    @classmethod
+    def shutdown_all_workers(cls, timeout_ms: int = 5000) -> None:
+        """Interrompt et attend tous les workers orphelins — à appeler à la fermeture de l'app.
+
+        Sans cet appel, Qt détruit les QThread encore actifs ce qui provoque un SIGABRT.
+        """
+        if cls._cleanup_timer is not None:
+            cls._cleanup_timer.stop()
+
+        running = [w for w in cls._global_orphan_workers if w.isRunning()]
+        if not running:
+            cls._global_orphan_workers.clear()
+            return
+
+        logging.info("[BatchProcessor] Arrêt de %d worker(s) orphelin(s)…", len(running))
+
+        for worker in running:
+            worker.requestInterruption()
+            worker.quit()
+
+        for worker in running:
+            if not worker.wait(timeout_ms):
+                logging.warning("[BatchProcessor] Worker non terminé après %dms, terminate()", timeout_ms)
+                worker.terminate()
+                worker.wait(1000)
+
+        cls._global_orphan_workers.clear()
+        logging.info("[BatchProcessor] Tous les workers orphelins arrêtés")
+
     # Signals
     progress = Signal(int, int, object)  # current, total, current_item
     item_complete = Signal(object, object)  # item, result

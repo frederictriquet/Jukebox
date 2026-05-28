@@ -265,8 +265,12 @@ class TrackListModel(QAbstractTableModel):
                 waveform_index = self.index(row, 0)  # Waveform is column 0
                 self.dataChanged.emit(waveform_index, waveform_index, [])
             except (ValueError, Exception) as e:
-                logging.error(
-                    f"[TrackListModel] Failed to update waveform for {filepath}: {e}", exc_info=True
+                logging.warning(
+                    f"[TrackListModel] Cache waveform invalide pour {filepath}"
+                    f" (format obsolète ?), suppression pour régénération : {e}"
+                )
+                self.database.conn.execute(
+                    "DELETE FROM waveform_cache WHERE track_id = ?", (track_id,)
                 )
 
     def _on_stats_complete(self, track_id: int) -> None:
@@ -462,9 +466,12 @@ class TrackListModel(QAbstractTableModel):
                     try:
                         waveform = deserialize_waveform(waveform_cache["waveform_data"])
                     except (ValueError, Exception) as e:
-                        logging.error(
-                            f"[TrackListModel] Failed to load waveform for {filepath}: {e}",
-                            exc_info=True,
+                        logging.warning(
+                            f"[TrackListModel] Cache waveform invalide pour {filepath}"
+                            f" (format obsolète ?), suppression pour régénération : {e}"
+                        )
+                        self.database.conn.execute(
+                            "DELETE FROM waveform_cache WHERE track_id = ?", (track_id,)
                         )
 
                 # Check if audio analysis exists (with key stats)

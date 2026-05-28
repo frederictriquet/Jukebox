@@ -138,8 +138,6 @@ class AudioPlayer(QObject):
     def _on_end_reached(self, _event: Any) -> None:
         """Handle VLC end reached event (appelé depuis le thread interne VLC).
 
-        Reroutage via QueuedConnection pour émettre le signal depuis le thread Qt principal.
+        Qt AutoConnection détecte le cross-thread et délivre le signal dans le thread principal.
         """
-        from PySide6.QtCore import QMetaObject, Qt  # type: ignore[import]
-
-        QMetaObject.invokeMethod(self, b"track_finished", Qt.ConnectionType.QueuedConnection)
+        self.track_finished.emit()
