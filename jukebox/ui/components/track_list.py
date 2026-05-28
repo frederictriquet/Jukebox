@@ -265,8 +265,12 @@ class TrackListModel(QAbstractTableModel):
                 waveform_index = self.index(row, 0)  # Waveform is column 0
                 self.dataChanged.emit(waveform_index, waveform_index, [])
             except (ValueError, Exception) as e:
-                logging.error(
-                    f"[TrackListModel] Failed to update waveform for {filepath}: {e}", exc_info=True
+                logging.warning(
+                    f"[TrackListModel] Cache waveform invalide pour {filepath}"
+                    f" (format obsolète ?), suppression pour régénération : {e}"
+                )
+                self.database.conn.execute(
+                    "DELETE FROM waveform_cache WHERE track_id = ?", (track_id,)
                 )
 
     def _on_stats_complete(self, track_id: int) -> None:
@@ -405,7 +409,10 @@ class TrackListModel(QAbstractTableModel):
             "filename": lambda t: (t.get("filename") or "").lower(),
             "genre": lambda t: (t.get("genre") or "").lower(),
             "duration": lambda t: t.get("duration_seconds") or 0.0,
-            "rating": lambda t: (t.get("genre") or "").lower(),
+            "rating": lambda t: next(
+                (int(p[1:]) for p in (t.get("genre") or "").split("-") if p.startswith("*") and p[1:].isdigit()),
+                0,
+            ),
             "path": lambda t: str(t.get("filepath", "").parent).lower(),
         }
 
@@ -459,9 +466,12 @@ class TrackListModel(QAbstractTableModel):
                     try:
                         waveform = deserialize_waveform(waveform_cache["waveform_data"])
                     except (ValueError, Exception) as e:
-                        logging.error(
-                            f"[TrackListModel] Failed to load waveform for {filepath}: {e}",
-                            exc_info=True,
+                        logging.warning(
+                            f"[TrackListModel] Cache waveform invalide pour {filepath}"
+                            f" (format obsolète ?), suppression pour régénération : {e}"
+                        )
+                        self.database.conn.execute(
+                            "DELETE FROM waveform_cache WHERE track_id = ?", (track_id,)
                         )
 
                 # Check if audio analysis exists (with key stats)
@@ -582,7 +592,9 @@ class TrackListModel(QAbstractTableModel):
         track_dicts = [dict(t) for t in self.tracks]
 
         worker = BackgroundCheckWorker(self._duplicate_checker, track_dicts)
-        worker.results.connect(self._on_duplicate_check_results)
+        # QueuedConnection explicite : le slot s'exécute dans le thread Qt principal
+        # même si le signal est émis depuis run() du worker thread.
+        worker.results.connect(self._on_duplicate_check_results, Qt.ConnectionType.QueuedConnection)
         self._bg_worker = worker
         worker.start()
         logging.debug(

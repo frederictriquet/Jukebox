@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 class TabEventFilter(QObject):
     """Event filter to capture TAB key within metadata editor."""
 
-    def __init__(self, metadata_widget: "MetadataEditorWidget"):
+    def __init__(self, metadata_widget: MetadataEditorWidget):
         """Initialize event filter."""
         super().__init__()
         self.metadata_widget = metadata_widget
@@ -47,35 +47,21 @@ class TabEventFilter(QObject):
             focused_widget = QApplication.focusWidget()
 
             if event.key() == Qt.Key.Key_Tab:
-                # Check if current focus is within metadata editor fields
-                if focused_widget in self.metadata_widget.field_widgets:
-                    # Already in metadata fields
+                if isinstance(focused_widget, QLineEdit) and focused_widget in self.metadata_widget.field_widgets:
                     current_index = self.metadata_widget.field_widgets.index(focused_widget)
-
-                    # If on last field, clear focus (triggers save)
                     if current_index == len(self.metadata_widget.field_widgets) - 1:
                         focused_widget.clearFocus()
-                        return True  # Block TAB from propagating
                     else:
-                        # Go to next field
-                        next_index = current_index + 1
-                        self.metadata_widget.field_widgets[next_index].setFocus()
-                        return True  # Block TAB from propagating
-                else:
-                    # Not in metadata fields, go to first field
-                    if self.metadata_widget.field_widgets:
-                        self.metadata_widget.field_widgets[0].setFocus()
-                    return True  # Block TAB from propagating
+                        self.metadata_widget.field_widgets[current_index + 1].setFocus()
+                elif self.metadata_widget.field_widgets:
+                    self.metadata_widget.field_widgets[0].setFocus()
+                return True
 
-            elif (
-                event.key() == Qt.Key.Key_Backtab
-                and focused_widget in self.metadata_widget.field_widgets
-            ):
-                # Shift+Tab: go backwards
+            elif event.key() == Qt.Key.Key_Backtab and isinstance(focused_widget, QLineEdit) and focused_widget in self.metadata_widget.field_widgets:
                 current_index = self.metadata_widget.field_widgets.index(focused_widget)
                 prev_index = (current_index - 1) % len(self.metadata_widget.field_widgets)
                 self.metadata_widget.field_widgets[prev_index].setFocus()
-                return True  # Block Shift+TAB from propagating
+                return True
 
         return False  # Let other events continue
 
@@ -338,13 +324,7 @@ class MetadataEditorWidget(QWidget):
         if self.field_widgets:
             self.setTabOrder(self.field_widgets[-1], self.field_widgets[0])  # Loop back
 
-        # Install event filter on application to capture TAB
-        from PySide6.QtWidgets import QApplication
-
         self.tab_filter = TabEventFilter(self)
-        app = QApplication.instance()
-        if app:
-            app.installEventFilter(self.tab_filter)
 
     def set_metadata(self, values: dict[str, str]) -> None:
         """Set metadata values in fields.
@@ -395,9 +375,26 @@ class MetadataEditorWidget(QWidget):
         # Trigger auto-save
         self._on_field_changed()
 
+    def showEvent(self, event: Any) -> None:  # noqa: N802
+        """Installe le filtre TAB quand le widget devient visible."""
+        super().showEvent(event)
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app:
+            app.installEventFilter(self.tab_filter)
+
+    def hideEvent(self, event: Any) -> None:  # noqa: N802
+        """Retire le filtre TAB quand le widget est masqué."""
+        super().hideEvent(event)
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app:
+            app.removeEventFilter(self.tab_filter)
+
     def _on_field_changed(self) -> None:
         """Handle field editing finished - auto-save."""
-        # Collect all field values
         values = {}
         for config in self.field_configs:
             widget = self.field_map.get(config.tag)

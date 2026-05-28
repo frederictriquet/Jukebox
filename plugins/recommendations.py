@@ -66,7 +66,7 @@ class RecommendationsPlugin:
         if not recent:
             # No history, return random
             return db.conn.execute(
-                f"SELECT * FROM tracks ORDER BY RANDOM() LIMIT {limit}"
+                "SELECT * FROM tracks ORDER BY RANDOM() LIMIT ?", (limit,)
             ).fetchall()
 
         # Get favorite artists and genres

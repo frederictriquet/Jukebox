@@ -20,6 +20,10 @@ AUDIO_ANALYSIS_COLUMNS: frozenset[str] = frozenset(
     [
         # Core stats
         "tempo",
+        "energy",
+        "bass_energy",
+        "mid_energy",
+        "treble_energy",
         "rms_energy",
         "spectral_centroid",
         "zero_crossing_rate",

@@ -1102,7 +1102,7 @@ class VJingLayer(BaseVisualLayer):
             # Last slot = no post-processing
             if slot_idx < pp_count:
                 energy = ctx.get("energy", 0.0)
-                peak = max(self.energy) if self.energy else 1.0
+                peak = max(self.energy) if len(self.energy) > 0 else 1.0
                 # Skip PP during quiet passages (below 30% of peak energy)
                 if peak > 0.0 and energy >= 0.3 * peak:
                     effect_name = post_processors[slot_idx]

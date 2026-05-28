@@ -1,28 +1,26 @@
-"""Secure waveform serialization using numpy (no pickle).
+"""Waveform serialization using numpy (format sûr, sans pickle).
 
-Pickle can execute arbitrary code during deserialization, making it
-a security risk for untrusted data. This module uses numpy's native
-format which is safe and cannot execute code.
+pickle peut exécuter du code arbitraire à la désérialisation — interdit
+pour des données provenant de la base SQLite. On utilise uniquement
+numpy.savez_compressed / numpy.load(allow_pickle=False).
 """
 
 import io
-import logging
-from typing import Any, cast
+from typing import Any
 
 import numpy as np
 
 
 def serialize_waveform(waveform: dict[str, Any]) -> bytes:
-    """Serialize waveform data to bytes using numpy's secure format.
+    """Sérialise les données waveform en bytes (format numpy compressé).
 
     Args:
-        waveform: Dict with 'bass', 'mid', 'treble' numpy arrays
+        waveform: Dict avec les arrays 'bass', 'mid', 'treble'
 
     Returns:
-        Compressed bytes representation
+        Bytes au format npz compressé
     """
     buffer = io.BytesIO()
-    # Use savez_compressed for efficient storage of multiple arrays
     np.savez_compressed(
         buffer,
         bass=waveform.get("bass", np.array([])),
@@ -33,42 +31,24 @@ def serialize_waveform(waveform: dict[str, Any]) -> bytes:
 
 
 def deserialize_waveform(data: bytes) -> dict[str, np.ndarray]:
-    """Deserialize waveform data from bytes.
-
-    Tries numpy format first (secure), falls back to pickle for legacy data
-    with a deprecation warning. Legacy pickle data will be replaced with
-    secure numpy format on next waveform regeneration.
+    """Désérialise les données waveform depuis bytes.
 
     Args:
-        data: Bytes from serialize_waveform() or legacy pickle
+        data: Bytes produits par serialize_waveform()
 
     Returns:
-        Dict with 'bass', 'mid', 'treble' numpy arrays
+        Dict avec les arrays numpy 'bass', 'mid', 'treble'
 
     Raises:
-        ValueError: If data is corrupted or invalid format
+        ValueError: Si les données sont corrompues ou dans un format non supporté
     """
     buffer = io.BytesIO(data)
     try:
-        # Try secure numpy format first (allow_pickle=False)
         with np.load(buffer, allow_pickle=False) as npz:
             return {
                 "bass": npz["bass"],
                 "mid": npz["mid"],
                 "treble": npz["treble"],
             }
-    except Exception:
-        # Fall back to legacy pickle format for old cached data
-        # This is temporary - data will be replaced on next waveform generation
-        import pickle
-
-        buffer.seek(0)
-        try:
-            result = pickle.loads(data)
-            logging.debug(
-                "[WaveformSerializer] Loaded legacy pickle data. "
-                "Regenerate waveforms to upgrade to secure format."
-            )
-            return cast(dict[str, np.ndarray], result)
-        except Exception as e:
-            raise ValueError(f"Invalid waveform data: {e}") from e
+    except Exception as e:
+        raise ValueError(f"Données waveform invalides ou format non supporté : {e}") from e

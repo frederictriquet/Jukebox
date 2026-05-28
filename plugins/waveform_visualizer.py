@@ -158,14 +158,14 @@ class WaveformVisualizerPlugin(SettingsSyncMixin):
         cached_data = self.context.database.waveforms.get(track_id)
 
         if cached_data:
-            # Load from cache
-            import pickle
+            from jukebox.utils.waveform_serializer import deserialize_waveform
 
             try:
-                waveform = pickle.loads(cached_data)
+                waveform = deserialize_waveform(cached_data)
                 self.waveform_widget.display_waveform(waveform)
-            except Exception as e:
+            except (ValueError, Exception) as e:
                 logging.warning("[WaveformVisualizer] Cache corrompu, effacement : %s", e)
+                self.context.database.waveforms.delete(track_id)
                 self.waveform_widget.clear_waveform()
         else:
             # Not in cache - add to priority queue if batch is running
@@ -287,10 +287,10 @@ class WaveformVisualizerPlugin(SettingsSyncMixin):
         # Save to database (safe in main thread)
         try:
             import os
-            import pickle
+            from jukebox.utils.waveform_serializer import serialize_waveform
 
             # Cache waveform
-            waveform_bytes = pickle.dumps(result["waveform_data"])
+            waveform_bytes = serialize_waveform(result["waveform_data"])
             self.context.database.waveforms.save(track_id, waveform_bytes)
 
             # Save audio analysis
@@ -350,7 +350,7 @@ class WaveformVisualizerPlugin(SettingsSyncMixin):
             self._single_worker.wait(WORKER_WAIT_TIMEOUT_MS)
             self._single_worker = None
 
-        # Stop batch processor if running (but keep it alive in class variable)
+        # Stop batch processor if running
         if WaveformVisualizerPlugin._batch_processor:
             logging.debug("[Waveform] Stopping batch processor during shutdown")
             WaveformVisualizerPlugin._batch_processor.stop()
@@ -360,7 +360,10 @@ class WaveformVisualizerPlugin(SettingsSyncMixin):
                 WaveformVisualizerPlugin._batch_processor.item_error.disconnect()
             except (RuntimeError, TypeError) as e:
                 logging.debug("[WaveformVisualizer] Signaux déjà déconnectés : %s", e)
-        # Don't set to None - keep it alive so orphan workers can finish
+
+        # Attendre tous les workers orphelins avant que Qt ne détruise les QThreads
+        from jukebox.core.batch_processor import BatchProcessor
+        BatchProcessor.shutdown_all_workers(timeout_ms=WORKER_WAIT_TIMEOUT_MS)
 
     _config_attr = "waveform"
     _synced_settings = [

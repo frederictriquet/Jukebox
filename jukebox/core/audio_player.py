@@ -135,10 +135,9 @@ class AudioPlayer(QObject):
         self._player.set_media(None)
         self._current_file = None
 
-    def _on_end_reached(self, event: Any) -> None:
-        """Handle VLC end reached event.
+    def _on_end_reached(self, _event: Any) -> None:
+        """Handle VLC end reached event (appelé depuis le thread interne VLC).
 
-        Args:
-            event: VLC event
+        Qt AutoConnection détecte le cross-thread et délivre le signal dans le thread principal.
         """
         self.track_finished.emit()

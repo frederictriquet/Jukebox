@@ -1,10 +1,14 @@
 """Training and evaluation module for multi-label genre classifiers."""
 
+import hashlib
+import logging
 import pickle
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 import pandas as pd
@@ -17,9 +21,9 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import train_test_split
 
-from .data_loader import ML_FEATURE_COLUMNS, load_training_data
-from .feature_engineering import FeaturePreprocessor, MultiLabelGenreEncoder
-from .models import BaseGenreClassifier, get_all_models, get_model
+from .data_loader import ML_FEATURE_COLUMNS, load_training_data  # type: ignore[import]
+from .feature_engineering import FeaturePreprocessor, MultiLabelGenreEncoder  # type: ignore[import]
+from .models import BaseGenreClassifier, get_all_models, get_model  # type: ignore[import]
 
 
 @dataclass
@@ -273,12 +277,11 @@ class GenreClassifierTrainer:
         Returns:
             DataFrame with comparison results
         """
-        if models is None:
-            models = get_all_models(random_state=self.random_state)
+        all_models: list[BaseGenreClassifier] = models if models is not None else get_all_models(random_state=self.random_state)
 
         results = []
-        for model in models:
-            print(f"Training {model.name}...")
+        for model in all_models:
+            logger.info("Training %s...", model.name)
             result = self.train_model(model)
             results.append({
                 "model": model.name,
@@ -289,8 +292,7 @@ class GenreClassifierTrainer:
                 "f1_samples": result.metrics.f1_samples,
                 "training_time": result.training_time,
             })
-            print(result.summary())
-            print()
+            logger.info(result.summary())
 
         return pd.DataFrame(results).sort_values("f1_micro", ascending=False)
 
@@ -366,6 +368,14 @@ class TrainedModel:
         sorted_proba = sorted(proba_dict.items(), key=lambda x: -x[1])
         return sorted_proba[:n]
 
+    @staticmethod
+    def _sha256(path: Path) -> str:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()
+
     def save(self, path: Path | str) -> None:
         """Save the trained model to disk.
 
@@ -388,7 +398,9 @@ class TrainedModel:
         }
 
         with open(path, "wb") as f:
-            pickle.dump(data, f)
+            pickle.dump(data, f)  # noqa: S301
+
+        path.with_suffix(".sha256").write_text(self._sha256(path))
 
     @classmethod
     def load(cls, path: Path | str) -> "TrainedModel":
@@ -404,8 +416,19 @@ class TrainedModel:
         if not path.exists():
             raise FileNotFoundError(f"Model file not found: {path}")
 
+        hash_path = path.with_suffix(".sha256")
+        if hash_path.exists():
+            expected = hash_path.read_text().strip()
+            actual = cls._sha256(path)
+            if actual != expected:
+                raise ValueError(
+                    f"SHA256 mismatch pour {path} — fichier corrompu ou altéré"
+                )
+        else:
+            logger.warning("[TrainedModel] Aucun fichier .sha256 pour %s — chargement sans vérification", path)
+
         with open(path, "rb") as f:
-            data = pickle.load(f)
+            data = pickle.load(f)  # noqa: S301
 
         return cls(
             model=data["model"],
@@ -441,20 +464,20 @@ def train_best_model(
         db_path=db_path,
         min_samples_per_genre=min_samples_per_genre,
     )
-    print(f"Loaded {n_samples} samples, {n_features} features, {n_genres} genres")
-    print(f"Genres: {', '.join(trainer.genres)}")
+    logger.info("Loaded %d samples, %d features, %d genres", n_samples, n_features, n_genres)
+    logger.info("Genres: %s", ", ".join(trainer.genres))
 
     # Get and train model
     model = get_model(model_name, **model_kwargs)
     result = trainer.train_model(model)
 
-    print(result.summary())
+    logger.info(result.summary())
 
-    # Print per-genre metrics
-    print("\nPer-genre metrics:")
     for genre, metrics in sorted(result.metrics.per_genre_metrics.items()):
-        print(f"  {genre}: P={metrics['precision']:.3f} R={metrics['recall']:.3f} "
-              f"F1={metrics['f1']:.3f} (n={metrics['support']})")
+        logger.info(
+            "  %s: P=%.3f R=%.3f F1=%.3f (n=%d)",
+            genre, metrics["precision"], metrics["recall"], metrics["f1"], metrics["support"],
+        )
 
     # Create trained model wrapper
     trained_model = TrainedModel(
@@ -473,9 +496,8 @@ def train_best_model(
         },
     )
 
-    # Save if requested
     if save_path:
         trained_model.save(save_path)
-        print(f"\nModel saved to: {save_path}")
+        logger.info("Model saved to: %s", save_path)
 
     return trained_model, result

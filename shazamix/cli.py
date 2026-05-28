@@ -7,6 +7,7 @@ Commands:
     stats     - Show indexing statistics
     clear     - Clear all fingerprints
 """
+# ruff: noqa: T201  # print() intentionnel dans un module CLI
 
 from __future__ import annotations
 
@@ -18,7 +19,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
-from .database import FingerprintDB, DEFAULT_DB_PATH
+from .database import FingerprintDB, DEFAULT_DB_PATH  # type: ignore[import]
 
 
 def _notify_done(message: str, has_errors: bool = False) -> None:
@@ -56,23 +57,23 @@ def cmd_stats(args: argparse.Namespace) -> int:
     return 0
 
 
-def _index_single_track(args: tuple[int, str]) -> tuple[int, str, int | None, str | None]:
+def _index_single_track(args: tuple[int, str]) -> tuple[int, str, list | None, str | None]:
     """Index a single track (worker function for multiprocessing).
 
     Args:
         args: Tuple of (track_id, filepath)
 
     Returns:
-        Tuple of (track_id, filepath, fingerprint_count or None, error or None)
+        Tuple of (track_id, filepath, fingerprints or None, error or None)
     """
-    from .fingerprint import Fingerprinter
+    from .fingerprint import Fingerprinter  # type: ignore[import]
 
     track_id, filepath = args
 
     try:
         fp = Fingerprinter()
         fingerprints = fp.extract_fingerprints(filepath)
-        return (track_id, filepath, len(fingerprints), None)
+        return (track_id, filepath, fingerprints, None)
     except Exception as e:
         return (track_id, filepath, None, str(e))
 
@@ -104,19 +105,15 @@ def cmd_index(args: argparse.Namespace) -> int:
         }
 
         for future in as_completed(futures):
-            track_id, filepath, fp_count, error = future.result()
+            track_id, filepath, fingerprints, error = future.result()
             filename = os.path.basename(filepath)
 
-            if fp_count is not None:
-                # Store fingerprints (need to re-extract in main process due to pickle)
-                from .fingerprint import Fingerprinter
-                fp = Fingerprinter()
-                fingerprints = fp.extract_fingerprints(filepath)
+            if fingerprints is not None:
                 db.store_fingerprints(track_id, fingerprints)
 
                 indexed += 1
                 if args.verbose:
-                    print(f"  {filename}: {fp_count} fingerprints")
+                    print(f"  {filename}: {len(fingerprints)} fingerprints")
             else:
                 errors += 1
                 if args.verbose:
@@ -153,8 +150,8 @@ def cmd_index(args: argparse.Namespace) -> int:
 
 def cmd_identify(args: argparse.Namespace) -> int:
     """Identify a single audio file."""
-    from .database import FingerprintDB
-    from .matcher import Matcher
+    from .database import FingerprintDB  # type: ignore[import]
+    from .matcher import Matcher  # type: ignore[import]
 
     if not os.path.exists(args.file):
         print(f"Error: File not found: {args.file}", file=sys.stderr)
@@ -197,8 +194,8 @@ def cmd_identify(args: argparse.Namespace) -> int:
 
 def cmd_analyze(args: argparse.Namespace) -> int:
     """Analyze a mix to identify all tracks."""
-    from .database import FingerprintDB
-    from .matcher import Matcher
+    from .database import FingerprintDB  # type: ignore[import]
+    from .matcher import Matcher  # type: ignore[import]
 
     if not os.path.exists(args.file):
         print(f"Error: File not found: {args.file}", file=sys.stderr)

@@ -157,6 +157,8 @@ class FFmpegEncoder:
             "-b:a",
             self.audio_bitrate,
             "-shortest",  # Fin quand le flux le plus court se termine
+            "-movflags",
+            "+faststart",  # MOOV atom en tête : requis pour streaming web / Instagram boost
             str(self.output_path),
         ])
 

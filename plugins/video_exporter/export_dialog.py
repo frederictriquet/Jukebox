@@ -49,9 +49,9 @@ RESOLUTION_PRESETS: dict[str, tuple[int, int]] = {
     "720p": (1280, 720),
     "square_1080": (1080, 1080),
     "square_720": (720, 720),
-    "vertical": (1080, 1920),
-    "instagram": (1080, 1350),
-    "instagram_full": (1080, 1440),
+    "reels_9x16 (1080×1920)": (1080, 1920),       # Reels / Stories — boostable
+    "feed_4x5 (1080×1350)": (1080, 1350),          # Feed portrait standard
+    "feed_3x4 (1080×1440)": (1080, 1440),          # Feed portrait élargi
 }
 
 # Palette display names for tooltips
@@ -828,6 +828,10 @@ class ExportDialog(QDialog):
         simultaneous_layout.addStretch()
         layers_layout.addLayout(simultaneous_layout)
 
+        self.milkdrop_check = QCheckBox("MilkDrop (projectM)")
+        self.milkdrop_check.setToolTip("Effets MilkDrop — ajoute ~30s de warmup avant l'export")
+        layers_layout.addWidget(self.milkdrop_check)
+
         self.video_bg_check = QCheckBox("Video Background")
         layers_layout.addWidget(self.video_bg_check)
 
@@ -1107,6 +1111,7 @@ class ExportDialog(QDialog):
         self.dynamics_check.setChecked(config.dynamics_enabled)
         self.vjing_check.setChecked(config.vjing_enabled)
         self.video_bg_check.setChecked(config.video_background_enabled)
+        self.milkdrop_check.setChecked(config.milkdrop_enabled)
 
     def _generate_default_filename(self) -> None:
         """Generate a default filename based on track metadata."""
@@ -1181,8 +1186,8 @@ class ExportDialog(QDialog):
         resolution = RESOLUTION_PRESETS[self.resolution_combo.currentText()]
         # Use smaller resolution for preview (max 480p)
         scale = min(1.0, 480 / resolution[1])
-        preview_width = int(resolution[0] * scale)
-        preview_height = int(resolution[1] * scale)
+        preview_width = int(resolution[0] * scale) // 4 * 4
+        preview_height = int(resolution[1] * scale) // 4 * 4
 
         try:
             # Load audio
@@ -1201,6 +1206,10 @@ class ExportDialog(QDialog):
                 "dynamics": self.dynamics_check.isChecked(),
                 "vjing": self.vjing_check.isChecked(),
                 "video_background": self.video_bg_check.isChecked(),
+                "milkdrop_enabled": self.milkdrop_check.isChecked(),
+                "milkdrop_preset_path": self.context.config.video_exporter.milkdrop_preset_path,
+                "milkdrop_preset_duration": self.context.config.video_exporter.milkdrop_preset_duration,
+                "milkdrop_hard_cut_on_beat": self.context.config.video_exporter.milkdrop_hard_cut_on_beat,
             }
 
             waveform_config = {
@@ -1374,8 +1383,8 @@ class ExportDialog(QDialog):
             pixmap = pixmap.scaled(label_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
             self.preview_label.setPixmap(pixmap)
 
-        except Exception as e:
-            logging.warning(f"[Export Dialog] Preview render failed: {e}")
+        except Exception:
+            logging.exception("[Export Dialog] Preview render failed")
 
     def _preview_single_effect(self, effect_id: str, effect_name: str) -> None:
         """Open a preview dialog for a single effect.
@@ -1473,6 +1482,10 @@ class ExportDialog(QDialog):
                 "dynamics": self.dynamics_check.isChecked(),
                 "vjing": self.vjing_check.isChecked(),
                 "video_background": self.video_bg_check.isChecked(),
+                "milkdrop_enabled": self.milkdrop_check.isChecked(),
+                "milkdrop_preset_path": self.context.config.video_exporter.milkdrop_preset_path,
+                "milkdrop_preset_duration": self.context.config.video_exporter.milkdrop_preset_duration,
+                "milkdrop_hard_cut_on_beat": self.context.config.video_exporter.milkdrop_hard_cut_on_beat,
             },
             "video_clips_folder": self.video_folder_edit.text(),
             "vjing_mappings": {
@@ -1519,11 +1532,12 @@ class ExportDialog(QDialog):
         }
 
     def reject(self) -> None:
-        """Handle Escape key - stop playback before closing."""
-        # Stop preview timer
+        """Handle Escape key / close button — annule l'export si actif."""
+        if self.worker and self.worker.isRunning():
+            self._on_cancel()
+            return
         if self._preview_timer.isActive():
             self._preview_timer.stop()
-        # Stop VLC player
         try:
             self._vlc_player.stop()
         except Exception as e:
@@ -1532,17 +1546,19 @@ class ExportDialog(QDialog):
 
     def closeEvent(self, event: Any) -> None:
         """Clean up resources when dialog is closed."""
-        # Stop preview timer
+        if self.worker and self.worker.isRunning():
+            # Bloquer la fermeture et déléguer à _on_cancel qui attend la fin du worker
+            event.ignore()
+            self._on_cancel()
+            return
         if self._preview_timer.isActive():
             self._preview_timer.stop()
-        # Stop and release local VLC player
         try:
             self._vlc_player.stop()
             self._vlc_player.release()  # type: ignore[attr-defined]
             self._vlc_instance.release()  # type: ignore[attr-defined]
         except Exception as e:
             logging.debug(f"VLC cleanup error: {e}")
-        # Clear preview renderer
         self._preview_renderer = None
         self._preview_audio = None
         super().closeEvent(event)

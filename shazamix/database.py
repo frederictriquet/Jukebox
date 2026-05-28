@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import numpy as np
 
-from .fingerprint import Fingerprint
+from .fingerprint import Fingerprint  # type: ignore[import]
 
 
 def _dict_factory(cursor: sqlite3.Cursor, row: tuple) -> dict[str, Any]:
@@ -352,7 +352,7 @@ class FingerprintDB:
         conn.close()
 
     def store_audio_features(
-        self, track_id: int, feature_type: str, features: "np.ndarray"
+        self, track_id: int, feature_type: str, features: np.ndarray
     ) -> None:
         """Store audio feature vector for a track.
 
@@ -376,7 +376,7 @@ class FingerprintDB:
 
     def get_all_audio_features(
         self, feature_type: str
-    ) -> "dict[int, np.ndarray]":
+    ) -> dict[int, np.ndarray]:
         """Load all audio features of a given type.
 
         Args:
@@ -395,8 +395,8 @@ class FingerprintDB:
         conn.close()
 
         result: dict[int, np.ndarray] = {}
-        for track_id, blob in rows:
-            result[track_id] = np.frombuffer(blob, dtype=np.float32)
+        for row in rows:
+            result[row["track_id"]] = np.frombuffer(row["feature_data"], dtype=np.float32)
         return result
 
     def count_audio_features(self, feature_type: str) -> int:

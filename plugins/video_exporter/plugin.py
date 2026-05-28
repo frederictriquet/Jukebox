@@ -147,6 +147,10 @@ class VideoExporterPlugin(SettingsSyncMixin):
         SyncedSetting("dynamics_enabled", bool),
         SyncedSetting("vjing_enabled", bool),
         SyncedSetting("video_background_enabled", bool),
+        SyncedSetting("milkdrop_enabled", bool),
+        SyncedSetting("milkdrop_preset_path", str),
+        SyncedSetting("milkdrop_preset_duration", float),
+        SyncedSetting("milkdrop_hard_cut_on_beat", bool),
     ]
 
     def _on_settings_changed(self) -> None:
@@ -186,7 +190,8 @@ class VideoExporterPlugin(SettingsSyncMixin):
             track_metadata=track,
         )
 
-        if dialog.exec():
+        _run_dialog = getattr(dialog, "exec")  # Boucle modale Qt
+        if _run_dialog():
             # Dialog handles the export via worker
             logging.info("[Video Exporter] Export initiated from dialog")
 
@@ -201,13 +206,13 @@ class VideoExporterPlugin(SettingsSyncMixin):
                 "label": "Default Resolution",
                 "type": "choice",
                 "options": [
+                    "reels_9x16 (1080×1920)",
+                    "feed_4x5 (1080×1350)",
+                    "feed_3x4 (1080×1440)",
                     "1080p",
                     "720p",
                     "square_1080",
                     "square_720",
-                    "vertical",
-                    "instagram",
-                    "instagram_full",
                 ],
                 "default": self.context.config.video_exporter.default_resolution,
             },
@@ -279,5 +284,27 @@ class VideoExporterPlugin(SettingsSyncMixin):
                 "label": "Enable Video Background",
                 "type": "bool",
                 "default": self.context.config.video_exporter.video_background_enabled,
+            },
+            "milkdrop_enabled": {
+                "label": "Effets MilkDrop",
+                "type": "bool",
+                "default": self.context.config.video_exporter.milkdrop_enabled,
+            },
+            "milkdrop_preset_path": {
+                "label": "Répertoire de presets .milk",
+                "type": "directory",
+                "default": self.context.config.video_exporter.milkdrop_preset_path,
+            },
+            "milkdrop_preset_duration": {
+                "label": "Durée par preset (s)",
+                "type": "float",
+                "default": self.context.config.video_exporter.milkdrop_preset_duration,
+                "min": 1.0,
+                "max": 60.0,
+            },
+            "milkdrop_hard_cut_on_beat": {
+                "label": "Changement de preset sur le beat",
+                "type": "bool",
+                "default": self.context.config.video_exporter.milkdrop_hard_cut_on_beat,
             },
         }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
@@ -45,13 +46,19 @@ class PlaylistsPlugin:
     def _show_playlists(self) -> None:
         """Show playlist dialog."""
         dialog = PlaylistDialog(self.context)
-        dialog.exec()
+        dialog.exec_()
 
     def _update_context_menu(self) -> None:
         """Load playlists into track list context menu."""
-        playlists = self.context.database.conn.execute(
-            "SELECT * FROM playlists ORDER BY name"
-        ).fetchall()
+        conn = self.context.database.conn
+        if conn is None:
+            logging.error("[PlaylistsPlugin] Base de données non connectée")
+            return
+        try:
+            playlists = conn.execute("SELECT * FROM playlists ORDER BY name").fetchall()
+        except Exception:
+            logging.exception("[PlaylistsPlugin] Erreur lors du chargement des playlists")
+            return
         self.context.app.track_list.set_playlists(playlists)
 
     def shutdown(self) -> None:
@@ -105,18 +112,29 @@ class PlaylistDialog(QDialog):
         layout.addLayout(btn_layout)
         self.setLayout(layout)
 
+    def _conn(self) -> object:
+        """Retourne la connexion SQLite avec garde None."""
+        conn = self.context.database.conn
+        if conn is None:
+            raise RuntimeError("Base de données non connectée")
+        return conn
+
     def _load_playlists(self) -> None:
         """Load playlists."""
         self.playlist_list.clear()
-        playlists = self.context.database.conn.execute(
-            """
-            SELECT p.*, COUNT(pt.track_id) AS track_count
-            FROM playlists p
-            LEFT JOIN playlist_tracks pt ON p.id = pt.playlist_id
-            GROUP BY p.id
-            ORDER BY p.name
-            """
-        ).fetchall()
+        try:
+            playlists = self._conn().execute(  # type: ignore[union-attr]
+                """
+                SELECT p.*, COUNT(pt.track_id) AS track_count
+                FROM playlists p
+                LEFT JOIN playlist_tracks pt ON p.id = pt.playlist_id
+                GROUP BY p.id
+                ORDER BY p.name
+                """
+            ).fetchall()
+        except Exception:
+            logging.exception("[PlaylistDialog] Erreur lors du chargement des playlists")
+            return
 
         for playlist in playlists:
             count = playlist["track_count"]
@@ -128,47 +146,44 @@ class PlaylistDialog(QDialog):
     def _create_playlist(self) -> None:
         """Create new playlist."""
         name, ok = QInputDialog.getText(self, "New Playlist", "Playlist name:")
-
         if ok and name:
             try:
-                self.context.database.conn.execute(
-                    "INSERT INTO playlists (name) VALUES (?)", (name,)
-                )
-                self.context.database.conn.commit()
+                self._conn().execute("INSERT INTO playlists (name) VALUES (?)", (name,))  # type: ignore[union-attr]
                 self._load_playlists()
                 self._update_context_menu()
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed: {e}")
+            except Exception:
+                logging.exception("[PlaylistDialog] Erreur lors de la création de la playlist")
+                QMessageBox.critical(self, "Erreur", "Impossible de créer la playlist.")
 
     def _view_playlist(self) -> None:
         """View playlist tracks."""
         current = self.playlist_list.currentItem()
         if not current:
             return
-
         playlist_id = current.data(Qt.ItemDataRole.UserRole)
-        tracks = self.context.database.conn.execute(
-            """
-            SELECT t.*
-            FROM tracks t
-            JOIN playlist_tracks pt ON t.id = pt.track_id
-            WHERE pt.playlist_id = ?
-            ORDER BY pt.position
-        """,
-            (playlist_id,),
-        ).fetchall()
+        try:
+            tracks = self._conn().execute(  # type: ignore[union-attr]
+                """
+                SELECT t.*
+                FROM tracks t
+                JOIN playlist_tracks pt ON t.id = pt.track_id
+                WHERE pt.playlist_id = ?
+                ORDER BY pt.position
+                """,
+                (playlist_id,),
+            ).fetchall()
+        except Exception:
+            logging.exception("[PlaylistDialog] Erreur lors du chargement des tracks")
+            return
 
         if not tracks:
             QMessageBox.information(self, "Empty", "No tracks in this playlist.")
             return
 
         track_list = "\n".join(
-            [
-                f"{t['artist']} - {t['title']}" if t["artist"] and t["title"] else t["filename"]
-                for t in tracks
-            ]
+            f"{t['artist']} - {t['title']}" if t["artist"] and t["title"] else t["filename"]
+            for t in tracks
         )
-
         QMessageBox.information(self, f"Tracks ({len(tracks)})", track_list)
 
     def _load_playlist(self) -> None:
@@ -176,29 +191,28 @@ class PlaylistDialog(QDialog):
         current = self.playlist_list.currentItem()
         if not current:
             return
-
         playlist_id = current.data(Qt.ItemDataRole.UserRole)
-
-        # Load tracks into main track list
-        tracks = self.context.database.conn.execute(
-            """
-            SELECT t.*
-            FROM tracks t
-            JOIN playlist_tracks pt ON t.id = pt.track_id
-            WHERE pt.playlist_id = ?
-            ORDER BY pt.position
-        """,
-            (playlist_id,),
-        ).fetchall()
+        try:
+            tracks = self._conn().execute(  # type: ignore[union-attr]
+                """
+                SELECT t.*
+                FROM tracks t
+                JOIN playlist_tracks pt ON t.id = pt.track_id
+                WHERE pt.playlist_id = ?
+                ORDER BY pt.position
+                """,
+                (playlist_id,),
+            ).fetchall()
+        except Exception:
+            logging.exception("[PlaylistDialog] Erreur lors du chargement de la playlist")
+            return
 
         from pathlib import Path
 
         from jukebox.core.event_bus import Events
 
-        # Emit event to load playlist tracks into track list
         track_filepaths = [Path(track["filepath"]) for track in tracks]
         self.context.emit(Events.LOAD_TRACK_LIST, filepaths=track_filepaths)
-
         self.close()
 
     def _show_context_menu(self, position: object) -> None:
@@ -229,7 +243,7 @@ class PlaylistDialog(QDialog):
         delete_action.triggered.connect(self._delete_playlist)
         menu.addAction(delete_action)
 
-        menu.exec(self.playlist_list.mapToGlobal(position))  # type: ignore[arg-type]
+        menu.exec_(self.playlist_list.mapToGlobal(position))  # type: ignore[arg-type]
 
     def _export_to_engine_dj(self) -> None:
         """Export selected playlist to Engine DJ database."""
@@ -257,14 +271,18 @@ class PlaylistDialog(QDialog):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            self.context.database.conn.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
-            self.context.database.conn.commit()
-            self._load_playlists()
-            self._update_context_menu()
+            try:
+                self._conn().execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))  # type: ignore[union-attr]
+                self._load_playlists()
+                self._update_context_menu()
+            except Exception:
+                logging.exception("[PlaylistDialog] Erreur lors de la suppression de la playlist")
 
     def _update_context_menu(self) -> None:
         """Update track list context menu."""
-        playlists = self.context.database.conn.execute(
-            "SELECT * FROM playlists ORDER BY name"
-        ).fetchall()
+        try:
+            playlists = self._conn().execute("SELECT * FROM playlists ORDER BY name").fetchall()  # type: ignore[union-attr]
+        except Exception:
+            logging.exception("[PlaylistDialog] Erreur lors de la mise à jour du menu")
+            return
         self.context.app.track_list.set_playlists(playlists)
