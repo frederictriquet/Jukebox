@@ -34,7 +34,7 @@ ml-xgboost = [
     "xgboost>=2.0.0",
 ]
 video = [
-    "opencv-python>=4.8.0",  # Optional, for video background layer
+    "opencv-python>=4.13.0.92",  # Optional, for video background layer
     "noise>=1.2.2",  # Perlin/Simplex noise for VJing effects (désactivé sur ARM64)
     "moderngl>=5.8.0",  # GPU shaders for heavy VJing effects (désactivé sur ARM64)
 ]
