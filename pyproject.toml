@@ -106,6 +106,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "jukebox/ui/components/track_list.py" = ["N802"]
 "plugins/cue_maker/table_model.py" = ["N802"]
+"tests/**/*.py" = ["S101"]  # assert est idiomatique dans pytest
 
 [tool.mypy]
 python_version = "3.11"
