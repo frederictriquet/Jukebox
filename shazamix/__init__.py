@@ -15,8 +15,8 @@ References:
 
 __version__ = "0.1.0"
 
-from .fingerprint import Fingerprinter
 from .database import FingerprintDB
+from .fingerprint import Fingerprinter
 from .matcher import Matcher
 
 __all__ = ["Fingerprinter", "FingerprintDB", "Matcher"]

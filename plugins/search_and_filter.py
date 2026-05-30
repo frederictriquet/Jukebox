@@ -38,8 +38,8 @@ from PySide6.QtCore import (  # pyright: ignore[reportMissingImports]
     QModelIndex,
     QPersistentModelIndex,
     QSortFilterProxyModel,
-    QTimer,
     Qt,
+    QTimer,
 )
 from PySide6.QtWidgets import (  # pyright: ignore[reportMissingImports]
     QComboBox,
@@ -270,7 +270,9 @@ class GenreFilterProxyModel(QSortFilterProxyModel):
                 return False
         return all(g not in track_genres for g in self._off_genres)
 
-    def sort(self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder) -> None:  # noqa: N802
+    def sort(
+        self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder
+    ) -> None:  # noqa: N802
         """Delegate sorting to the source model to use numeric keys (not DisplayRole strings)."""
         # Mémoriser le tri pour pouvoir le réappliquer après un changement de filtre.
         # column=-1 signifie "retour au tri par défaut" : on réinitialise la mémoire.

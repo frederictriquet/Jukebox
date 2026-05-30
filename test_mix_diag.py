@@ -1,22 +1,26 @@
 """Diagnostic: test analyze_mix flow step by step on a real mix."""
-import sys
+
 import logging
+import sys
+
 sys.path.insert(0, "/Users/fred/Code/Jukebox")
 
 logging.basicConfig(level=logging.WARNING)
 
+
 from shazamix.database import FingerprintDB
-from shazamix.fingerprint import Fingerprinter, Fingerprint
+from shazamix.fingerprint import Fingerprint, Fingerprinter
 from shazamix.matcher import Matcher
-import numpy as np
 
 DB_PATH = "/Users/fred/.jukebox/jukebox.db"
 
 # Find a mix file
 import glob
+
 mix_files = glob.glob("/Users/fred/Music/**/*.mp3", recursive=True)
 # Filter for likely mixes (larger files)
 import os
+
 large_files = [(f, os.path.getsize(f)) for f in mix_files if os.path.getsize(f) > 50_000_000]
 large_files.sort(key=lambda x: -x[1])
 
@@ -33,6 +37,7 @@ matcher = Matcher(db, fp)
 
 # Load first 60s of the mix
 import librosa
+
 print("Loading first 60s of mix...")
 y, sr = librosa.load(MIX_PATH, sr=fp.sample_rate, mono=True, duration=60.0)
 print(f"Loaded {len(y)} samples at {sr} Hz ({len(y)/sr:.1f}s)")

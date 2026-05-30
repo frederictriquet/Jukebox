@@ -98,7 +98,11 @@ class TestDeserializeWaveform:
         """Pickle data est rejeté (pickle interdit pour raisons de sécurité)."""
         import pickle
 
-        waveform = {"bass": np.array([0.1, 0.2]), "mid": np.array([0.3, 0.4]), "treble": np.array([0.5, 0.6])}
+        waveform = {
+            "bass": np.array([0.1, 0.2]),
+            "mid": np.array([0.3, 0.4]),
+            "treble": np.array([0.5, 0.6]),
+        }
         with pytest.raises(ValueError):
             deserialize_waveform(pickle.dumps(waveform))
 

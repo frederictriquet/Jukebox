@@ -284,9 +284,7 @@ class LoopPlayerPlugin(SettingsSyncMixin):
             filepath=player.current_file,
         )
 
-        logger.debug(
-            "[Loop Player] Loop moved to %.2fs - %.2fs", self.loop_start, self.loop_end
-        )
+        logger.debug("[Loop Player] Loop moved to %.2fs - %.2fs", self.loop_start, self.loop_end)
 
     def _move_loop_coarse_forward(self) -> None:
         """Move loop forward by coarse step."""

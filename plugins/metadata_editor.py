@@ -49,7 +49,10 @@ class TabEventFilter(QObject):
             focused_widget = QApplication.focusWidget()
 
             if event.key() == Qt.Key.Key_Tab:
-                if isinstance(focused_widget, QLineEdit) and focused_widget in self.metadata_widget.field_widgets:
+                if (
+                    isinstance(focused_widget, QLineEdit)
+                    and focused_widget in self.metadata_widget.field_widgets
+                ):
                     current_index = self.metadata_widget.field_widgets.index(focused_widget)
                     if current_index == len(self.metadata_widget.field_widgets) - 1:
                         focused_widget.clearFocus()
@@ -59,7 +62,11 @@ class TabEventFilter(QObject):
                     self.metadata_widget.field_widgets[0].setFocus()
                 return True
 
-            elif event.key() == Qt.Key.Key_Backtab and isinstance(focused_widget, QLineEdit) and focused_widget in self.metadata_widget.field_widgets:
+            elif (
+                event.key() == Qt.Key.Key_Backtab
+                and isinstance(focused_widget, QLineEdit)
+                and focused_widget in self.metadata_widget.field_widgets
+            ):
                 current_index = self.metadata_widget.field_widgets.index(focused_widget)
                 prev_index = (current_index - 1) % len(self.metadata_widget.field_widgets)
                 self.metadata_widget.field_widgets[prev_index].setFocus()

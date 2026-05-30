@@ -10,15 +10,16 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import logging
 import faulthandler
-import random
+import logging
+import secrets
 import socket
 import struct
 import sys
 import threading
 from collections import deque
 from pathlib import Path
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -42,10 +43,17 @@ except ImportError:
     PILImage = None  # type: ignore[assignment,misc]
     HAS_PIL = False
 
+# ── Blocage des C extensions ARM64 bugguées ──────────────────────────────────
+# noise._perlin / noise._simplex et moderngl.mgl ont des bugs d'initialisation
+# (PyInit_*) sur ARM64 qui corrompent le refcount de None même sans être appelés.
+# On injecte des faux modules dans sys.modules AVANT que vjing_layer.py ne fasse
+# `from noise import pnoise2, snoise2` (niveau module), afin que les vraies
+# C extensions ne soient jamais chargées.
+import types as _types
+
 from PySide6.QtCore import QObject, Qt, QTimer, Slot
 from PySide6.QtGui import QColor, QImage, QPalette, QPixmap
 from PySide6.QtWidgets import (
-    QMessageBox,
     QApplication,
     QButtonGroup,
     QComboBox,
@@ -54,20 +62,13 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QSlider,
     QSplitter,
     QVBoxLayout,
     QWidget,
 )
-
-# ── Blocage des C extensions ARM64 bugguées ──────────────────────────────────
-# noise._perlin / noise._simplex et moderngl.mgl ont des bugs d'initialisation
-# (PyInit_*) sur ARM64 qui corrompent le refcount de None même sans être appelés.
-# On injecte des faux modules dans sys.modules AVANT que vjing_layer.py ne fasse
-# `from noise import pnoise2, snoise2` (niveau module), afin que les vraies
-# C extensions ne soient jamais chargées.
-import types as _types
 
 
 class _BlockedModule(_types.ModuleType):
@@ -86,11 +87,10 @@ for _blocked in ("noise", "moderngl", "PIL._imagingft"):
         sys.modules[_blocked] = _BlockedModule(_blocked)
 
 
-from video_exporter.layers.vjing_layer import VJingLayer  # noqa: E402
+from video_exporter.layers.vjing_layer import VJingLayer  # type: ignore[import] # noqa: E402
 
 logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
-
 
 
 LED_SIZE = 64
@@ -98,7 +98,7 @@ LED_DISPLAY = 256
 FPS = 30
 MIC_SR = 22050
 MIC_BLOCK_SIZE = 2048
-MIC_DURATION = 60    # buffer 60s — réduit la mémoire de ~24Mo à ~0.5Mo
+MIC_DURATION = 60  # buffer 60s — réduit la mémoire de ~24Mo à ~0.5Mo
 
 ESP32_PORT = 5005
 ESP32_CHUNK_SIZE = 1024
@@ -116,7 +116,7 @@ def _discover_effects() -> list[str]:
     known_set = set(known)
     for name in sorted(dir(VJingLayer)):
         if name.startswith("_render_") and callable(getattr(VJingLayer, name)):
-            effect_name = name[len("_render_"):]
+            effect_name = name[len("_render_") :]
             if effect_name not in known_set and effect_name not in internal:
                 known.append(effect_name)
                 known_set.add(effect_name)
@@ -131,12 +131,8 @@ def _list_input_devices() -> list[tuple[int, str]]:
     if not HAS_SOUNDDEVICE:
         return []
     try:
-        devices = sd.query_devices()
-        return [
-            (i, d["name"])
-            for i, d in enumerate(devices)
-            if d["max_input_channels"] > 0
-        ]
+        devices = sd.query_devices()  # type: ignore[union-attr]
+        return [(i, d["name"]) for i, d in enumerate(devices) if d["max_input_channels"] > 0]
     except Exception:
         return []
 
@@ -158,7 +154,7 @@ class MicrophoneSource:
         self._n_fft = n_fft
         # Buffer glissant : on concatène les derniers blocs lus pour avoir n_fft samples
         self._ring = np.zeros(n_fft, dtype=np.float32)
-        self._stream: sd.InputStream | None = None
+        self._stream: Any = None
 
         self._last_beat_frame = -100
         self._bass_history: deque[float] = deque(maxlen=30)
@@ -166,8 +162,11 @@ class MicrophoneSource:
 
         self._n_bands = 32
         self._ctx: dict = {
-            "energy": 0.0, "bass": 0.0, "mid": 0.0,
-            "treble": 0.0, "fft": np.zeros(self._n_bands, dtype=np.float32),
+            "energy": 0.0,
+            "bass": 0.0,
+            "mid": 0.0,
+            "treble": 0.0,
+            "fft": np.zeros(self._n_bands, dtype=np.float32),
             "is_beat": False,
         }
         self._init_freq_slices(sr)
@@ -176,8 +175,8 @@ class MicrophoneSource:
         """(Re)calcule les slices FFT pour le sample rate donné."""
         freqs = np.fft.rfftfreq(self._n_fft, 1.0 / sr)
         n_bins = len(freqs)
-        self._bass_sl = slice(int(np.searchsorted(freqs, 20)),  int(np.searchsorted(freqs, 250)))
-        self._mid_sl  = slice(int(np.searchsorted(freqs, 250)), int(np.searchsorted(freqs, 4000)))
+        self._bass_sl = slice(int(np.searchsorted(freqs, 20)), int(np.searchsorted(freqs, 250)))
+        self._mid_sl = slice(int(np.searchsorted(freqs, 250)), int(np.searchsorted(freqs, 4000)))
         self._treble_sl = slice(int(np.searchsorted(freqs, 4000)), None)
         self._band_edges = np.linspace(0, n_bins, self._n_bands + 1, dtype=int)
         self._band_counts = np.maximum(np.diff(self._band_edges).astype(np.float32), 1)
@@ -188,18 +187,20 @@ class MicrophoneSource:
         actual_sr = self.sr
         if device is not None:
             try:
-                dev_info = sd.query_devices(device)
+                dev_info = sd.query_devices(device)  # type: ignore[union-attr]
                 native_sr = int(dev_info.get("default_samplerate", self.sr))
                 if native_sr != self.sr:
                     log.info(
                         "[Mic] SR natif device=%s : %d Hz (au lieu de %d) — adaptation",
-                        device, native_sr, self.sr,
+                        device,
+                        native_sr,
+                        self.sr,
                     )
                     actual_sr = native_sr
-            except Exception:
-                pass
+            except Exception as e:  # noqa: BLE001
+                log.debug("Impossible de lire le SR natif du device %s : %s", device, e)
         # Pas de callback= : mode polling, sounddevice bufferise en interne
-        self._stream = sd.InputStream(
+        self._stream = sd.InputStream(  # type: ignore[union-attr]
             device=device,
             samplerate=actual_sr,
             channels=1,
@@ -211,7 +212,9 @@ class MicrophoneSource:
         if actual_sr != self.sr:
             self.sr = actual_sr
             self._init_freq_slices(actual_sr)
-        log.info("[Mic] Démarré (polling) device=%s %d Hz block=%d", device, self.sr, self.block_size)
+        log.info(
+            "[Mic] Démarré (polling) device=%s %d Hz block=%d", device, self.sr, self.block_size
+        )
 
     def stop(self) -> None:
         if self._stream:
@@ -231,12 +234,12 @@ class MicrophoneSource:
         available = self._stream.read_available
         if available <= 0:
             return
-        data, _ = self._stream.read(available)   # (available, 1) float32
+        data, _ = self._stream.read(available)  # (available, 1) float32
         samples = data[:, 0]
         n = len(samples)
         if n >= self._n_fft:
             # Plus de samples que le buffer : garder les plus récents
-            self._ring[:] = samples[-self._n_fft:]
+            self._ring[:] = samples[-self._n_fft :]
         else:
             # Décaler et ajouter
             self._ring[:-n] = self._ring[n:]
@@ -253,14 +256,14 @@ class MicrophoneSource:
             return float(np.sqrt(np.dot(v, v) / max(len(v), 1)))
 
         bass_e = _rms(self._bass_sl)
-        mid_e  = _rms(self._mid_sl)
+        mid_e = _rms(self._mid_sl)
         treble_e = _rms(self._treble_sl)
 
         peak = max(bass_e, mid_e, treble_e)
         self._running_max = max(peak * 1.2, self._running_max * 0.998)
         norm = max(self._running_max, 1e-6)
-        bass_n   = min(1.0, bass_e   / norm)
-        mid_n    = min(1.0, mid_e    / norm)
+        bass_n = min(1.0, bass_e / norm)
+        mid_n = min(1.0, mid_e / norm)
         treble_n = min(1.0, treble_e / norm)
         energy = (bass_n + mid_n + treble_n) / 3.0
 
@@ -274,17 +277,15 @@ class MicrophoneSource:
 
         self._bass_history.append(bass_n)
         avg_bass = sum(self._bass_history) / len(self._bass_history)
-        is_beat = bass_n > max(0.5, avg_bass * 1.5) and (
-            frame_idx - self._last_beat_frame
-        ) >= 7
+        is_beat = bass_n > max(0.5, avg_bass * 1.5) and (frame_idx - self._last_beat_frame) >= 7
         if is_beat:
             self._last_beat_frame = frame_idx
 
         # Mise à jour du dict pré-alloué (pas de nouvelle allocation)
-        self._ctx["energy"]  = energy
-        self._ctx["bass"]    = bass_n
-        self._ctx["mid"]     = mid_n
-        self._ctx["treble"]  = treble_n
+        self._ctx["energy"] = energy
+        self._ctx["bass"] = bass_n
+        self._ctx["mid"] = mid_n
+        self._ctx["treble"] = treble_n
         self._ctx["is_beat"] = is_beat
         return self._ctx
 
@@ -303,9 +304,9 @@ class LiveVJingLayer(VJingLayer):
 
     def _precompute(self) -> None:
         n = self.total_frames
-        self.energy       = np.zeros(n, dtype=np.float32)
-        self.bass_energy  = np.zeros(n, dtype=np.float32)
-        self.mid_energy   = np.zeros(n, dtype=np.float32)
+        self.energy = np.zeros(n, dtype=np.float32)
+        self.bass_energy = np.zeros(n, dtype=np.float32)
+        self.mid_energy = np.zeros(n, dtype=np.float32)
         self.treble_energy = np.zeros(n, dtype=np.float32)
         # Array 2D continu au lieu d'une liste de 108 000 objets numpy
         self.fft_data: np.ndarray = np.zeros((n, 32), dtype=np.float32)  # type: ignore[assignment]
@@ -318,21 +319,21 @@ class LiveVJingLayer(VJingLayer):
             if init_fn:
                 init_fn()
 
-        h, w = self.height, self.width
+        _h, _w = self.height, self.width
 
         if self._pending_gpu_init:
             self._init_gpu_renderer()
 
-    def render(self, frame_idx: int, time_pos: float) -> "Image.Image":  # type: ignore[name-defined] # noqa: F821
+    def render(self, frame_idx: int, time_pos: float) -> PILImage:  # type: ignore[return-value]
         if self.live_ctx is not None:
             # Wrapping : frame_idx tourne dans [0, total_frames) indéfiniment
             safe = frame_idx % self.total_frames
             ctx = self.live_ctx
-            self.energy[safe]       = ctx["energy"]
-            self.bass_energy[safe]  = ctx["bass"]
-            self.mid_energy[safe]   = ctx["mid"]
+            self.energy[safe] = ctx["energy"]
+            self.bass_energy[safe] = ctx["bass"]
+            self.mid_energy[safe] = ctx["mid"]
             self.treble_energy[safe] = ctx["treble"]
-            self.fft_data[safe]     = ctx["fft"]
+            self.fft_data[safe] = ctx["fft"]
             if ctx["is_beat"] and (not self.beats or self.beats[-1] != frame_idx):
                 self.beats.append(frame_idx)
                 self._beats_set.add(frame_idx)
@@ -445,13 +446,13 @@ class RpiVJPanel(QObject):
         _hdr = 8  # struct ">IHH" = I(4) + H(2) + H(2)
         self._esp32_bufs = [bytearray(_hdr + ESP32_CHUNK_SIZE) for _ in range(ESP32_TOTAL_CHUNKS)]
         for _i, _buf in enumerate(self._esp32_bufs):
-            struct.pack_into(">H", _buf, 4, _i)                 # chunk index (fixe)
+            struct.pack_into(">H", _buf, 4, _i)  # chunk index (fixe)
             struct.pack_into(">H", _buf, 6, ESP32_TOTAL_CHUNKS)  # total chunks (fixe)
 
         self._led_layer: LiveVJingLayer | None = None
         self._mic_source: MicrophoneSource | None = None
-        self._frame_idx: int = 0       # boucle à total_frames (indexation énergie)
-        self._abs_frame_idx: int = 0   # monotone, jamais remis à zéro (time_pos transitions)
+        self._frame_idx: int = 0  # boucle à total_frames (indexation énergie)
+        self._abs_frame_idx: int = 0  # monotone, jamais remis à zéro (time_pos transitions)
         self._current_palette = "neon"
 
         self._manual_beat = False
@@ -474,15 +475,22 @@ class RpiVJPanel(QObject):
         )
         # QImage pointe directement sur _display_rawbuf — créé une seule fois, jamais libéré
         self._display_qimage = QImage(
-            self._display_rawbuf, LED_DISPLAY, LED_DISPLAY, 3 * LED_DISPLAY,
+            self._display_rawbuf,
+            LED_DISPLAY,
+            LED_DISPLAY,
+            3 * LED_DISPLAY,
             QImage.Format.Format_RGB888,
         )
         # QPixmap mis à jour en place via convertFromImage() — créé une seule fois
         self._display_qpixmap = QPixmap(LED_DISPLAY, LED_DISPLAY)
         # Contexte auto pré-alloué (évite dict allocation à 30fps)
         self._auto_ctx: dict = {
-            "energy": 0.5, "bass": 0.4, "mid": 0.5,
-            "treble": 0.3, "fft": _AUTO_CTX_FFT, "is_beat": False,
+            "energy": 0.5,
+            "bass": 0.4,
+            "mid": 0.5,
+            "treble": 0.3,
+            "fft": _AUTO_CTX_FFT,
+            "is_beat": False,
         }
 
         self._timer = QTimer()
@@ -694,7 +702,8 @@ class RpiVJPanel(QObject):
         # Bouton passage effet suivant
         self._next_effect_btn = QPushButton("NEXT EFFECT ▶")
         self._next_effect_btn.setFixedHeight(100)
-        self._next_effect_btn.setStyleSheet("""
+        self._next_effect_btn.setStyleSheet(
+            """
             QPushButton {
                 background: #1a1a3a;
                 color: #66aaff;
@@ -708,14 +717,16 @@ class RpiVJPanel(QObject):
                 color: white;
                 border-color: #4488ff;
             }
-        """)
+        """
+        )
         self._next_effect_btn.clicked.connect(self._on_next_effect)
         right_layout.addWidget(self._next_effect_btn)
 
         # Zone de tap beat (tactile)
         self._beat_btn = QPushButton("TAP BEAT")
         self._beat_btn.setFixedHeight(240)
-        self._beat_btn.setStyleSheet("""
+        self._beat_btn.setStyleSheet(
+            """
             QPushButton {
                 background: #2a2a2a;
                 color: #888;
@@ -729,7 +740,8 @@ class RpiVJPanel(QObject):
                 color: white;
                 border-color: #ff6622;
             }
-        """)
+        """
+        )
         self._beat_btn.pressed.connect(self._on_tap_beat)
         right_layout.addWidget(self._beat_btn)
 
@@ -759,13 +771,19 @@ class RpiVJPanel(QObject):
     @staticmethod
     def _fx_btn_style(checked: bool, active: bool) -> str:
         if active:
-            return ("font-size: 44px; font-weight: bold; color: #00FF00; "
-                    "background: #1a3a1a; border: 2px solid #00FF00; border-radius: 4px;")
+            return (
+                "font-size: 44px; font-weight: bold; color: #00FF00; "
+                "background: #1a3a1a; border: 2px solid #00FF00; border-radius: 4px;"
+            )
         if checked:
-            return ("font-size: 44px; color: #ccc; "
-                    "background: #3a3a3a; border: 2px solid #666; border-radius: 4px;")
-        return ("font-size: 44px; color: #555; "
-                "background: #1e1e1e; border: 2px solid #333; border-radius: 4px;")
+            return (
+                "font-size: 44px; color: #ccc; "
+                "background: #3a3a3a; border: 2px solid #666; border-radius: 4px;"
+            )
+        return (
+            "font-size: 44px; color: #555; "
+            "background: #1e1e1e; border: 2px solid #333; border-radius: 4px;"
+        )
 
     _STYLE_MIC_ON = (
         "QPushButton { background: #1a4a1a; color: #4f4; font-weight: bold; "
@@ -898,7 +916,7 @@ class RpiVJPanel(QObject):
 
     def _build_live_layer(self) -> None:
         checked = self._get_checked_effects()
-        random.shuffle(checked)
+        checked.sort(key=lambda _: secrets.token_bytes(4))
         if not checked:
             self._led_layer = None
             self._win.statusBar().showMessage("No effect selected")
@@ -974,7 +992,7 @@ class RpiVJPanel(QObject):
     def _on_effect_toggled(self, *_args: object) -> None:
         self._last_visible = frozenset()  # force style refresh sur le prochain frame
         # Feedback visuel immédiat : met à jour checked/unchecked sans attendre le timer
-        for name, cb in self._effect_checkboxes.items():
+        for _, cb in self._effect_checkboxes.items():
             cb.setStyleSheet(self._fx_btn_style(checked=cb.isChecked(), active=False))
 
         checked = self._get_checked_effects()
@@ -1193,7 +1211,7 @@ class RpiVJPanel(QObject):
             return
         self._last_visible = frozen
 
-        for name, cb in self._effect_checkboxes.items():
+        for _, cb in self._effect_checkboxes.items():
             cb.setStyleSheet(self._fx_btn_style(checked=cb.isChecked(), active=name in visible))
 
         for name, rb in self._post_fx_radios.items():
@@ -1206,7 +1224,7 @@ class RpiVJPanel(QObject):
         dlg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         dlg.setDefaultButton(QMessageBox.StandardButton.No)
         dlg.setStyleSheet("font-size: 28px;")
-        if dlg.exec() == QMessageBox.StandardButton.Yes:
+        if getattr(dlg, "exec")() == QMessageBox.StandardButton.Yes:  # noqa: B009
             self._win.close()
 
     # ─── Nettoyage ───────────────────────────────────────────────────────
@@ -1255,7 +1273,7 @@ def main() -> None:
     window = RpiVJPanel(esp32_host=args.esp32)
     app.aboutToQuit.connect(window._cleanup)
     window._win.showFullScreen()
-    sys.exit(app.exec())
+    sys.exit(getattr(app, "exec")())  # noqa: B009
 
 
 if __name__ == "__main__":

@@ -55,9 +55,7 @@ class PlaybackNavigationPlugin(SettingsSyncMixin):
         self.auto_play_next = context.get_setting(
             self.name, "auto_play_next", bool, self.auto_play_next
         )
-        self.random_mode = context.get_setting(
-            self.name, "random_mode", bool, self.random_mode
-        )
+        self.random_mode = context.get_setting(self.name, "random_mode", bool, self.random_mode)
 
     def _persist_setting(self, key: str, value: bool) -> None:
         """Persiste un réglage booléen dans la table plugin_settings."""

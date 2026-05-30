@@ -61,9 +61,7 @@ class IntroOverlayLayer(BaseVisualLayer):
             raise FileNotFoundError(f"Vidéo d'intro introuvable : {self.video_path}")
 
         if self.video_path.suffix.lower() not in self.VIDEO_EXTENSIONS:
-            raise ValueError(
-                f"Format vidéo non supporté pour l'intro : {self.video_path.suffix}"
-            )
+            raise ValueError(f"Format vidéo non supporté pour l'intro : {self.video_path.suffix}")
 
         try:
             import cv2
@@ -85,7 +83,10 @@ class IntroOverlayLayer(BaseVisualLayer):
 
             logging.info(
                 "[Intro Overlay] Vidéo : %dx%d @ %.2ffps, %d frames",
-                video_width, video_height, video_fps, total_video_frames,
+                video_width,
+                video_height,
+                video_fps,
+                total_video_frames,
             )
 
             self._frame_ratio = video_fps / self.fps if video_fps > 0 else 1.0
@@ -181,7 +182,8 @@ class IntroOverlayLayer(BaseVisualLayer):
         """Rend transparents les pixels sombres (chroma key noir)."""
         brightness = np.max(frame[:, :, :3], axis=2)
         alpha = np.clip(
-            (brightness.astype(float) - self.chroma_key_threshold) * 255
+            (brightness.astype(float) - self.chroma_key_threshold)
+            * 255
             / max(1, 255 - self.chroma_key_threshold),
             0,
             255,

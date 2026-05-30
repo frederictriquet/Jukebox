@@ -119,9 +119,7 @@ class FileInput(QLineEdit):
         """Open file browser on click."""
         current = self.text() or str(Path.home())
         start_dir = str(Path(current).parent) if current and Path(current).exists() else current
-        filepath, _ = QFileDialog.getOpenFileName(
-            self, "Select File", start_dir, self.file_filter
-        )
+        filepath, _ = QFileDialog.getOpenFileName(self, "Select File", start_dir, self.file_filter)
         if filepath:
             self.setText(filepath)
         super().mousePressEvent(event)
@@ -466,9 +464,7 @@ class ConfigDialog(QDialog):
                 input_widget = ShortcutInput()
             elif setting_type == "int":
                 input_widget = QSpinBox()
-                input_widget.setRange(
-                    setting_config.get("min", 0), setting_config.get("max", 1000)
-                )
+                input_widget.setRange(setting_config.get("min", 0), setting_config.get("max", 1000))
                 if "suffix" in setting_config:
                     input_widget.setSuffix(setting_config["suffix"])
             elif setting_type == "float":
@@ -555,19 +551,13 @@ class ConfigDialog(QDialog):
                         if index >= 0:
                             input_widget.setCurrentIndex(index)
                 elif isinstance(input_widget, QCheckBox):
-                    input_widget.setChecked(
-                        self._coerce_setting_value(value, setting_config, bool)
-                    )
+                    input_widget.setChecked(self._coerce_setting_value(value, setting_config, bool))
                 elif isinstance(input_widget, (DirectoryInput, ShortcutInput)):
                     input_widget.setText(value)
                 elif isinstance(input_widget, QDoubleSpinBox):
-                    input_widget.setValue(
-                        self._coerce_setting_value(value, setting_config, float)
-                    )
+                    input_widget.setValue(self._coerce_setting_value(value, setting_config, float))
                 elif isinstance(input_widget, QSpinBox):
-                    input_widget.setValue(
-                        self._coerce_setting_value(value, setting_config, int)
-                    )
+                    input_widget.setValue(self._coerce_setting_value(value, setting_config, int))
                 elif isinstance(input_widget, QLineEdit):
                     input_widget.setText(value)
 
@@ -579,9 +569,7 @@ class ConfigDialog(QDialog):
         """
         from pydantic import TypeAdapter, ValidationError  # type: ignore[import]
 
-        default = setting_config.get(
-            "default", 0 if target_type in (int, float) else False
-        )
+        default = setting_config.get("default", 0 if target_type in (int, float) else False)
         if not raw:
             return default
         try:
@@ -589,7 +577,9 @@ class ConfigDialog(QDialog):
         except (ValidationError, ValueError, TypeError):
             logging.warning(
                 "[ConfManager] Valeur invalide %r pour le type %s — défaut utilisé : %r",
-                raw, target_type.__name__, default,
+                raw,
+                target_type.__name__,
+                default,
             )
             return default
 

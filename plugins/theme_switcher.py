@@ -59,9 +59,7 @@ class ThemeSwitcherPlugin:
             # Feedback explicite : sans cela, un échec d'application de thème
             # (nom inconnu, fichier QSS manquant) passait totalement inaperçu.
             logger.warning("Failed to apply theme '%s'", theme_name)
-            self.context.emit(
-                Events.STATUS_MESSAGE, message=f"Could not apply theme: {theme_name}"
-            )
+            self.context.emit(Events.STATUS_MESSAGE, message=f"Could not apply theme: {theme_name}")
 
     def _toggle_theme(self) -> None:
         """Toggle between dark and light themes."""

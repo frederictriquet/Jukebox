@@ -213,9 +213,10 @@ class MicrophoneSource:
         self._bass_history.append(bass_n)
         avg_bass = float(np.mean(self._bass_history))
         min_interval = 7  # ~4 beats/sec at 30 fps
-        is_beat = bass_n > max(0.5, avg_bass * 1.5) and (
-            frame_idx - self._last_beat_frame
-        ) >= min_interval
+        is_beat = (
+            bass_n > max(0.5, avg_bass * 1.5)
+            and (frame_idx - self._last_beat_frame) >= min_interval
+        )
         if is_beat:
             self._last_beat_frame = frame_idx
 
@@ -554,7 +555,9 @@ class VJingPlayground(QMainWindow):
         milkdrop_row = QHBoxLayout()
         self._cb_milkdrop = QCheckBox("MilkDrop (projectM)")
         self._cb_milkdrop.setChecked(False)
-        self._cb_milkdrop.setToolTip("Superpose les effets MilkDrop sur la preview (warmup en arrière-plan)")
+        self._cb_milkdrop.setToolTip(
+            "Superpose les effets MilkDrop sur la preview (warmup en arrière-plan)"
+        )
         self._cb_milkdrop.toggled.connect(self._on_milkdrop_toggled)
         milkdrop_row.addWidget(self._cb_milkdrop)
         self._milkdrop_status_label = QLabel("")
@@ -699,13 +702,9 @@ class VJingPlayground(QMainWindow):
 
                 audio, sr = librosa.load(filepath, sr=22050, mono=True)
             except Exception as exc:
-                QTimer.singleShot(
-                    0, lambda err=exc: self._on_audio_load_failed(filepath, err)
-                )
+                QTimer.singleShot(0, lambda err=exc: self._on_audio_load_failed(filepath, err))
                 return
-            QTimer.singleShot(
-                0, lambda a=audio, s=sr: self._on_audio_loaded(filepath, a, float(s))
-            )
+            QTimer.singleShot(0, lambda a=audio, s=sr: self._on_audio_loaded(filepath, a, float(s)))
 
         threading.Thread(target=_load_audio, daemon=True, name="vjing-audio-load").start()
 
@@ -799,9 +798,7 @@ class VJingPlayground(QMainWindow):
         if self._cb_milkdrop.isChecked():
             self._build_milkdrop_layer()
 
-    def _hot_swap_effects(
-        self, layer: VJingLayer, effects: list[str], time_pos: float
-    ) -> None:
+    def _hot_swap_effects(self, layer: VJingLayer, effects: list[str], time_pos: float) -> None:
         """Update active effects on an existing layer without re-doing audio analysis.
 
         Preserves the order of already-active effects (new ones appended at the end)
@@ -868,9 +865,7 @@ class VJingPlayground(QMainWindow):
                 has_layer = True
 
         if has_layer:
-            self.statusBar().showMessage(
-                f"{len(checked)} effects, palette={self._current_palette}"
-            )
+            self.statusBar().showMessage(f"{len(checked)} effects, palette={self._current_palette}")
         else:
             # No layers at all (e.g. after "None" then re-check) — async rebuild
             self._build_layers()
@@ -934,14 +929,18 @@ class VJingPlayground(QMainWindow):
             return
 
         try:
-            from plugins.video_exporter.layers.milkdrop_layer import MilkDropLayer  # type: ignore[import]
+            from plugins.video_exporter.layers.milkdrop_layer import (
+                MilkDropLayer,  # type: ignore[import]
+            )
         except ImportError as e:
             log.warning("MilkDrop non disponible: %s", e)
             self._cb_milkdrop.setChecked(False)
             self._milkdrop_status_label.setText("non disponible")
             return
 
-        audio = self._audio if self._audio is not None else np.zeros(int(self._sr), dtype=np.float32)
+        audio = (
+            self._audio if self._audio is not None else np.zeros(int(self._sr), dtype=np.float32)
+        )
         duration = self._duration if self._duration > 0 else 60.0
 
         self._set_milkdrop_ready(False)
@@ -1221,9 +1220,7 @@ class VJingPlayground(QMainWindow):
                 self._led_layer.live_ctx = ctx
             # Update time label for mic mode
             elapsed = self._frame_idx / FPS
-            self._time_label.setText(
-                f"{int(elapsed) // 60}:{int(elapsed) % 60:02d} (live)"
-            )
+            self._time_label.setText(f"{int(elapsed) // 60}:{int(elapsed) % 60:02d} (live)")
 
         time_pos = self._frame_idx / FPS
 
@@ -1358,7 +1355,7 @@ def main() -> None:
 
     window = VJingPlayground()
     window.show()
-    _run = getattr(app, "exec")  # Boucle d'événements Qt
+    _run = getattr(app, "exec")  # noqa: B009  # Boucle d'événements Qt
     sys.exit(_run())
 
 

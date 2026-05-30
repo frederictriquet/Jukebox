@@ -190,7 +190,7 @@ class VideoExporterPlugin(SettingsSyncMixin):
             track_metadata=track,
         )
 
-        _run_dialog = getattr(dialog, "exec")  # Boucle modale Qt
+        _run_dialog = getattr(dialog, "exec")  # noqa: B009  # Boucle modale Qt
         if _run_dialog():
             # Dialog handles the export via worker
             logging.info("[Video Exporter] Export initiated from dialog")

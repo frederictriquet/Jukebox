@@ -252,10 +252,12 @@ class GenreClassifierTrainer:
         feature_importance = None
         importances = model.get_feature_importance()
         if importances is not None:
-            feature_importance = pd.DataFrame({
-                "feature": ML_FEATURE_COLUMNS,
-                "importance": importances,
-            }).sort_values("importance", ascending=False)
+            feature_importance = pd.DataFrame(
+                {
+                    "feature": ML_FEATURE_COLUMNS,
+                    "importance": importances,
+                }
+            ).sort_values("importance", ascending=False)
 
         return TrainingResult(
             model_name=model.name,
@@ -280,21 +282,25 @@ class GenreClassifierTrainer:
         Returns:
             DataFrame with comparison results
         """
-        all_models: list[BaseGenreClassifier] = models if models is not None else get_all_models(random_state=self.random_state)
+        all_models: list[BaseGenreClassifier] = (
+            models if models is not None else get_all_models(random_state=self.random_state)
+        )
 
         results = []
         for model in all_models:
             logger.info("Training %s...", model.name)
             result = self.train_model(model)
-            results.append({
-                "model": model.name,
-                "hamming_loss": result.metrics.hamming_loss,
-                "subset_accuracy": result.metrics.subset_accuracy,
-                "f1_micro": result.metrics.f1_micro,
-                "f1_macro": result.metrics.f1_macro,
-                "f1_samples": result.metrics.f1_samples,
-                "training_time": result.training_time,
-            })
+            results.append(
+                {
+                    "model": model.name,
+                    "hamming_loss": result.metrics.hamming_loss,
+                    "subset_accuracy": result.metrics.subset_accuracy,
+                    "f1_micro": result.metrics.f1_micro,
+                    "f1_macro": result.metrics.f1_macro,
+                    "f1_samples": result.metrics.f1_samples,
+                    "training_time": result.training_time,
+                }
+            )
             logger.info(result.summary())
 
         return pd.DataFrame(results).sort_values("f1_micro", ascending=False)
@@ -431,9 +437,7 @@ class TrainedModel:
             expected = hash_path.read_text().strip()
             actual = cls._sha256(path)
             if actual != expected:
-                raise ValueError(
-                    f"SHA256 mismatch pour {path} — fichier corrompu ou altéré"
-                )
+                raise ValueError(f"SHA256 mismatch pour {path} — fichier corrompu ou altéré")
         elif require_hash:
             raise FileNotFoundError(
                 f"Fichier d'empreinte introuvable : {hash_path} — refus de "
@@ -495,7 +499,11 @@ def train_best_model(
     for genre, metrics in sorted(result.metrics.per_genre_metrics.items()):
         logger.info(
             "  %s: P=%.3f R=%.3f F1=%.3f (n=%d)",
-            genre, metrics["precision"], metrics["recall"], metrics["f1"], metrics["support"],
+            genre,
+            metrics["precision"],
+            metrics["recall"],
+            metrics["f1"],
+            metrics["support"],
         )
 
     # Create trained model wrapper

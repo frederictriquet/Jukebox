@@ -921,7 +921,9 @@ class Matcher:
                 computed += 1
             except Exception as exc:
                 logging.getLogger(__name__).warning(
-                    "[Matcher] precompute_audio_features: impossible de traiter %s : %s", filepath, exc
+                    "[Matcher] precompute_audio_features: impossible de traiter %s : %s",
+                    filepath,
+                    exc,
                 )
 
             if (i + 1) % 50 == 0 or i + 1 == total:

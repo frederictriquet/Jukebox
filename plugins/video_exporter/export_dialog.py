@@ -50,9 +50,9 @@ RESOLUTION_PRESETS: dict[str, tuple[int, int]] = {
     "720p": (1280, 720),
     "square_1080": (1080, 1080),
     "square_720": (720, 720),
-    "reels_9x16 (1080×1920)": (1080, 1920),       # Reels / Stories — boostable
-    "feed_4x5 (1080×1350)": (1080, 1350),          # Feed portrait standard
-    "feed_3x4 (1080×1440)": (1080, 1440),          # Feed portrait élargi
+    "reels_9x16 (1080×1920)": (1080, 1920),  # Reels / Stories — boostable
+    "feed_4x5 (1080×1350)": (1080, 1350),  # Feed portrait standard
+    "feed_3x4 (1080×1440)": (1080, 1440),  # Feed portrait élargi
 }
 
 # Palette display names for tooltips
@@ -87,7 +87,8 @@ class PaletteButton(QPushButton):
             stops.append(f"stop:{pos:.2f} rgb({r},{g},{b})")
 
         gradient = ", ".join(stops)
-        self.setStyleSheet(f"""
+        self.setStyleSheet(
+            f"""
             QPushButton {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, {gradient});
                 border: 2px solid #444;
@@ -99,7 +100,8 @@ class PaletteButton(QPushButton):
             QPushButton:hover {{
                 border: 2px solid #888;
             }}
-        """)
+        """
+        )
 
 
 class EffectPreviewDialog(QDialog):
@@ -169,7 +171,8 @@ class EffectPreviewDialog(QDialog):
 
     def _setup_ui(self) -> None:
         """Set up the dialog UI."""
-        self.setStyleSheet("""
+        self.setStyleSheet(
+            """
             QDialog { background: #2b2b2b; }
             QLabel { color: #ffffff; }
             QPushButton {
@@ -181,7 +184,8 @@ class EffectPreviewDialog(QDialog):
             }
             QPushButton:hover { background: #4a4a4a; }
             QPushButton:pressed { background: #0078d4; }
-        """)
+        """
+        )
 
         layout = QVBoxLayout(self)
 
@@ -324,7 +328,9 @@ class EffectPreviewDialog(QDialog):
         # Position at loop start (en millisecondes)
         self._vlc_player.play()
         # Wait a bit for player to initialize, then seek
-        QTimer.singleShot(VLC_SEEK_DELAY_MS, lambda: self._vlc_player.set_time(int(self.loop_start * 1000)))
+        QTimer.singleShot(
+            VLC_SEEK_DELAY_MS, lambda: self._vlc_player.set_time(int(self.loop_start * 1000))
+        )
 
         self._timer.start(interval)
         self._playing = True
@@ -519,13 +525,11 @@ class ExportDialog(QDialog):
             track_metadata=self.track_metadata,
             video_clips_folder=self.video_folder_edit.text(),
             vjing_mappings={
-                m.letter: m.get_effects()
-                for m in self.context.config.video_exporter.vjing_mappings
+                m.letter: m.get_effects() for m in self.context.config.video_exporter.vjing_mappings
             },
             vjing_preset=self.vjing_preset_combo.currentData(),
             vjing_presets={
-                p.name: p.effects
-                for p in self.context.config.video_exporter.vjing_presets
+                p.name: p.effects for p in self.context.config.video_exporter.vjing_presets
             },
             waveform_config={
                 "height_ratio": self.context.config.video_exporter.waveform_height_ratio,
@@ -551,7 +555,8 @@ class ExportDialog(QDialog):
 
     def _apply_dark_style(self) -> None:
         """Apply dark mode compatible styling."""
-        self.setStyleSheet("""
+        self.setStyleSheet(
+            """
             QTabWidget::pane {
                 border: 1px solid #555;
                 background: #2b2b2b;
@@ -619,7 +624,8 @@ class ExportDialog(QDialog):
                 background: #0078d4;
                 border-radius: 3px;
             }
-        """)
+        """
+        )
 
     def _get_metadata(self, key: str, default: str = "Unknown") -> str:
         """Get metadata value safely from sqlite3.Row or dict.
@@ -655,7 +661,9 @@ class ExportDialog(QDialog):
         seed_row.addWidget(QLabel("Seed:"))
         self.seed_input = QLineEdit(str(self._rng_seed))
         self.seed_input.setFixedWidth(120)
-        self.seed_input.setToolTip("Seed for reproducible VJing effects (shared by preview and export)")
+        self.seed_input.setToolTip(
+            "Seed for reproducible VJing effects (shared by preview and export)"
+        )
         self.seed_input.editingFinished.connect(self._on_seed_edited)
         seed_row.addWidget(self.seed_input)
         self.seed_randomize_btn = QPushButton("🎲")
@@ -977,9 +985,9 @@ class ExportDialog(QDialog):
                     preview_btn.setFixedSize(24, 24)
                     preview_btn.setToolTip(f"Preview {effect_name}")
                     preview_btn.clicked.connect(
-                        lambda checked,
-                        eid=effect_id,
-                        ename=effect_name: self._preview_single_effect(eid, ename)
+                        lambda checked, eid=effect_id, ename=effect_name: self._preview_single_effect(
+                            eid, ename
+                        )
                     )
 
                     row_layout.addWidget(name_label)
@@ -1383,7 +1391,11 @@ class ExportDialog(QDialog):
 
             # Scale to fit label while preserving aspect ratio
             label_size = self.preview_label.size()
-            pixmap = pixmap.scaled(label_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            pixmap = pixmap.scaled(
+                label_size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
             self.preview_label.setPixmap(pixmap)
 
         except Exception:
@@ -1415,7 +1427,7 @@ class ExportDialog(QDialog):
             audio_sensitivity=audio_sensitivity,
             track_metadata=self.track_metadata,
         )
-        getattr(dialog, "exec")()  # évite le mot-clé exec flaggé par le hook
+        getattr(dialog, "exec")()  # noqa: B009  # évite le mot-clé exec flaggé par le hook
 
     def _get_selected_palette(self) -> str:
         """Get the currently selected color palette ID.
@@ -1663,7 +1675,9 @@ class ExportDialog(QDialog):
 
         # Hashtags de genre
         genre_str = (fresh.get("genre") or "").strip()
-        logging.info("[Video Exporter] description: genre=%r artist=%r title=%r", genre_str, artist, title)
+        logging.info(
+            "[Video Exporter] description: genre=%r artist=%r title=%r", genre_str, artist, title
+        )
         if genre_str:
             try:
                 code_to_hashtags: dict[str, list[str]] = {}
@@ -1672,7 +1686,9 @@ class ExportDialog(QDialog):
                         code_to_hashtags[gc.code] = [
                             t if t.startswith("#") else f"#{t}" for t in gc.hashtags
                         ]
-                logging.info("[Video Exporter] code_to_hashtags keys: %s", list(code_to_hashtags.keys()))
+                logging.info(
+                    "[Video Exporter] code_to_hashtags keys: %s", list(code_to_hashtags.keys())
+                )
 
                 codes = [p for p in genre_str.split("-") if not p.startswith("*")]
                 hashtags: list[str] = []

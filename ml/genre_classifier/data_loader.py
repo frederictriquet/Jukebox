@@ -309,13 +309,15 @@ def get_dataset_stats(db_path: Path | str = DEFAULT_DB_PATH) -> dict:
         ).fetchone()[0]
 
         # Tracks with both genre and ML features (usable for training)
-        usable_tracks = conn.execute("""
+        usable_tracks = conn.execute(
+            """
             SELECT COUNT(*)
             FROM tracks t
             INNER JOIN audio_analysis a ON t.id = a.track_id
             WHERE t.genre IS NOT NULL AND t.genre != ''
             AND a.rms_mean IS NOT NULL
-        """).fetchone()[0]
+        """
+        ).fetchone()[0]
 
         # Genre distribution (multi-label aware)
         for row in conn.execute(genre_query):

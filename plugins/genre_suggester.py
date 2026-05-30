@@ -53,9 +53,7 @@ class PredictionWorker(QThread):
             predictions = self._model.predict_top_n(features, n=TOP_N)
             self.finished_prediction.emit(predictions, None)
         except Exception:
-            logger.exception(
-                "[genre_suggester] Prediction failed for track %d", self._track_id
-            )
+            logger.exception("[genre_suggester] Prediction failed for track %d", self._track_id)
             self.finished_prediction.emit(None, "Prediction error")
 
 

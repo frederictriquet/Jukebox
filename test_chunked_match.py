@@ -1,13 +1,16 @@
 """Test _match_chunked on cached fingerprints."""
-import sys
+
 import logging
+import sys
+
 sys.path.insert(0, "/Users/fred/Code/Jukebox")
 
 logging.basicConfig(level=logging.INFO)
 
 import numpy as np
+
 from shazamix.database import FingerprintDB
-from shazamix.fingerprint import Fingerprinter, Fingerprint
+from shazamix.fingerprint import Fingerprint, Fingerprinter
 from shazamix.matcher import Matcher
 
 DB_PATH = "/Users/fred/.jukebox/jukebox.db"
@@ -16,7 +19,11 @@ CACHE_PATH = "/Users/fred/.jukebox/cue_cache/853c763cfa2ec0646bf41dd43ab0d4db5b8
 # Load cached fps
 data = np.load(CACHE_PATH)
 fps = [
-    Fingerprint(hash=int(data["hashes"][i]), time_offset_ms=int(data["time_offsets"][i]), freq_bin=int(data["freq_bins"][i]))
+    Fingerprint(
+        hash=int(data["hashes"][i]),
+        time_offset_ms=int(data["time_offsets"][i]),
+        freq_bin=int(data["freq_bins"][i]),
+    )
     for i in range(len(data["hashes"]))
 ]
 print(f"Loaded {len(fps)} cached fingerprints")
@@ -29,7 +36,9 @@ print("\n--- Test 1: _match_chunked (60s chunks) ---")
 matches = matcher._match_chunked(fps, chunk_duration_ms=60_000)
 print(f"Total matches: {len(matches)}")
 for m in matches[:5]:
-    print(f"  [{m.query_start_ms/1000:.0f}s] {m.artist} - {m.title} (conf={m.confidence:.2f}, count={m.match_count})")
+    print(
+        f"  [{m.query_start_ms/1000:.0f}s] {m.artist} - {m.title} (conf={m.confidence:.2f}, count={m.match_count})"
+    )
 
 # Test 2: Take a specific chunk manually (around 5:00)
 print("\n--- Test 2: Manual chunk around 5:00 (280-340s) ---")
@@ -53,6 +62,8 @@ for start_min in range(0, 78, 2):
     window_matches = matcher._match_fingerprints(window_fps)
     if window_matches:
         top = window_matches[0]
-        print(f"  [{start_min}:00-{start_min+1}:00] {len(window_fps)} fps, {unique_h} hashes -> "
-              f"{len(window_matches)} matches | best: {top.artist} - {top.title} "
-              f"(count={top.match_count}, conf={top.confidence:.2f})")
+        print(
+            f"  [{start_min}:00-{start_min+1}:00] {len(window_fps)} fps, {unique_h} hashes -> "
+            f"{len(window_matches)} matches | best: {top.artist} - {top.title} "
+            f"(count={top.match_count}, conf={top.confidence:.2f})"
+        )

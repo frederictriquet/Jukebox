@@ -155,9 +155,7 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
             if not title:
                 missing.append("title")
             error_msg = f"Cannot copy: missing {' and '.join(missing)}"
-            logging.warning(
-                "[File Manager] %s for track %s", error_msg, self.current_track_id
-            )
+            logging.warning("[File Manager] %s for track %s", error_msg, self.current_track_id)
             self.context.emit(Events.STATUS_MESSAGE, message=error_msg)
             return
 
@@ -292,9 +290,9 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
     def _sanitize_filename(self, filename: str) -> str:
         """Sanitize filename by removing invalid characters."""
         # Replace invalid characters with underscore
-        invalid_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+        invalid_chars = ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]
         for char in invalid_chars:
-            filename = filename.replace(char, '_')
+            filename = filename.replace(char, "_")
         return filename
 
     def _remove_from_library(self) -> None:
@@ -314,9 +312,7 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
 
             # Delete from database (and waveform_cache via CASCADE)
             self.context.database.tracks.delete(track_id)
-            logging.info(
-                "Removed track %s from database (file kept: %s)", track_id, old_filepath
-            )
+            logging.info("Removed track %s from database (file kept: %s)", track_id, old_filepath)
 
             # Reset current track BEFORE emitting event
             self.current_track_id = None
@@ -356,10 +352,8 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
         if mode == AppMode.CURATING.value:
             # Disable shortcuts when leaving curating mode
             self._deactivate_shortcuts()
-        elif mode == AppMode.JUKEBOX.value:
-            # Hide remove button when leaving jukebox mode
-            if self.remove_button:
-                self.remove_button.setVisible(False)
+        elif mode == AppMode.JUKEBOX.value and self.remove_button:
+            self.remove_button.setVisible(False)
         logging.debug("[File Manager] Deactivated for %s mode", mode)
 
     def shutdown(self) -> None:

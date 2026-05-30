@@ -174,12 +174,12 @@ class WaveformVisualizerPlugin(SettingsSyncMixin):
             if (
                 WaveformVisualizerPlugin._batch_processor
                 and WaveformVisualizerPlugin._batch_processor.is_running
+                and track
             ):
-                if track:
-                    item = (track_id, track["filepath"])
-                    added = WaveformVisualizerPlugin._batch_processor.add_priority_item(item)
-                    if added:
-                        logging.info("[Waveform] Track %s added to priority queue", track_id)
+                item = (track_id, track["filepath"])
+                added = WaveformVisualizerPlugin._batch_processor.add_priority_item(item)
+                if added:
+                    logging.info("[Waveform] Track %s added to priority queue", track_id)
 
     def _regenerate_waveform(self, track: dict[str, Any]) -> None:
         """Regenerate waveform for a specific track.
@@ -287,6 +287,7 @@ class WaveformVisualizerPlugin(SettingsSyncMixin):
         # Save to database (safe in main thread)
         try:
             import os
+
             from jukebox.utils.waveform_serializer import serialize_waveform
 
             # Cache waveform
@@ -366,6 +367,7 @@ class WaveformVisualizerPlugin(SettingsSyncMixin):
 
         # Attendre tous les workers orphelins avant que Qt ne détruise les QThreads
         from jukebox.core.batch_processor import BatchProcessor
+
         BatchProcessor.shutdown_all_workers(timeout_ms=WORKER_WAIT_TIMEOUT_MS)
 
     _config_attr = "waveform"
@@ -621,7 +623,9 @@ class CompleteWaveformWorker(QThread):
 
             # Pre-calculate filter coefficients
             sos_bass = signal.butter(4, FREQ_BASS_HIGH, "lp", fs=sr, output="sos")
-            sos_mid = signal.butter(4, [FREQ_BASS_HIGH, FREQ_MID_HIGH], "bandpass", fs=sr, output="sos")
+            sos_mid = signal.butter(
+                4, [FREQ_BASS_HIGH, FREQ_MID_HIGH], "bandpass", fs=sr, output="sos"
+            )
             sos_treble = signal.butter(4, FREQ_MID_HIGH, "hp", fs=sr, output="sos")
 
             # Pre-allocate arrays

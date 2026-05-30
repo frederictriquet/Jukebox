@@ -46,9 +46,7 @@ class ModeSwitcherPlugin:
         try:
             initial_mode = AppMode(initial_mode_str)
         except ValueError:
-            logging.warning(
-                "Mode inconnu '%s' dans la config, repli sur JUKEBOX", initial_mode_str
-            )
+            logging.warning("Mode inconnu '%s' dans la config, repli sur JUKEBOX", initial_mode_str)
             initial_mode = AppMode.JUKEBOX
 
         self.mode_manager = ModeManager(initial_mode)

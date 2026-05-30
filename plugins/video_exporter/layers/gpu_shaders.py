@@ -115,7 +115,8 @@ vec3 getPaletteColorCycled(float t, float timeOffset) {
 """
 
 # Plasma shader with palette support
-PLASMA_SHADER = """
+PLASMA_SHADER = (
+    """
 #version 330 core
 
 in vec2 uv;
@@ -128,7 +129,9 @@ uniform float mid;
 uniform vec2 resolution;
 uniform float intensity;
 
-""" + PALETTE_FUNCTIONS + """
+"""
+    + PALETTE_FUNCTIONS
+    + """
 
 void main() {
     vec2 p = uv * 4.0 - 2.0;
@@ -149,9 +152,11 @@ void main() {
     fragColor = vec4(color, intensity);
 }
 """
+)
 
 # Fractal (Julia set) shader with palette support
-FRACTAL_SHADER = """
+FRACTAL_SHADER = (
+    """
 #version 330 core
 
 in vec2 uv;
@@ -163,7 +168,9 @@ uniform float bass;
 uniform vec2 resolution;
 uniform float intensity;
 
-""" + PALETTE_FUNCTIONS + """
+"""
+    + PALETTE_FUNCTIONS
+    + """
 
 void main() {
     vec2 c = vec2(
@@ -194,9 +201,11 @@ void main() {
     }
 }
 """
+)
 
 # Metaballs shader with palette support
-METABALLS_SHADER = """
+METABALLS_SHADER = (
+    """
 #version 330 core
 
 in vec2 uv;
@@ -208,7 +217,9 @@ uniform float bass;
 uniform vec2 resolution;
 uniform float intensity;
 
-""" + PALETTE_FUNCTIONS + """
+"""
+    + PALETTE_FUNCTIONS
+    + """
 
 void main() {
     vec2 p = uv;
@@ -246,9 +257,11 @@ void main() {
     }
 }
 """
+)
 
 # Wormhole shader with palette support
-WORMHOLE_SHADER = """
+WORMHOLE_SHADER = (
+    """
 #version 330 core
 
 in vec2 uv;
@@ -260,7 +273,9 @@ uniform float bass;
 uniform vec2 resolution;
 uniform float intensity;
 
-""" + PALETTE_FUNCTIONS + """
+"""
+    + PALETTE_FUNCTIONS
+    + """
 
 void main() {
     vec2 center = vec2(0.5);
@@ -290,9 +305,11 @@ void main() {
     fragColor = vec4(color, alpha);
 }
 """
+)
 
 # Voronoi shader with palette support
-VORONOI_SHADER = """
+VORONOI_SHADER = (
+    """
 #version 330 core
 
 in vec2 uv;
@@ -304,7 +321,9 @@ uniform float bass;
 uniform vec2 resolution;
 uniform float intensity;
 
-""" + PALETTE_FUNCTIONS + """
+"""
+    + PALETTE_FUNCTIONS
+    + """
 
 vec2 hash2(vec2 p) {
     p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
@@ -349,6 +368,7 @@ void main() {
     fragColor = vec4(color, intensity * edge);
 }
 """
+)
 
 
 # =============================================================================
@@ -410,10 +430,22 @@ class GPUShaderRenderer:
         vertices = np.array(
             [
                 # x, y, u, v
-                -1.0, -1.0, 0.0, 0.0,
-                 1.0, -1.0, 1.0, 0.0,
-                -1.0,  1.0, 0.0, 1.0,
-                 1.0,  1.0, 1.0, 1.0,
+                -1.0,
+                -1.0,
+                0.0,
+                0.0,
+                1.0,
+                -1.0,
+                1.0,
+                0.0,
+                -1.0,
+                1.0,
+                0.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0,
             ],
             dtype="f4",
         )
@@ -452,9 +484,7 @@ class GPUShaderRenderer:
                 )
                 logging.debug(f"[GPU Renderer] Compiled shader: {name}")
             except Exception as e:
-                logging.warning(
-                    f"[GPU Renderer] Failed to compile {name}: {e}", exc_info=True
-                )
+                logging.warning(f"[GPU Renderer] Failed to compile {name}: {e}", exc_info=True)
 
     @property
     def available(self) -> bool:
@@ -507,21 +537,22 @@ class GPUShaderRenderer:
         # Default neon palette if none provided
         if palette is None:
             palette = [
-                (255, 0, 128),    # Hot pink
-                (0, 255, 255),    # Cyan
-                (255, 255, 0),    # Yellow
-                (128, 0, 255),    # Purple
-                (0, 255, 128),    # Spring green
+                (255, 0, 128),  # Hot pink
+                (0, 255, 255),  # Cyan
+                (255, 255, 0),  # Yellow
+                (128, 0, 255),  # Purple
+                (0, 255, 128),  # Spring green
             ]
 
         # Normalize palette colors to 0-1 range for shader
         palette_normalized = [
-            (c[0] / 255.0, c[1] / 255.0, c[2] / 255.0)
-            for c in palette[:5]  # Take first 5 colors
+            (c[0] / 255.0, c[1] / 255.0, c[2] / 255.0) for c in palette[:5]  # Take first 5 colors
         ]
         # Pad to 5 colors if needed
         while len(palette_normalized) < 5:
-            palette_normalized.append(palette_normalized[-1] if palette_normalized else (1.0, 1.0, 1.0))
+            palette_normalized.append(
+                palette_normalized[-1] if palette_normalized else (1.0, 1.0, 1.0)
+            )
 
         # Serialize GPU access - OpenGL contexts are NOT thread-safe
         with _gpu_lock:
@@ -579,7 +610,9 @@ class GPUShaderRenderer:
             try:
                 self._texture.release()
             except Exception:
-                logging.debug("[GPU Renderer] cleanup: texture release ignoré (contexte déjà libéré)")
+                logging.debug(
+                    "[GPU Renderer] cleanup: texture release ignoré (contexte déjà libéré)"
+                )
             self._texture = None
         if self._vbo:
             try:
@@ -595,7 +628,9 @@ class GPUShaderRenderer:
             try:
                 prog.release()
             except Exception:
-                logging.debug("[GPU Renderer] cleanup: program release ignoré (contexte déjà libéré)")
+                logging.debug(
+                    "[GPU Renderer] cleanup: program release ignoré (contexte déjà libéré)"
+                )
         self._programs.clear()
         self._ctx = None
         self._initialized = False

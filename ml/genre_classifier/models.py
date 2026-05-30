@@ -136,9 +136,9 @@ class RandomForestGenreClassifier(BaseGenreClassifier):
 
     def get_feature_importance(self) -> np.ndarray:
         """Get average feature importances across all genre classifiers."""
-        importances = np.array([
-            est.feature_importances_ for est in self.model.estimators_
-        ])
+        importances = np.array(
+            [est.feature_importances_ for est in self.model.estimators_ if est is not None]
+        )
         return importances.mean(axis=0)
 
 
@@ -166,9 +166,7 @@ class XGBoostGenreClassifier(BaseGenreClassifier):
         try:
             from xgboost import XGBClassifier
         except ImportError:
-            raise ImportError(
-                "XGBoost not installed. Install with: pip install xgboost"
-            )
+            raise ImportError("XGBoost not installed. Install with: pip install xgboost") from None
 
         base_clf = XGBClassifier(
             n_estimators=n_estimators,
@@ -214,9 +212,9 @@ class XGBoostGenreClassifier(BaseGenreClassifier):
 
     def get_feature_importance(self) -> np.ndarray:
         """Get average feature importances across all genre classifiers."""
-        importances = np.array([
-            est.feature_importances_ for est in self.model.estimators_
-        ])
+        importances = np.array(
+            [est.feature_importances_ for est in self.model.estimators_ if est is not None]
+        )
         return importances.mean(axis=0)
 
 
@@ -312,11 +310,12 @@ def get_all_models(**common_kwargs) -> list[BaseGenreClassifier]:
         List of model instances
     """
     models = []
-    for name, cls in MODEL_REGISTRY.items():
+    for _, cls in MODEL_REGISTRY.items():
         try:
             # Filter kwargs to only those accepted by this model
-            model = cls(**{k: v for k, v in common_kwargs.items()
-                          if k in cls.__init__.__code__.co_varnames})
+            model = cls(
+                **{k: v for k, v in common_kwargs.items() if k in cls.__init__.__code__.co_varnames}
+            )
             models.append(model)
         except ImportError:
             # Skip models with missing dependencies (e.g., xgboost)

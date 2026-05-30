@@ -154,10 +154,7 @@ class GenreEditorPlugin(SettingsSyncMixin, ShortcutMixin):
             match = re.match(r"\*(\d)", current)
             if match:
                 current_num = int(match.group(1))
-                if current_num >= 5:
-                    new_rating = ""  # Cycle back to no rating
-                else:
-                    new_rating = f"*{current_num + 1}"
+                new_rating = "" if current_num >= 5 else f"*{current_num + 1}"
             else:
                 new_rating = "*1"
 
