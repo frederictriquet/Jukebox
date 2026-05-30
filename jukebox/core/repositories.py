@@ -193,7 +193,7 @@ class TrackRepository(BaseRepository):
         Returns:
             Track row or None
         """
-        cursor = self._conn.execute("SELECT * FROM tracks WHERE filepath = ?", (str(filepath),))
+        cursor = self._conn.execute("SELECT * FROM tracks WHERE filepath = ?", (Path(filepath).as_posix(),))
         result = cursor.fetchone()
         return result if result is not None else None
 
@@ -219,7 +219,7 @@ class TrackRepository(BaseRepository):
         Returns:
             True if deleted, False if track not found
         """
-        cursor = self._conn.execute("DELETE FROM tracks WHERE filepath = ?", (str(filepath),))
+        cursor = self._conn.execute("DELETE FROM tracks WHERE filepath = ?", (Path(filepath).as_posix(),))
         self._commit()
         return cursor.rowcount > 0
 
@@ -278,7 +278,7 @@ class TrackRepository(BaseRepository):
         Returns:
             True if updated, False if track not found
         """
-        new_filepath_str = str(new_filepath)
+        new_filepath_str = Path(new_filepath).as_posix()
         if new_filename is None:
             new_filename = Path(new_filepath).name
 
