@@ -120,9 +120,9 @@ class TextLayer(BaseVisualLayer):
 
         # Calculate text positions
         margin = 40
-        # Marge supérieure étendue à 110 px pour respecter la safe zone Instagram Reels
-        # (l'UI Instagram masque les ~100 px du haut)
-        margin_top = 110
+        # Marge supérieure dynamique : au moins 110 px ou 15 % de la hauteur,
+        # pour respecter la safe zone Instagram Reels (l'UI masque ~100 px en haut)
+        margin_top = max(110, int(self.height * 0.15))
         text_y = margin_top + y_offset
 
         # Get text bounding boxes

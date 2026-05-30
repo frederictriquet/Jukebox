@@ -34,6 +34,8 @@ class ModeSwitcherPlugin:
         self.jukebox_action: Any = None
         self.curating_action: Any = None
         self.cue_maker_action: Any = None
+        # Garde de réentrance : processEvents() peut redéclencher _on_mode_changed.
+        self._switching: bool = False
 
     def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
@@ -41,13 +43,10 @@ class ModeSwitcherPlugin:
 
         # Create mode manager and store in app context
         initial_mode_str = getattr(context.config.ui, "mode", "jukebox")
-        if initial_mode_str == "jukebox":
-            initial_mode = AppMode.JUKEBOX
-        elif initial_mode_str == "curating":
-            initial_mode = AppMode.CURATING
-        elif initial_mode_str == "cue_maker":
-            initial_mode = AppMode.CUE_MAKER
-        else:
+        try:
+            initial_mode = AppMode(initial_mode_str)
+        except ValueError:
+            logging.warning("Mode inconnu '%s' dans la config, repli sur JUKEBOX", initial_mode_str)
             initial_mode = AppMode.JUKEBOX
 
         self.mode_manager = ModeManager(initial_mode)
@@ -104,7 +103,13 @@ class ModeSwitcherPlugin:
 
     def _on_mode_changed(self, mode: AppMode) -> None:
         """Handle mode change and reload plugins."""
-        logging.info(f"Switching to {mode.value} mode...")
+        # Empêche une réentrance déclenchée par les processEvents() ci-dessous.
+        if self._switching:
+            logging.warning("Changement de mode ignoré : un switch est déjà en cours")
+            return
+        self._switching = True
+
+        logging.info("Switching to %s mode...", mode.value)
 
         # Update menu checks
         self._update_menu_checks(mode)
@@ -167,6 +172,8 @@ class ModeSwitcherPlugin:
             # Small delay then remove overlay
             QTimer.singleShot(50, overlay.deleteLater)
 
+            self._switching = False
+
     def register_shortcuts(self, shortcut_manager: ShortcutManagerProtocol) -> None:
         """Register keyboard shortcuts."""
         # Ctrl+M is already registered via menu action
@@ -183,5 +190,14 @@ class ModeSwitcherPlugin:
         pass
 
     def shutdown(self) -> None:
-        """Cleanup on application exit. No cleanup needed for this plugin."""
-        ...
+        """Cleanup on application exit.
+
+        Déconnecte mode_changed pour éviter un double déclenchement si le
+        plugin est rechargé dynamiquement.
+        """
+        if self.mode_manager is not None:
+            try:
+                self.mode_manager.mode_changed.disconnect(self._on_mode_changed)
+            except (RuntimeError, TypeError) as e:
+                # Connexion déjà rompue ou objet détruit : non bloquant.
+                logging.debug("[Mode Switcher] mode_changed déjà déconnecté : %s", e)

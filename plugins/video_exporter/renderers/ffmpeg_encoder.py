@@ -29,7 +29,7 @@ class FFmpegEncoder:
         *,
         video_codec: str = "libx264",
         preset: str = "medium",
-        crf: str = "23",
+        crf: int = 23,
         pixel_format: str = "yuv420p",
         audio_codec: str = "aac",
         audio_bitrate: str = "192k",
@@ -136,31 +136,33 @@ class FFmpegEncoder:
             cmd.extend(["-af", audio_filter])
 
         # Paramètres de sortie : constrained CRF pour garantir le débit minimum Instagram Reels
-        cmd.extend([
-            "-c:v",
-            self.video_codec,
-            "-preset",
-            self.preset,
-            "-crf",
-            self.crf,
-            # Constrained CRF : impose un débit plancher sans abandonner le CRF
-            "-b:v",
-            self.min_video_bitrate,
-            "-maxrate",
-            self.max_video_bitrate,
-            "-bufsize",
-            self.bufsize,
-            "-pix_fmt",
-            self.pixel_format,
-            "-c:a",
-            self.audio_codec,
-            "-b:a",
-            self.audio_bitrate,
-            "-shortest",  # Fin quand le flux le plus court se termine
-            "-movflags",
-            "+faststart",  # MOOV atom en tête : requis pour streaming web / Instagram boost
-            str(self.output_path),
-        ])
+        cmd.extend(
+            [
+                "-c:v",
+                self.video_codec,
+                "-preset",
+                self.preset,
+                "-crf",
+                str(self.crf),
+                # Constrained CRF : impose un débit plancher sans abandonner le CRF
+                "-b:v",
+                self.min_video_bitrate,
+                "-maxrate",
+                self.max_video_bitrate,
+                "-bufsize",
+                self.bufsize,
+                "-pix_fmt",
+                self.pixel_format,
+                "-c:a",
+                self.audio_codec,
+                "-b:a",
+                self.audio_bitrate,
+                "-shortest",  # Fin quand le flux le plus court se termine
+                "-movflags",
+                "+faststart",  # MOOV atom en tête : requis pour streaming web / Instagram boost
+                str(self.output_path),
+            ]
+        )
 
         logging.info(f"[FFmpeg] Starting encoder: {' '.join(cmd)}")
 
@@ -232,9 +234,7 @@ class FFmpegEncoder:
             stderr = self.process.stderr.read() if self.process.stderr else b""
             error_msg = stderr.decode() if stderr else "No error output"
             if poll_result != 0:
-                raise RuntimeError(
-                    f"FFmpeg terminated early (code {poll_result}): {error_msg}"
-                )
+                raise RuntimeError(f"FFmpeg terminated early (code {poll_result}): {error_msg}")
             logging.info(
                 f"[FFmpeg] Encoding complete: {self._frame_count} frames -> {self.output_path}"
             )
@@ -263,9 +263,7 @@ class FFmpegEncoder:
 
         if self.process.returncode != 0:
             error_msg = stderr.decode() if stderr else "No error output"
-            raise RuntimeError(
-                f"FFmpeg failed (code {self.process.returncode}): {error_msg}"
-            )
+            raise RuntimeError(f"FFmpeg failed (code {self.process.returncode}): {error_msg}")
 
         logging.info(
             f"[FFmpeg] Encoding complete: {self._frame_count} frames -> {self.output_path}"
@@ -276,6 +274,14 @@ class FFmpegEncoder:
     def cancel(self) -> None:
         """Cancel encoding and terminate FFmpeg process."""
         if self.process:
+            # Fermer stdin avant terminate() : un FFmpeg bloqué en lecture sur stdin
+            # ne réagit pas toujours à SIGTERM sur certains OS tant que le pipe est ouvert.
+            if self.process.stdin:
+                try:
+                    self.process.stdin.close()
+                except Exception as e:
+                    logging.debug("[FFmpeg] cancel: stdin close ignoré (pipe fermé) : %s", e)
+                self.process.stdin = None
             self.process.terminate()
             self.process.wait()
             logging.info("[FFmpeg] Encoding cancelled")

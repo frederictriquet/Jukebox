@@ -1,5 +1,7 @@
 """Quick diagnostic: test if identify_track works on a known DB track."""
+
 import sys
+
 sys.path.insert(0, "/Users/fred/Code/Jukebox")
 
 from shazamix.database import FingerprintDB
@@ -17,8 +19,11 @@ matcher = Matcher(db, fp)
 
 # 1. Check how many fingerprints this track has in DB
 import sqlite3
+
 conn = sqlite3.connect(DB_PATH)
-db_fp_count = conn.execute("SELECT COUNT(*) FROM fingerprints WHERE track_id = ?", (TRACK_ID,)).fetchone()[0]
+db_fp_count = conn.execute(
+    "SELECT COUNT(*) FROM fingerprints WHERE track_id = ?", (TRACK_ID,)
+).fetchone()[0]
 print(f"Track {TRACK_ID} has {db_fp_count} fingerprints in DB")
 
 # 2. Extract fingerprints from the track file
@@ -29,7 +34,8 @@ print(f"Extracted {len(query_fps)} fingerprints from file")
 # 3. Check hash overlap
 query_hashes = set(h.hash for h in query_fps)
 db_hashes_for_track = set(
-    row[0] for row in conn.execute(
+    row[0]
+    for row in conn.execute(
         "SELECT hash FROM fingerprints WHERE track_id = ?", (TRACK_ID,)
     ).fetchall()
 )
@@ -43,7 +49,9 @@ print("\nRunning identify_track...")
 matches = matcher.identify_track(TRACK_PATH)
 print(f"Matches found: {len(matches)}")
 for m in matches[:5]:
-    print(f"  track_id={m.track_id} artist={m.artist} title={m.title} "
-          f"confidence={m.confidence:.2f} count={m.match_count}")
+    print(
+        f"  track_id={m.track_id} artist={m.artist} title={m.title} "
+        f"confidence={m.confidence:.2f} count={m.match_count}"
+    )
 
 conn.close()

@@ -106,6 +106,16 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "jukebox/ui/components/track_list.py" = ["N802"]
 "plugins/cue_maker/table_model.py" = ["N802"]
+"plugins/metadata_editor.py" = ["N802"]
+"plugins/video_exporter/export_dialog.py" = ["N802"]
+"tests/**/*.py" = ["S101"]  # assert est idiomatique dans pytest
+"ml/**/*.py" = ["N803", "N806"]  # X, C sont des conventions sklearn/ML
+"plugins/video_exporter/layers/vjing_layer.py" = ["N806"]  # N,X,Y,Z,W,P : conventions math
+"shazamix/fingerprint.py" = ["N806"]  # C, C_db : convention DSP (CQT)
+"rpi/**/*.py" = ["E402"]  # imports conditionnels après sys.path
+"vj/**/*.py" = ["E402"]  # imports conditionnels après availability checks
+"scripts/**/*.py" = ["E402", "T201"]  # imports conditionnels et print() OK dans scripts
+"test_*.py" = ["E402"]  # scripts de test standalone avec sys.path manipulation
 
 [tool.mypy]
 python_version = "3.11"

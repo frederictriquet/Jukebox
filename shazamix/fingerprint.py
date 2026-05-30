@@ -8,9 +8,10 @@ This implementation uses:
 
 from __future__ import annotations
 
-import numpy as np
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Iterator
+
+import numpy as np
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +26,7 @@ class Fingerprint:
         time_offset_ms: Time offset from start of audio (in milliseconds)
         freq_bin: Anchor frequency bin (for debugging/verification)
     """
+
     hash: int
     time_offset_ms: int
     freq_bin: int
@@ -33,6 +35,7 @@ class Fingerprint:
 @dataclass(frozen=True, slots=True)
 class Peak:
     """A spectral peak in the CQT spectrogram."""
+
     time_frame: int
     freq_bin: int
     magnitude: float
@@ -58,7 +61,10 @@ class Fingerprinter:
         hop_length: int = 512,
         n_bins: int = 84,  # 7 octaves
         bins_per_octave: int = 12,
-        peak_neighborhood: tuple[int, int] = (5, 5),  # (time, freq) neighborhood - larger = fewer peaks
+        peak_neighborhood: tuple[int, int] = (
+            5,
+            5,
+        ),  # (time, freq) neighborhood - larger = fewer peaks
         target_zone: tuple[int, int, int, int] = (2, 30, -8, 8),  # (t_min, t_max, f_min, f_max)
         fan_out: int = 3,  # Max targets per anchor - reduced for more selective fingerprints
     ):
@@ -117,13 +123,15 @@ class Fingerprinter:
 
         # Compute Constant-Q Transform
         # CQT gives log-frequency representation which is more robust to pitch shifts
-        C = np.abs(librosa.cqt(
-            y,
-            sr=self.sample_rate,
-            hop_length=self.hop_length,
-            n_bins=self.n_bins,
-            bins_per_octave=self.bins_per_octave,
-        ))
+        C = np.abs(
+            librosa.cqt(
+                y,
+                sr=self.sample_rate,
+                hop_length=self.hop_length,
+                n_bins=self.n_bins,
+                bins_per_octave=self.bins_per_octave,
+            )
+        )
 
         # Convert to dB scale
         C_db = librosa.amplitude_to_db(C, ref=np.max)
@@ -145,7 +153,7 @@ class Fingerprinter:
         Returns:
             List of Peak objects sorted by time
         """
-        from scipy.ndimage import maximum_filter, minimum_filter
+        from scipy.ndimage import maximum_filter
 
         n_freq, n_time = spectrogram.shape
         freq_hood, time_hood = self.peak_neighborhood
@@ -155,11 +163,11 @@ class Fingerprinter:
 
         # Find local maxima
         local_max = maximum_filter(spectrogram, size=neighborhood_size)
-        is_peak = (spectrogram == local_max)
+        is_peak = spectrogram == local_max
 
         # Threshold: only keep peaks well above median (more selective)
         threshold = np.median(spectrogram) + 20  # dB above median
-        is_peak &= (spectrogram > threshold)
+        is_peak &= spectrogram > threshold
 
         # Also filter by percentile - keep only top peaks
         if np.any(is_peak):
@@ -167,18 +175,14 @@ class Fingerprinter:
             if len(peak_values) > 1000:
                 # Keep only top 1000 peaks per spectrogram
                 top_threshold = np.percentile(peak_values, 100 * (1 - 1000 / len(peak_values)))
-                is_peak &= (spectrogram >= top_threshold)
+                is_peak &= spectrogram >= top_threshold
 
         # Extract peak coordinates
         freq_bins, time_frames = np.where(is_peak)
 
         peaks = [
-            Peak(
-                time_frame=int(t),
-                freq_bin=int(f),
-                magnitude=float(spectrogram[f, t])
-            )
-            for f, t in zip(freq_bins, time_frames)
+            Peak(time_frame=int(t), freq_bin=int(f), magnitude=float(spectrogram[f, t]))
+            for f, t in zip(freq_bins, time_frames, strict=False)
         ]
 
         # Sort by time
@@ -270,7 +274,7 @@ class Fingerprinter:
         target_freq = target.freq_bin & 0x7F
 
         # Frequency difference with offset (6 bits = 64 values, range -32 to +31)
-        freq_diff = ((df + 32) & 0x3F)
+        freq_diff = (df + 32) & 0x3F
 
         # Time difference (6 bits = 64 values, range 0-63 frames)
         time_diff = min(dt, 63) & 0x3F
@@ -283,11 +287,11 @@ class Fingerprinter:
 
         # Combine into 32-bit hash (7+7+6+6+6 = 32 bits)
         fp_hash = (
-            (anchor_freq << 25) |      # bits 31-25
-            (target_freq << 18) |       # bits 24-18
-            (freq_diff << 12) |         # bits 17-12
-            (time_diff << 6) |          # bits 11-6
-            mag_quantized               # bits 5-0
+            (anchor_freq << 25)  # bits 31-25
+            | (target_freq << 18)  # bits 24-18
+            | (freq_diff << 12)  # bits 17-12
+            | (time_diff << 6)  # bits 11-6
+            | mag_quantized  # bits 5-0
         )
 
         return fp_hash & 0xFFFFFFFF

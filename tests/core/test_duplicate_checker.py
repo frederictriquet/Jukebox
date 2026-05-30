@@ -146,7 +146,10 @@ class TestMakeDisplay:
         assert result == "fallback.mp3\n/music/fallback.mp3"
 
     def test_no_filepath(self) -> None:
-        assert DuplicateChecker._make_display("Daft Punk", "Get Lucky", "x.mp3") == "Daft Punk - Get Lucky"
+        assert (
+            DuplicateChecker._make_display("Daft Punk", "Get Lucky", "x.mp3")
+            == "Daft Punk - Get Lucky"
+        )
 
 
 class TestTokenize:

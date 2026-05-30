@@ -3,16 +3,20 @@
 import atexit
 import logging
 from pathlib import Path
-from typing import Any
+from threading import Lock
+from typing import TYPE_CHECKING, Any, cast
 
 from PySide6.QtCore import (
     QAbstractTableModel,
+    QMetaObject,
     QModelIndex,
     QPersistentModelIndex,
     QSortFilterProxyModel,
     Qt,
     QThread,
+    QTimer,
     Signal,
+    Slot,
 )
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QPalette
 from PySide6.QtWidgets import (
@@ -33,9 +37,21 @@ from jukebox.core.event_bus import Events
 from jukebox.core.mode_manager import AppMode
 from jukebox.ui.components.track_cell_renderer import CellRenderer
 
+if TYPE_CHECKING:
+    from jukebox.ui.main_window import MainWindow
+
 # Column configuration per mode
 COLUMNS_JUKEBOX = ["waveform", "artist", "title", "genre", "rating", "duration", "stats"]
-COLUMNS_CURATING = ["waveform", "filename", "genre", "rating", "duration", "stats", "duplicate", "path"]
+COLUMNS_CURATING = [
+    "waveform",
+    "filename",
+    "genre",
+    "rating",
+    "duration",
+    "stats",
+    "duplicate",
+    "path",
+]
 COLUMNS = COLUMNS_CURATING  # default (overridden by mode)
 
 # Column widths (in pixels)
@@ -148,6 +164,14 @@ class TrackListModel(QAbstractTableModel):
         self.filepath_to_row: dict[Path, int] = {}  # Cache for fast lookup
         self._mode = mode
 
+        # Files d'événements remplies depuis n'importe quel thread (EventBus),
+        # drainées sur le thread Qt principal via QMetaObject.invokeMethod.
+        # Protégées par un lock car push (thread background) et pop (thread UI) concurrents.
+        self._event_lock = Lock()
+        self._pending_metadata: list[Path] = []
+        self._pending_waveform: list[int] = []
+        self._pending_stats: list[int] = []
+
         # Build genre names mapping from config
         genre_names = {}
         if config and hasattr(config, "genre_editor"):
@@ -181,16 +205,36 @@ class TrackListModel(QAbstractTableModel):
             event_bus.subscribe(Events.TRACK_DELETED, self._on_track_deleted)
 
     def _on_track_metadata_updated(self, filepath: Path) -> None:
-        """Handle track metadata update event.
+        """Réceptionne l'événement EventBus (potentiellement depuis un thread background).
 
-        Args:
-            filepath: Path of the track that was updated
+        Bufferise l'argument puis reporte le traitement sur le thread Qt propriétaire :
+        émettre dataChanged hors du thread principal est un comportement indéfini.
         """
-        # Find the row — normalize to Path for consistent lookup
         if not isinstance(filepath, Path):
             filepath = Path(filepath)
+        with self._event_lock:
+            self._pending_metadata.append(filepath)
+        # PySide6 6.10 : la forme `bytes` lève une ValueError au runtime ; seule la
+        # forme `str` fonctionne, mais les stubs exigent `bytes` d'où le type: ignore.
+        QMetaObject.invokeMethod(
+            self,
+            "_process_metadata_updates",  # type: ignore[call-overload]
+            Qt.ConnectionType.QueuedConnection,
+        )
+
+    @Slot()
+    def _process_metadata_updates(self) -> None:
+        """Draine la file des mises à jour de métadonnées sur le thread Qt principal."""
+        with self._event_lock:
+            pending = self._pending_metadata
+            self._pending_metadata = []
+        for filepath in pending:
+            self._apply_metadata_update(filepath)
+
+    def _apply_metadata_update(self, filepath: Path) -> None:
+        """Applique une mise à jour de métadonnées pour un fichier (thread Qt principal)."""
         row = self.find_row_by_filepath(filepath)
-        if row < 0 or not self.database:
+        if row < 0 or not self.database or self.database.conn is None:
             return
 
         # Refresh track data from database
@@ -220,12 +264,26 @@ class TrackListModel(QAbstractTableModel):
             )
 
     def _on_waveform_complete(self, track_id: int) -> None:
-        """Handle waveform completion event.
+        """Réceptionne l'événement EventBus (potentiellement depuis un thread background).
 
-        Args:
-            track_id: Database ID of the track with new waveform
+        Bufferise l'argument puis reporte le traitement sur le thread Qt propriétaire.
         """
-        if not self.database:
+        with self._event_lock:
+            self._pending_waveform.append(track_id)
+        QTimer.singleShot(0, self._process_waveform_updates)
+
+    @Slot()
+    def _process_waveform_updates(self) -> None:
+        """Draine la file des waveforms terminées sur le thread Qt principal."""
+        with self._event_lock:
+            pending = self._pending_waveform
+            self._pending_waveform = []
+        for track_id in pending:
+            self._apply_waveform_update(track_id)
+
+    def _apply_waveform_update(self, track_id: int) -> None:
+        """Applique une waveform terminée pour un track_id (thread Qt principal)."""
+        if not self.database or self.database.conn is None:
             return
 
         # Get filepath from track_id
@@ -255,11 +313,10 @@ class TrackListModel(QAbstractTableModel):
                 # Update track data
                 self.tracks[row]["waveform_data"] = waveform
 
-                # Clear cache for this track so it re-renders
+                # Invalide le cache pour ce fichier afin de forcer un re-rendu
                 from jukebox.ui.components.track_cell_renderer import WaveformStyler
 
-                cache_key = hash(str(filepath))
-                WaveformStyler._cache.pop(cache_key, None)
+                WaveformStyler.invalidate(filepath)
 
                 # Emit dataChanged to refresh the waveform column only
                 waveform_index = self.index(row, 0)  # Waveform is column 0
@@ -274,12 +331,31 @@ class TrackListModel(QAbstractTableModel):
                 )
 
     def _on_stats_complete(self, track_id: int) -> None:
-        """Handle full audio analysis completion event.
+        """Réceptionne l'événement EventBus (potentiellement depuis un thread background).
 
-        Args:
-            track_id: Database ID of the track with new stats
+        Bufferise l'argument puis reporte le traitement sur le thread Qt propriétaire.
         """
-        if not self.database:
+        with self._event_lock:
+            self._pending_stats.append(track_id)
+        # PySide6 6.10 : voir note ci-dessus dans _on_metadata_updated.
+        QMetaObject.invokeMethod(
+            self,
+            "_process_stats_updates",  # type: ignore[call-overload]
+            Qt.ConnectionType.QueuedConnection,
+        )
+
+    @Slot()
+    def _process_stats_updates(self) -> None:
+        """Draine la file des analyses audio terminées sur le thread Qt principal."""
+        with self._event_lock:
+            pending = self._pending_stats
+            self._pending_stats = []
+        for track_id in pending:
+            self._apply_stats_update(track_id)
+
+    def _apply_stats_update(self, track_id: int) -> None:
+        """Applique une analyse audio terminée pour un track_id (thread Qt principal)."""
+        if not self.database or self.database.conn is None:
             return
 
         # Get filepath from track_id
@@ -410,10 +486,14 @@ class TrackListModel(QAbstractTableModel):
             "genre": lambda t: (t.get("genre") or "").lower(),
             "duration": lambda t: t.get("duration_seconds") or 0.0,
             "rating": lambda t: next(
-                (int(p[1:]) for p in (t.get("genre") or "").split("-") if p.startswith("*") and p[1:].isdigit()),
+                (
+                    int(p[1:])
+                    for p in (t.get("genre") or "").split("-")
+                    if p.startswith("*") and p[1:].isdigit()
+                ),
                 0,
             ),
-            "path": lambda t: str(t.get("filepath", "").parent).lower(),
+            "path": lambda t: str(Path(t.get("filepath") or "").parent).lower(),
         }
 
         if column == -1 or column >= len(columns) or columns[column] not in sort_key_map:
@@ -445,7 +525,7 @@ class TrackListModel(QAbstractTableModel):
         # Load waveform and stats info from cache if available
         waveform = None
         has_stats = False
-        if self.database:
+        if self.database and self.database.conn is not None:
             # Get track_id from filepath
             track_db = self.database.conn.execute(
                 "SELECT id FROM tracks WHERE filepath = ?", (str(filepath),)
@@ -555,8 +635,6 @@ class TrackListModel(QAbstractTableModel):
         """
         if not self._bg_check_pending:
             self._bg_check_pending = True
-            from PySide6.QtCore import QTimer
-
             QTimer.singleShot(0, self._run_background_checks)
 
     def _run_background_checks(self) -> None:
@@ -581,11 +659,17 @@ class TrackListModel(QAbstractTableModel):
         if not self._duplicate_checker or self._mode != AppMode.CURATING.value:
             return
 
-        # Stop previous worker if still running
+        # Stop previous worker if still running, sans bloquer le thread Qt.
+        # On demande l'interruption et on déconnecte son signal pour ignorer
+        # d'éventuels résultats périmés ; le worker s'auto-retire de
+        # _live_workers à la fin de run() (et atexit le draine au pire).
         if self._bg_worker is not None and self._bg_worker.isRunning():
             self._bg_worker.requestInterruption()
-            self._bg_worker.quit()
-            self._bg_worker.wait(5000)
+            try:
+                self._bg_worker.results.disconnect(self._on_duplicate_check_results)
+            except (RuntimeError, TypeError) as e:
+                # Signal déjà déconnecté ou worker détruit : sans conséquence.
+                logging.debug(f"[TrackListModel] Déconnexion worker précédent ignorée: {e}")
         self._bg_worker = None
 
         # Deep-copy track data for thread-safe duplicate check
@@ -643,11 +727,9 @@ class ColorPreservingDelegate(QStyledItemDelegate):
         # Get the ForegroundRole color from the model
         color = index.data(Qt.ItemDataRole.ForegroundRole)
         if color:
-            # Preserve the color even when item is selected/highlighted
-            # Note: palette is available at runtime but not in stubs
-            option.palette.setColor(  # type: ignore[attr-defined]
-                QPalette.ColorRole.HighlightedText, color
-            )
+            # Préserve la couleur même quand l'item est sélectionné/surligné.
+            # `palette` existe au runtime mais pas dans les stubs : cast vers Any.
+            cast(Any, option).palette.setColor(QPalette.ColorRole.HighlightedText, color)
 
 
 class TrackList(QTableView):
@@ -930,7 +1012,9 @@ class TrackList(QTableView):
             # Add plugin context menu actions
             main_window = self.window()
             if hasattr(main_window, "ui_builder"):
-                plugin_actions = main_window.ui_builder.get_track_context_actions()  # type: ignore[attr-defined]
+                plugin_actions = cast(
+                    "MainWindow", main_window
+                ).ui_builder.get_track_context_actions()
                 if plugin_actions:
                     menu.addSeparator()
                     # Get track info from database for plugin callbacks
@@ -991,7 +1075,7 @@ class TrackList(QTableView):
         """
         main_window = self.window()
         if hasattr(main_window, "database"):
-            track = main_window.database.get_track_by_filepath(str(filepath))  # type: ignore[attr-defined]
+            track = cast("MainWindow", main_window).database.get_track_by_filepath(str(filepath))
             if track:
                 return dict(track)
 
@@ -1006,7 +1090,7 @@ class TrackList(QTableView):
         # Delete from database if present
         main_window = self.window()
         if hasattr(main_window, "database"):
-            main_window.database.tracks.delete_by_filepath(str(filepath))  # type: ignore[attr-defined]
+            cast("MainWindow", main_window).database.tracks.delete_by_filepath(str(filepath))
 
         # Emit TRACK_DELETED so the model removes the row
         event_bus = self._track_model.event_bus
@@ -1036,7 +1120,7 @@ class TrackList(QTableView):
         stem = filepath.stem if isinstance(filepath, Path) else Path(filepath).stem
         if " - " in stem:
             split_btn = QPushButton("Name \u2192 Artist / Title")
-            split_btn.setToolTip(f"Split \"{stem}\"")
+            split_btn.setToolTip(f'Split "{stem}"')
 
             def _split() -> None:
                 parts = stem.split(" - ", 1)
@@ -1081,7 +1165,7 @@ class TrackList(QTableView):
         if new_title != (track_dict.get("title") or ""):
             updates["title"] = new_title
 
-        main_window.database.tracks.update_metadata(track_dict["id"], updates)  # type: ignore[attr-defined]
+        cast("MainWindow", main_window).database.tracks.update_metadata(track_dict["id"], updates)
 
         # Update file tags
         from jukebox.utils.tag_writer import save_audio_tags

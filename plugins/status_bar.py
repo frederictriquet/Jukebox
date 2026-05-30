@@ -20,13 +20,12 @@ class StatusBarPlugin:
     description = "Status bar for system messages"
     modes = ["jukebox", "curating", "cue_maker"]  # Active in all modes
 
-    # Class variable to share status bar across plugins
-    _status_bar: QStatusBar | None = None
-    _status_label: QLabel | None = None
-
     def __init__(self) -> None:
         """Initialize plugin."""
         self.context: PluginContextProtocol = None  # type: ignore[assignment]
+        # Variables d'instance : pas de partage d'état entre instances de plugin
+        self._status_bar: QStatusBar | None = None
+        self._status_label: QLabel | None = None
 
     def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
@@ -37,33 +36,50 @@ class StatusBarPlugin:
 
     def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register status bar."""
+        # Idempotent : ne pas recréer un QStatusBar si déjà enregistré
+        if self._status_bar is not None:
+            return
+
         # Use Qt's built-in status bar (always at bottom, visible in all modes)
-        StatusBarPlugin._status_bar = QStatusBar()
-        StatusBarPlugin._status_label = QLabel("")
+        self._status_bar = QStatusBar()
+        self._status_label = QLabel("")
         # No fixed color - use theme's default text color
 
-        StatusBarPlugin._status_bar.addPermanentWidget(StatusBarPlugin._status_label)
-        ui_builder.main_window.setStatusBar(StatusBarPlugin._status_bar)
+        self._status_bar.addPermanentWidget(self._status_label)
+        ui_builder.main_window.setStatusBar(self._status_bar)
 
     def _on_status_message(self, message: str, color: str | None = None) -> None:
         """Handle status message event.
 
-        Note: color parameter is ignored - always uses theme default color.
+        Args:
+            message: Texte à afficher.
+            color: Couleur CSS optionnelle du texte. Si None, on rétablit la
+                couleur par défaut du thème.
         """
-        if StatusBarPlugin._status_label:
-            StatusBarPlugin._status_label.setText(message)
+        if self._status_label:
+            self._status_label.setText(message)
+            # On honore la couleur fournie par l'émetteur (ex. batch_helper),
+            # au lieu de l'ignorer silencieusement.
+            if color:
+                self._status_label.setStyleSheet(f"color: {color};")
+            else:
+                self._status_label.setStyleSheet("")
 
     def activate(self, mode: str) -> None:
-        """Activate plugin for this mode."""
-        # Status bar always visible
-        pass
+        """Activate plugin for this mode.
+
+        No-op intentionnel : la barre de statut reste visible dans tous les
+        modes, il n'y a donc rien à (ré)activer lors d'un changement de mode.
+        """
 
     def deactivate(self, mode: str) -> None:
-        """Deactivate plugin for this mode."""
-        # Status bar always visible
-        pass
+        """Deactivate plugin for this mode.
+
+        No-op intentionnel : la barre de statut reste visible dans tous les
+        modes, on ne la masque jamais lors d'un changement de mode.
+        """
 
     def shutdown(self) -> None:
         """Cleanup on application exit."""
-        StatusBarPlugin._status_bar = None
-        StatusBarPlugin._status_label = None
+        self._status_bar = None
+        self._status_label = None

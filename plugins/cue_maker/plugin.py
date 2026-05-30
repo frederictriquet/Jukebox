@@ -9,6 +9,7 @@ from PySide6.QtCore import QSortFilterProxyModel, Qt  # type: ignore[import-unty
 from PySide6.QtWidgets import QSplitter, QVBoxLayout, QWidget  # type: ignore[import-untyped]
 
 from jukebox.core.constants import WORKER_WAIT_TIMEOUT_MS
+from jukebox.core.event_bus import Events
 from plugins.cue_maker.widgets.bottom_drawer import BottomDrawer
 
 if TYPE_CHECKING:
@@ -63,8 +64,6 @@ class CueMakerPlugin:
         self._active = False
 
         # Listen for explicit "add track to cue" requests (e.g. from directory navigator)
-        from jukebox.core.event_bus import Events
-
         context.subscribe(Events.CUE_ADD_TRACK, self._on_cue_add_track)
         logger.info("[Cue Maker] Plugin initialized")
 
@@ -377,8 +376,6 @@ class CueMakerPlugin:
         self.main_widget = None
         # Unsubscribe from event bus
         if self.context and self.context.event_bus:
-            from jukebox.core.event_bus import Events
-
             self.context.event_bus.unsubscribe(Events.CUE_ADD_TRACK, self._on_cue_add_track)
         self.context = None  # type: ignore[assignment]
         logger.info("[Cue Maker] Plugin shut down")
@@ -431,8 +428,6 @@ class CueMakerPlugin:
         self._analyzer.start()
         logger.info("[Cue Maker] Analysis started for %s", mix_path)
 
-        from jukebox.core.event_bus import Events
-
         self.context.emit(Events.STATUS_MESSAGE, message="Cue Maker: Analyzing mix...")
 
     def _on_analysis_done(self, entries: list) -> None:
@@ -446,8 +441,6 @@ class CueMakerPlugin:
 
                 save_entries_cache(mix_path, entries)
         if self.context:
-            from jukebox.core.event_bus import Events
-
             n = len(entries)
             msg = f"Cue Maker: Found {n} track{'s' if n != 1 else ''} in mix"
             self.context.emit(Events.STATUS_MESSAGE, message=msg)
@@ -497,8 +490,6 @@ class CueMakerPlugin:
         self.main_widget.targeted_match_btn.setEnabled(False)
         self.main_widget.set_analysis_progress(-1, 0, "Targeted match in progress…")
         self._targeted_worker.start()
-
-        from jukebox.core.event_bus import Events
 
         self.context.emit(
             Events.STATUS_MESSAGE,
@@ -559,8 +550,6 @@ class CueMakerPlugin:
         self.main_widget.on_targeted_match_complete(match)
 
         if self.context:
-            from jukebox.core.event_bus import Events
-
             if match:
                 artist = getattr(match, "artist", "?")
                 title = getattr(match, "title", "?")
@@ -617,17 +606,16 @@ class CueMakerPlugin:
             return
 
         db = self.context.database
-        if not db.conn:  # type: ignore[attr-defined]
+        if not db or not hasattr(db, "tracks"):
             return
 
-        row = db.conn.execute(  # type: ignore[attr-defined]
-            "SELECT id, artist, title, filepath FROM tracks WHERE id = ?",
-            (track_id,),
-        ).fetchone()
-        if not row:
+        # Passe par le repository plutôt que d'accéder à db.conn directement :
+        # respecte l'encapsulation et reste robuste au mode de connexion.
+        track = db.tracks.get_by_id(track_id)
+        if not track:
             return
 
-        self._add_track_to_cue(dict(row))
+        self._add_track_to_cue(track)
 
     def _on_import_from_library(self, row: int) -> None:
         """Import artist/title/duration from the selected library track into a cue entry."""

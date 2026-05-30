@@ -214,13 +214,30 @@ class PluginManager:
 
         return plugins
 
+    @staticmethod
+    def _is_plugin_class(obj: type) -> bool:
+        """Vérifie qu'une classe respecte le protocole plugin.
+
+        Heuristique stricte : on exige les trois méthodes de cycle de vie
+        (initialize, register_ui, shutdown) ET un attribut de classe `name`
+        non vide de type str. Cela évite d'instancier des classes utilitaires
+        qui possèderaient par hasard une méthode `initialize` et un `name`.
+        """
+        if not all(
+            callable(getattr(obj, method, None))
+            for method in ("initialize", "register_ui", "shutdown")
+        ):
+            return False
+        name = getattr(obj, "name", None)
+        return isinstance(name, str) and bool(name.strip())
+
     def load_plugin(self, plugin_name: str) -> bool:
         """Load a plugin."""
         try:
             module = importlib.import_module(f"plugins.{plugin_name}")
 
             for _name, obj in inspect.getmembers(module, inspect.isclass):
-                if hasattr(obj, "initialize") and hasattr(obj, "name"):
+                if self._is_plugin_class(obj):
                     instance = obj()
                     instance.initialize(self.context)
                     self.plugins[instance.name] = instance
@@ -228,8 +245,8 @@ class PluginManager:
                     return True
 
             return False
-        except Exception as e:
-            logging.error(f"Failed to load plugin {plugin_name}: {e}")
+        except Exception:
+            logging.error(f"Failed to load plugin {plugin_name}", exc_info=True)
             return False
 
     def load_all_plugins(self, mode: str | None = None) -> int:

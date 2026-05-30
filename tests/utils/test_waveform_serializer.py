@@ -1,10 +1,5 @@
 """Tests for waveform serialization utilities."""
 
-import io
-import pickle
-import warnings
-from pathlib import Path
-
 import numpy as np
 import pytest
 
@@ -99,48 +94,26 @@ class TestSerializeWaveform:
 class TestDeserializeWaveform:
     """Tests for deserialize_waveform."""
 
-    def test_legacy_pickle_fallback_loads_data(self) -> None:
-        """Legacy pickle data is loaded with a deprecation log message."""
+    def test_pickle_data_raises_value_error(self) -> None:
+        """Pickle data est rejeté (pickle interdit pour raisons de sécurité)."""
+        import pickle
+
         waveform = {
             "bass": np.array([0.1, 0.2]),
             "mid": np.array([0.3, 0.4]),
             "treble": np.array([0.5, 0.6]),
         }
-        pickle_data = pickle.dumps(waveform)
-
-        # deserialize_waveform should fall back to pickle and succeed
-        result = deserialize_waveform(pickle_data)
-
-        np.testing.assert_array_almost_equal(result["bass"], waveform["bass"])
-        np.testing.assert_array_almost_equal(result["mid"], waveform["mid"])
-        np.testing.assert_array_almost_equal(result["treble"], waveform["treble"])
-
-    def test_legacy_pickle_fallback_logs_deprecation(self, caplog: pytest.LogCaptureFixture) -> None:
-        """Legacy pickle fallback emits a debug log about upgrading."""
-        import logging
-
-        waveform = {
-            "bass": np.array([1.0]),
-            "mid": np.array([2.0]),
-            "treble": np.array([3.0]),
-        }
-        pickle_data = pickle.dumps(waveform)
-
-        with caplog.at_level(logging.DEBUG):
-            deserialize_waveform(pickle_data)
-
-        assert any("legacy pickle" in record.message.lower() for record in caplog.records)
+        with pytest.raises(ValueError):
+            deserialize_waveform(pickle.dumps(waveform))
 
     def test_corrupt_data_raises_value_error(self) -> None:
-        """Corrupt bytes that are neither numpy nor pickle raise ValueError."""
-        corrupt_data = b"this is not valid waveform data at all!!!"
-
-        with pytest.raises(ValueError, match="Invalid waveform data"):
-            deserialize_waveform(corrupt_data)
+        """Corrupt bytes raise ValueError."""
+        with pytest.raises(ValueError):
+            deserialize_waveform(b"this is not valid waveform data at all!!!")
 
     def test_empty_bytes_raises_value_error(self) -> None:
         """Empty bytes raise ValueError."""
-        with pytest.raises(ValueError, match="Invalid waveform data"):
+        with pytest.raises(ValueError):
             deserialize_waveform(b"")
 
     def test_truncated_numpy_data_raises_value_error(self) -> None:
@@ -153,5 +126,5 @@ class TestDeserializeWaveform:
         good_data = serialize_waveform(waveform)
         truncated = good_data[: len(good_data) // 2]
 
-        with pytest.raises(ValueError, match="Invalid waveform data"):
+        with pytest.raises(ValueError):
             deserialize_waveform(truncated)

@@ -1,6 +1,7 @@
 """Data loader for extracting training data from Jukebox database."""
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pandas as pd
@@ -159,10 +160,6 @@ def load_training_data(
     if not db_path.exists():
         raise FileNotFoundError(f"Database not found: {db_path}")
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-
     # Build feature columns string
     feature_cols = ", ".join(f"a.{col}" for col in ML_FEATURE_COLUMNS)
 
@@ -178,8 +175,11 @@ def load_training_data(
         WHERE t.genre IS NOT NULL AND t.genre != ''
     """
 
-    df = pd.read_sql_query(query, conn)
-    conn.close()
+    # closing garantit la fermeture de la connexion même si read_sql_query lève.
+    with closing(sqlite3.connect(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        df = pd.read_sql_query(query, conn)
 
     if df.empty:
         raise ValueError("No tracks with both genre and audio analysis found")
@@ -250,9 +250,6 @@ def load_track_features(
     if not db_path.exists():
         raise FileNotFoundError(f"Database not found: {db_path}")
 
-    conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA foreign_keys = ON")
-
     feature_cols = ", ".join(ML_FEATURE_COLUMNS)
     query = f"""
         SELECT {feature_cols}
@@ -260,8 +257,10 @@ def load_track_features(
         WHERE track_id = ?
     """
 
-    df = pd.read_sql_query(query, conn, params=(track_id,))
-    conn.close()
+    # closing garantit la fermeture de la connexion même si read_sql_query lève.
+    with closing(sqlite3.connect(db_path)) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        df = pd.read_sql_query(query, conn, params=(track_id,))
 
     return df if not df.empty else None
 
@@ -279,36 +278,6 @@ def get_dataset_stats(db_path: Path | str = DEFAULT_DB_PATH) -> dict:
     if not db_path.exists():
         raise FileNotFoundError(f"Database not found: {db_path}")
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-
-    # Total tracks
-    total_tracks = conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
-
-    # Tracks with genre
-    tracks_with_genre = conn.execute(
-        "SELECT COUNT(*) FROM tracks WHERE genre IS NOT NULL AND genre != ''"
-    ).fetchone()[0]
-
-    # Tracks with basic analysis (any entry in audio_analysis)
-    tracks_with_analysis = conn.execute("SELECT COUNT(*) FROM audio_analysis").fetchone()[0]
-
-    # Tracks with ML features (rms_mean is not null)
-    tracks_with_ml_features = conn.execute(
-        "SELECT COUNT(*) FROM audio_analysis WHERE rms_mean IS NOT NULL"
-    ).fetchone()[0]
-
-    # Tracks with both genre and ML features (usable for training)
-    usable_tracks = conn.execute("""
-        SELECT COUNT(*)
-        FROM tracks t
-        INNER JOIN audio_analysis a ON t.id = a.track_id
-        WHERE t.genre IS NOT NULL AND t.genre != ''
-        AND a.rms_mean IS NOT NULL
-    """).fetchone()[0]
-
-    # Genre distribution (multi-label aware)
     genre_query = """
         SELECT t.genre
         FROM tracks t
@@ -317,12 +286,44 @@ def get_dataset_stats(db_path: Path | str = DEFAULT_DB_PATH) -> dict:
         AND a.rms_mean IS NOT NULL
     """
     genre_dist: dict[str, int] = {}
-    for row in conn.execute(genre_query):
-        genres = parse_genres(row["genre"])
-        for g in genres:
-            genre_dist[g] = genre_dist.get(g, 0) + 1
 
-    conn.close()
+    # closing garantit la fermeture de la connexion même si une requête lève.
+    with closing(sqlite3.connect(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+
+        # Total tracks
+        total_tracks = conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
+
+        # Tracks with genre
+        tracks_with_genre = conn.execute(
+            "SELECT COUNT(*) FROM tracks WHERE genre IS NOT NULL AND genre != ''"
+        ).fetchone()[0]
+
+        # Tracks with basic analysis (any entry in audio_analysis)
+        tracks_with_analysis = conn.execute("SELECT COUNT(*) FROM audio_analysis").fetchone()[0]
+
+        # Tracks with ML features (rms_mean is not null)
+        tracks_with_ml_features = conn.execute(
+            "SELECT COUNT(*) FROM audio_analysis WHERE rms_mean IS NOT NULL"
+        ).fetchone()[0]
+
+        # Tracks with both genre and ML features (usable for training)
+        usable_tracks = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM tracks t
+            INNER JOIN audio_analysis a ON t.id = a.track_id
+            WHERE t.genre IS NOT NULL AND t.genre != ''
+            AND a.rms_mean IS NOT NULL
+        """
+        ).fetchone()[0]
+
+        # Genre distribution (multi-label aware)
+        for row in conn.execute(genre_query):
+            genres = parse_genres(row["genre"])
+            for g in genres:
+                genre_dist[g] = genre_dist.get(g, 0) + 1
 
     return {
         "total_tracks": total_tracks,

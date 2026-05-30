@@ -17,7 +17,11 @@ except ImportError:
     moderngl = None  # type: ignore[assignment]
 
 from plugins.video_exporter.layers.base import BaseVisualLayer
-from plugins.video_exporter.layers.gpu_shaders import _gpu_lock, get_shared_gl_context
+from plugins.video_exporter.layers.gpu_shaders import (
+    _gpu_lock,
+    _is_gl_context_valid,
+    get_shared_gl_context,
+)
 
 # Chemins de recherche de la bibliothèque libprojectM (macOS et Linux)
 _LIBPROJECTM_SEARCH_PATHS = [
@@ -180,7 +184,9 @@ class MilkDropLayer(BaseVisualLayer):
             # Mélange déterministe par seed : chaque track voit un ordre différent
             rng = random.Random(self._rng_seed)  # noqa: S311
             rng.shuffle(presets)
-            logger.info("[MilkDropLayer] %d presets mélangés (seed=%d)", len(presets), self._rng_seed)
+            logger.info(
+                "[MilkDropLayer] %d presets mélangés (seed=%d)", len(presets), self._rng_seed
+            )
             return presets
 
         logger.warning(
@@ -200,7 +206,9 @@ class MilkDropLayer(BaseVisualLayer):
         hop_length = 512  # valeur par défaut de librosa.beat.beat_track
         samples_per_frame = max(1, self.sr // self.fps)
         # beat_track retourne des indices en unités de hop_length, pas en samples
-        _, beat_hop_frames = librosa.beat.beat_track(y=self.audio, sr=self.sr, hop_length=hop_length)
+        _, beat_hop_frames = librosa.beat.beat_track(
+            y=self.audio, sr=self.sr, hop_length=hop_length
+        )
         return [int((int(h) * hop_length) // samples_per_frame) for h in beat_hop_frames]
 
     def _init_gl(self) -> None:
@@ -214,7 +222,10 @@ class MilkDropLayer(BaseVisualLayer):
             self._lib.projectm_destroy(self._handle)  # type: ignore[union-attr]
             self._handle = None
         if self._fbo is not None:
-            self._fbo.release()  # type: ignore[union-attr]
+            try:
+                self._fbo.release()  # type: ignore[union-attr]
+            except Exception:
+                logger.debug("[MilkDropLayer] FBO stale (contexte déjà libéré), release ignoré")
             self._fbo = None
 
         self._presets = self._collect_presets()
@@ -229,8 +240,7 @@ class MilkDropLayer(BaseVisualLayer):
         depth_attachment = self._ctx.depth_renderbuffer((self.width, self.height))  # type: ignore[union-attr]
 
         self._fbo = self._ctx.framebuffer(  # type: ignore[union-attr]
-            color_attachments=[texture],
-            depth_attachment=depth_attachment
+            color_attachments=[texture], depth_attachment=depth_attachment
         )
         logger.debug("[MilkDropLayer] _init_gl: FBO créé")
 
@@ -302,7 +312,11 @@ class MilkDropLayer(BaseVisualLayer):
         if max_amp > 0:
             warmup_audio = np.clip(warmup_audio * (2.0 / max_amp), -1.0, 1.0)
 
-        logger.info("[MilkDropLayer] Démarrage chauffe intensive (%d frames, max_amp=%.4f)...", warmup_count, max_amp)
+        logger.info(
+            "[MilkDropLayer] Démarrage chauffe intensive (%d frames, max_amp=%.4f)...",
+            warmup_count,
+            max_amp,
+        )
 
         frames_per_preset = max(1, int(self._preset_duration * self.fps))
 
@@ -339,7 +353,7 @@ class MilkDropLayer(BaseVisualLayer):
 
         if self._ctx:
             self._ctx.finish()  # type: ignore[union-attr]
-            
+
         logger.info("[MilkDropLayer] Chauffe terminée")
 
     def warmup_gpu_frames(self) -> None:
@@ -440,13 +454,7 @@ class MilkDropLayer(BaseVisualLayer):
             # Sur macOS/CGL, le contexte créé sur le thread de warmup devient
             # InvalidObject quand ce thread se termine. On le recrée ici sur le
             # thread courant (main thread) pour garantir un rendu fonctionnel.
-            ctx_valid = self._ctx is not None
-            if ctx_valid:
-                try:
-                    _ = self._ctx.version_code  # type: ignore[union-attr]
-                except AttributeError:
-                    ctx_valid = False
-            if self._handle is None or not ctx_valid:
+            if self._handle is None or not _is_gl_context_valid(self._ctx) or self._fbo is None:
                 self._init_gl()
 
             # Rotation de preset par durée (fondu)

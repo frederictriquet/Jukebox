@@ -213,9 +213,10 @@ class MicrophoneSource:
         self._bass_history.append(bass_n)
         avg_bass = float(np.mean(self._bass_history))
         min_interval = 7  # ~4 beats/sec at 30 fps
-        is_beat = bass_n > max(0.5, avg_bass * 1.5) and (
-            frame_idx - self._last_beat_frame
-        ) >= min_interval
+        is_beat = (
+            bass_n > max(0.5, avg_bass * 1.5)
+            and (frame_idx - self._last_beat_frame) >= min_interval
+        )
         if is_beat:
             self._last_beat_frame = frame_idx
 
@@ -320,6 +321,9 @@ class VJingPlayground(QMainWindow):
 
         # MilkDrop (projectM)
         self._milkdrop_layer: Any = None
+        # _milkdrop_ready est écrit par le thread de warmup et lu par le thread UI :
+        # protégé par un lock pour éviter toute data race.
+        self._milkdrop_ready_lock = threading.Lock()
         self._milkdrop_ready = False
         self._milkdrop_warmup_thread: threading.Thread | None = None
 
@@ -551,7 +555,9 @@ class VJingPlayground(QMainWindow):
         milkdrop_row = QHBoxLayout()
         self._cb_milkdrop = QCheckBox("MilkDrop (projectM)")
         self._cb_milkdrop.setChecked(False)
-        self._cb_milkdrop.setToolTip("Superpose les effets MilkDrop sur la preview (warmup en arrière-plan)")
+        self._cb_milkdrop.setToolTip(
+            "Superpose les effets MilkDrop sur la preview (warmup en arrière-plan)"
+        )
         self._cb_milkdrop.toggled.connect(self._on_milkdrop_toggled)
         milkdrop_row.addWidget(self._cb_milkdrop)
         self._milkdrop_status_label = QLabel("")
@@ -687,20 +693,38 @@ class VJingPlayground(QMainWindow):
         self._stop_preview()
         self._current_filepath = filepath
         self.statusBar().showMessage(f"Loading: {Path(filepath).name}...")
-        QApplication.processEvents()
 
-        # Load audio with librosa for VJing analysis
-        try:
-            import librosa
+        # Le décodage audio (librosa.load) est lent : on l'exécute dans un thread de
+        # fond pour ne pas geler l'UI, puis on reprend sur le thread Qt via singleShot.
+        def _load_audio() -> None:
+            try:
+                import librosa
 
-            self._audio, self._sr = librosa.load(filepath, sr=22050, mono=True)
-            self._duration = len(self._audio) / self._sr
-        except Exception as e:
-            self.statusBar().showMessage(f"Failed to load audio: {e}")
+                audio, sr = librosa.load(filepath, sr=22050, mono=True)
+            except Exception as exc:
+                QTimer.singleShot(0, lambda err=exc: self._on_audio_load_failed(filepath, err))
+                return
+            QTimer.singleShot(0, lambda a=audio, s=sr: self._on_audio_loaded(filepath, a, float(s)))
+
+        threading.Thread(target=_load_audio, daemon=True, name="vjing-audio-load").start()
+
+    def _on_audio_loaded(self, filepath: str, audio: np.ndarray, sr: float) -> None:
+        """Reprend le pipeline sur le thread UI une fois l'audio décodé."""
+        # La piste sélectionnée a pu changer pendant le décodage : on ignore les
+        # résultats obsolètes.
+        if filepath != self._current_filepath:
             return
-
+        self._audio = audio
+        self._sr = sr
+        self._duration = len(audio) / sr
         self._build_layers()
         self._start_preview(filepath)
+
+    def _on_audio_load_failed(self, filepath: str, error: Exception) -> None:
+        """Affiche l'échec de décodage sur le thread UI."""
+        if filepath != self._current_filepath:
+            return
+        self.statusBar().showMessage(f"Failed to load audio: {error}")
 
     # ─── VJing Layer Management ────────────────────────────────────────
 
@@ -774,9 +798,7 @@ class VJingPlayground(QMainWindow):
         if self._cb_milkdrop.isChecked():
             self._build_milkdrop_layer()
 
-    def _hot_swap_effects(
-        self, layer: VJingLayer, effects: list[str], time_pos: float
-    ) -> None:
+    def _hot_swap_effects(self, layer: VJingLayer, effects: list[str], time_pos: float) -> None:
         """Update active effects on an existing layer without re-doing audio analysis.
 
         Preserves the order of already-active effects (new ones appended at the end)
@@ -843,9 +865,7 @@ class VJingPlayground(QMainWindow):
                 has_layer = True
 
         if has_layer:
-            self.statusBar().showMessage(
-                f"{len(checked)} effects, palette={self._current_palette}"
-            )
+            self.statusBar().showMessage(f"{len(checked)} effects, palette={self._current_palette}")
         else:
             # No layers at all (e.g. after "None" then re-check) — async rebuild
             self._build_layers()
@@ -893,23 +913,37 @@ class VJingPlayground(QMainWindow):
             self._milkdrop_warmup_thread = None
             self._milkdrop_status_label.setText("")
 
+    def _set_milkdrop_ready(self, value: bool) -> None:
+        """Écrit l'état de readiness MilkDrop sous lock (appelable depuis tout thread)."""
+        with self._milkdrop_ready_lock:
+            self._milkdrop_ready = value
+
+    def _is_milkdrop_ready(self) -> bool:
+        """Lit l'état de readiness MilkDrop sous lock (appelable depuis tout thread)."""
+        with self._milkdrop_ready_lock:
+            return self._milkdrop_ready
+
     def _build_milkdrop_layer(self) -> None:
         """Instancie MilkDropLayer et lance le warmup dans un thread de fond."""
         if self._milkdrop_warmup_thread and self._milkdrop_warmup_thread.is_alive():
             return
 
         try:
-            from plugins.video_exporter.layers.milkdrop_layer import MilkDropLayer  # type: ignore[import]
+            from plugins.video_exporter.layers.milkdrop_layer import (
+                MilkDropLayer,  # type: ignore[import]
+            )
         except ImportError as e:
             log.warning("MilkDrop non disponible: %s", e)
             self._cb_milkdrop.setChecked(False)
             self._milkdrop_status_label.setText("non disponible")
             return
 
-        audio = self._audio if self._audio is not None else np.zeros(int(self._sr), dtype=np.float32)
+        audio = (
+            self._audio if self._audio is not None else np.zeros(int(self._sr), dtype=np.float32)
+        )
         duration = self._duration if self._duration > 0 else 60.0
 
-        self._milkdrop_ready = False
+        self._set_milkdrop_ready(False)
         self._milkdrop_status_label.setText("warmup…")
         self._milkdrop_layer = MilkDropLayer(
             width=PREVIEW_SIZE,
@@ -925,7 +959,7 @@ class VJingPlayground(QMainWindow):
         def _warmup() -> None:
             try:
                 layer_ref.warmup_gpu_frames()
-                self._milkdrop_ready = True
+                self._set_milkdrop_ready(True)
             except Exception as e:
                 log.error("MilkDrop warmup échoué: %s", e)
 
@@ -1114,7 +1148,7 @@ class VJingPlayground(QMainWindow):
         self._frame_idx = 0
         self._btn_play.setText("Play")
         self._milkdrop_layer = None
-        self._milkdrop_ready = False
+        self._set_milkdrop_ready(False)
 
         # Black frames
         black = QPixmap(PREVIEW_SIZE, PREVIEW_SIZE)
@@ -1186,20 +1220,19 @@ class VJingPlayground(QMainWindow):
                 self._led_layer.live_ctx = ctx
             # Update time label for mic mode
             elapsed = self._frame_idx / FPS
-            self._time_label.setText(
-                f"{int(elapsed) // 60}:{int(elapsed) % 60:02d} (live)"
-            )
+            self._time_label.setText(f"{int(elapsed) // 60}:{int(elapsed) % 60:02d} (live)")
 
         time_pos = self._frame_idx / FPS
 
         # Mise à jour du statut MilkDrop warmup
+        milkdrop_ready = self._is_milkdrop_ready()
         if self._milkdrop_warmup_thread and not self._milkdrop_warmup_thread.is_alive():
             self._milkdrop_warmup_thread = None
-            self._milkdrop_status_label.setText("prêt" if self._milkdrop_ready else "erreur")
+            self._milkdrop_status_label.setText("prêt" if milkdrop_ready else "erreur")
 
         show_preview = self._cb_preview.isChecked()
         has_vjing = self._vjing_layer is not None
-        has_milkdrop = self._milkdrop_layer is not None and self._milkdrop_ready
+        has_milkdrop = self._milkdrop_layer is not None and milkdrop_ready
 
         if (has_vjing or has_milkdrop) and show_preview:
             try:
@@ -1292,7 +1325,7 @@ class VJingPlayground(QMainWindow):
             self._esp32_socket.close()
             self._esp32_socket = None
         self._milkdrop_layer = None
-        self._milkdrop_ready = False
+        self._set_milkdrop_ready(False)
         self._vlc_player.stop()
         self._vlc_player.release()  # type: ignore[union-attr]
         self._vlc_instance.release()  # type: ignore[union-attr]
@@ -1322,7 +1355,7 @@ def main() -> None:
 
     window = VJingPlayground()
     window.show()
-    _run = getattr(app, "exec")  # Boucle d'événements Qt
+    _run = getattr(app, "exec")  # noqa: B009  # Boucle d'événements Qt
     sys.exit(_run())
 
 

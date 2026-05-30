@@ -4,24 +4,26 @@ import logging
 from pathlib import Path
 from typing import Any
 
-# Mapping nom de tag → frame ID3 pour formats ID3-based (AIFF, WAV)
-# Les classes Frame sont importées de façon lazy dans save_audio_tags
-_TAG_TO_ID3_FRAME_ID: dict[str, str] = {
-    "genre":        "TCON",
-    "title":        "TIT2",
-    "artist":       "TPE1",
-    "album":        "TALB",
-    "year":         "TDRC",
-    "date":         "TDRC",
+# Mapping nom de tag → frame ID3 pour formats ID3-based (AIFF, WAV).
+# La valeur est le nom de la classe Frame mutagen, résolue de façon lazy
+# dans save_audio_tags (l'import de mutagen.id3 y est différé).
+# Source de vérité unique : le frame ID est dérivé du nom de classe.
+_TAG_TO_ID3_FRAME_CLASS_NAME: dict[str, str] = {
+    "genre": "TCON",
+    "title": "TIT2",
+    "artist": "TPE1",
+    "album": "TALB",
+    "year": "TDRC",
+    "date": "TDRC",
     "album_artist": "TPE2",
-    "albumartist":  "TPE2",
+    "albumartist": "TPE2",
 }
 
 
 def _register_easyid3_comment() -> None:
     """Register 'comment' key in EasyID3 so it maps to COMM frames."""
-    from mutagen.easyid3 import EasyID3  # type: ignore[import-untyped]
-    from mutagen.id3 import COMM  # type: ignore[import-untyped]
+    from mutagen.easyid3 import EasyID3
+    from mutagen.id3 import COMM  # pyright: ignore[reportPrivateImportUsage]
 
     def getter(id3: Any, key: str) -> list[str]:
         for k in id3:
@@ -78,13 +80,22 @@ def save_audio_tags(
         >>> save_audio_tags("/path/to/song.flac", {"artist": "", "genre": "Jazz"})  # Delete artist
         True
     """
-    from mutagen import File  # type: ignore[import-untyped]
-    from mutagen.easyid3 import EasyID3  # type: ignore[import-untyped]
-    from mutagen.id3 import COMM, ID3, TALB, TDRC, TCON, TIT2, TPE1, TPE2  # type: ignore[import-untyped]
-    from mutagen.id3 import ID3NoHeaderError  # type: ignore[import-untyped]
+    from mutagen import File  # pyright: ignore[reportPrivateImportUsage]
+    from mutagen.easyid3 import EasyID3
+    from mutagen.id3 import ID3, ID3NoHeaderError  # pyright: ignore[reportPrivateImportUsage]
+    from mutagen.id3._frames import (
+        COMM,
+        TALB,
+        TCON,
+        TDRC,
+        TIT2,
+        TPE1,
+        TPE2,
+    )
 
-    # Mapping nom de tag → classe Frame ID3 (utilisé pour AIFF/WAV)
-    _tag_to_id3_class: dict[str, type] = {
+    # Résolution des classes Frame à partir du mapping de référence unique.
+    # Évite la désynchronisation entre le nom de frame et la classe.
+    _frame_classes: dict[str, type] = {
         "TCON": TCON,
         "TIT2": TIT2,
         "TPE1": TPE1,
@@ -135,15 +146,17 @@ def save_audio_tags(
 
                 if is_id3_based:
                     if normalized_tag == "comment":
-                        # COMM requiert des paramètres spéciaux
-                        comm_key = "COMM::eng"
+                        # Supprime toutes les frames COMM existantes quelle que soit
+                        # leur langue/desc pour éviter les doublons (ex. COMM::fra).
+                        for frame_key in [k for k in audio.tags if k.startswith("COMM")]:
+                            del audio.tags[frame_key]
                         if value:
-                            audio.tags[comm_key] = COMM(encoding=3, lang="eng", desc="", text=value)
-                        elif comm_key in audio.tags:
-                            del audio.tags[comm_key]
-                    elif normalized_tag in _TAG_TO_ID3_FRAME_ID:
-                        frame_id = _TAG_TO_ID3_FRAME_ID[normalized_tag]
-                        frame_class = _tag_to_id3_class[frame_id]
+                            audio.tags["COMM::eng"] = COMM(
+                                encoding=3, lang="eng", desc="", text=value
+                            )
+                    elif normalized_tag in _TAG_TO_ID3_FRAME_CLASS_NAME:
+                        frame_id = _TAG_TO_ID3_FRAME_CLASS_NAME[normalized_tag]
+                        frame_class = _frame_classes[frame_id]
                         if value:
                             audio.tags[frame_id] = frame_class(encoding=3, text=[value])
                         elif frame_id in audio.tags:

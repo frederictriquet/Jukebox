@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, ClassVar
+from typing import Any, ClassVar
 
 
 @dataclass(frozen=True)
@@ -82,9 +83,7 @@ class SettingsSyncMixin:
             else:
                 default = getattr(config, setting.field_name)
 
-            value = self.context.get_setting(
-                self.name, setting.db_key, setting.value_type, default
-            )
+            value = self.context.get_setting(self.name, setting.db_key, setting.value_type, default)
 
             if setting.transform:
                 value = setting.transform(value)

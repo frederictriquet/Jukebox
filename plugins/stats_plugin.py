@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QMessageBox
 
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
+
+logger = logging.getLogger(__name__)
 
 
 class StatsPlugin:
@@ -34,8 +37,18 @@ class StatsPlugin:
         """Show statistics."""
         db = self.context.database
 
-        total = db.conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
-        duration = db.conn.execute("SELECT SUM(duration_seconds) FROM tracks").fetchone()[0] or 0
+        try:
+            stats = db.tracks.get_stats()
+            total = stats["total_tracks"]
+            duration = stats["total_duration_seconds"]
+        except Exception:
+            logger.error("[Stats] Échec de la lecture des statistiques en base", exc_info=True)
+            QMessageBox.warning(
+                None,
+                "Library Statistics",
+                "Impossible de lire les statistiques : la base de données est inaccessible.",
+            )
+            return
 
         hours = int(duration / 3600)
         minutes = int((duration % 3600) / 60)

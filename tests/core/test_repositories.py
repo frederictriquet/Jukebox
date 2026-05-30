@@ -7,13 +7,8 @@ import pytest
 
 from jukebox.core.database import Database
 from jukebox.core.repositories import (
-    AnalysisRepository,
-    BaseRepository,
-    PluginSettingsRepository,
     TrackRepository,
-    WaveformRepository,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -148,7 +143,9 @@ class TestTrackRepositoryAdd:
 
     def test_add_respects_explicit_mode(self, tmp_path: Path) -> None:
         db = make_db(tmp_path)
-        track_id = db.tracks.add(sample_track(filepath="/tmp/cur.mp3", filename="cur.mp3"), mode="curating")
+        track_id = db.tracks.add(
+            sample_track(filepath="/tmp/cur.mp3", filename="cur.mp3"), mode="curating"
+        )
         row = db.tracks.get_by_id(track_id)
         assert row is not None
         assert row["mode"] == "curating"
@@ -216,7 +213,9 @@ class TestTrackRepositoryGetAll:
     def test_get_all_limit_with_mode(self, tmp_path: Path) -> None:
         db = make_db(tmp_path)
         for i in range(4):
-            db.tracks.add(sample_track(filepath=f"/tmp/j{i}.mp3", filename=f"j{i}.mp3"), mode="jukebox")
+            db.tracks.add(
+                sample_track(filepath=f"/tmp/j{i}.mp3", filename=f"j{i}.mp3"), mode="jukebox"
+            )
         results = db.tracks.get_all(limit=2, mode="jukebox")
         assert len(results) == 2
 
@@ -335,7 +334,9 @@ class TestTrackRepositoryUpdateMetadata:
         db = make_db(tmp_path)
         track_id = db.tracks.add(sample_track(filepath="/tmp/orig.mp3", filename="orig.mp3"))
         # 'filepath', 'id', and 'mode' are not in allowed_fields
-        result = db.tracks.update_metadata(track_id, {"filepath": "/tmp/evil.mp3", "id": 42, "mode": "curating"})
+        result = db.tracks.update_metadata(
+            track_id, {"filepath": "/tmp/evil.mp3", "id": 42, "mode": "curating"}
+        )
         # All provided keys are disallowed → returns False (no update performed)
         assert result is False
         # Filepath must remain unchanged
@@ -347,7 +348,9 @@ class TestTrackRepositoryUpdateMetadata:
         """Disallowed keys are stripped; allowed keys still get applied."""
         db = make_db(tmp_path)
         track_id = db.tracks.add(sample_track(title="Original"))
-        result = db.tracks.update_metadata(track_id, {"title": "Changed", "id": 99, "mode": "curating"})
+        result = db.tracks.update_metadata(
+            track_id, {"title": "Changed", "id": 99, "mode": "curating"}
+        )
         assert result is True
         row = db.tracks.get_by_id(track_id)
         assert row is not None
@@ -389,7 +392,10 @@ class TestTrackRepositoryUpdateFilepath:
     def test_update_filepath_explicit_filename(self, tmp_path: Path) -> None:
         db = make_db(tmp_path)
         track_id = db.tracks.add(sample_track(filepath="/tmp/old3.mp3", filename="old3.mp3"))
-        assert db.tracks.update_filepath(track_id, "/tmp/dir/new3.mp3", new_filename="custom.mp3") is True
+        assert (
+            db.tracks.update_filepath(track_id, "/tmp/dir/new3.mp3", new_filename="custom.mp3")
+            is True
+        )
         row = db.tracks.get_by_id(track_id)
         assert row is not None
         assert row["filename"] == "custom.mp3"
@@ -482,15 +488,24 @@ class TestTrackRepositorySearch:
 
     def _add_fixture_tracks(self, db: Database) -> None:
         db.tracks.add(
-            sample_track(filepath="/tmp/rock.mp3", filename="rock.mp3", title="Rock Song", artist="Rock Band"),
+            sample_track(
+                filepath="/tmp/rock.mp3", filename="rock.mp3", title="Rock Song", artist="Rock Band"
+            ),
             mode="jukebox",
         )
         db.tracks.add(
-            sample_track(filepath="/tmp/jazz.mp3", filename="jazz.mp3", title="Jazz Tune", artist="Jazz Quartet"),
+            sample_track(
+                filepath="/tmp/jazz.mp3",
+                filename="jazz.mp3",
+                title="Jazz Tune",
+                artist="Jazz Quartet",
+            ),
             mode="curating",
         )
         db.tracks.add(
-            sample_track(filepath="/tmp/pop.mp3", filename="pop.mp3", title="Pop Hit", artist="Pop Star"),
+            sample_track(
+                filepath="/tmp/pop.mp3", filename="pop.mp3", title="Pop Hit", artist="Pop Star"
+            ),
             mode="jukebox",
         )
 
@@ -908,8 +923,7 @@ class TestTransactionIntegration:
 
     def test_transaction_rollback_on_error(self, tmp_path: Path) -> None:
         db = make_db(tmp_path)
-        with pytest.raises(RuntimeError):
-            with db.transaction():
-                db.tracks.add(sample_track(filepath="/tmp/r.mp3", filename="r.mp3"))
-                raise RuntimeError("forced rollback")
+        with pytest.raises(RuntimeError), db.transaction():
+            db.tracks.add(sample_track(filepath="/tmp/r.mp3", filename="r.mp3"))
+            raise RuntimeError("forced rollback")
         assert db.tracks.get_by_filepath("/tmp/r.mp3") is None

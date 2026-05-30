@@ -46,10 +46,12 @@ class TrackInfoPlugin:
         main_window = self.context.app
         controls = main_window.controls
         layout = controls.layout()
-        # Insert after stop button and before volume slider
-        # Layout: play/pause (0), stop (1), spacer (2), volume label (3), volume (4)
-        # We want to insert at index 3 (before volume label)
-        ui_builder.insert_widget_in_layout(layout, 3, self.info_widget)
+        # Insertion juste avant le label "Volume:" qui précède le slider de volume.
+        # On localise dynamiquement la position pour rester robuste à un refactor du layout.
+        volume_index = layout.indexOf(controls.volume_slider)
+        # Le label "Volume:" est ajouté juste avant le slider ; on insère avant ce label.
+        insert_index = max(0, volume_index - 1)
+        ui_builder.insert_widget_in_layout(layout, insert_index, self.info_widget)
 
     def _on_track_loaded(self, track_id: int) -> None:
         """Handle track loaded event."""

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from jukebox.core.repositories import (
         AnalysisRepository,
+        PlaylistRepository,
         PluginSettingsRepository,
         TrackRepository,
         WaveformRepository,
@@ -49,6 +50,7 @@ class Database:
         self._tracks: TrackRepository | None = None
         self._waveforms: WaveformRepository | None = None
         self._analysis: AnalysisRepository | None = None
+        self._playlists: PlaylistRepository | None = None
         self._settings: PluginSettingsRepository | None = None
 
     def connect(self) -> None:
@@ -58,8 +60,13 @@ class Database:
         # sauf si encadré d'un BEGIN explicite (géré par transaction()).
         # Évite le conflit "cannot start a transaction within a transaction"
         # causé par les BEGIN implicites du module sqlite3 avec isolation_level par défaut.
-        self.conn = sqlite3.connect(str(self.db_path), isolation_level=None)
-        self.conn.row_factory = _dict_factory  # type: ignore[assignment]
+        # check_same_thread=False : autorise l'accès depuis les QThread workers
+        # (BackgroundCheckWorker, BatchProcessor, etc.). La sérialisation des accès
+        # concurrents est gérée au niveau applicatif, pas par sqlite3.
+        self.conn = sqlite3.connect(
+            str(self.db_path), isolation_level=None, check_same_thread=False
+        )
+        self.conn.row_factory = _dict_factory  # pyright: ignore[reportAttributeAccessIssue]
         self.conn.execute("PRAGMA foreign_keys = ON")
 
     # ========== Repository Properties ==========
@@ -70,7 +77,7 @@ class Database:
         if self._tracks is None:
             from jukebox.core.repositories import TrackRepository
 
-            self._tracks = TrackRepository(self)  # type: ignore[arg-type]
+            self._tracks = TrackRepository(self)  # pyright: ignore[reportArgumentType]
         return self._tracks
 
     @property
@@ -79,7 +86,7 @@ class Database:
         if self._waveforms is None:
             from jukebox.core.repositories import WaveformRepository
 
-            self._waveforms = WaveformRepository(self)  # type: ignore[arg-type]
+            self._waveforms = WaveformRepository(self)  # pyright: ignore[reportArgumentType]
         return self._waveforms
 
     @property
@@ -88,8 +95,17 @@ class Database:
         if self._analysis is None:
             from jukebox.core.repositories import AnalysisRepository
 
-            self._analysis = AnalysisRepository(self)  # type: ignore[arg-type]
+            self._analysis = AnalysisRepository(self)  # pyright: ignore[reportArgumentType]
         return self._analysis
+
+    @property
+    def playlists(self) -> PlaylistRepository:
+        """Get the playlist repository."""
+        if self._playlists is None:
+            from jukebox.core.repositories import PlaylistRepository
+
+            self._playlists = PlaylistRepository(self)  # pyright: ignore[reportArgumentType]
+        return self._playlists
 
     @property
     def settings(self) -> PluginSettingsRepository:
@@ -97,7 +113,7 @@ class Database:
         if self._settings is None:
             from jukebox.core.repositories import PluginSettingsRepository
 
-            self._settings = PluginSettingsRepository(self)  # type: ignore[arg-type]
+            self._settings = PluginSettingsRepository(self)  # pyright: ignore[reportArgumentType]
         return self._settings
 
     # ========== Transaction Management ==========
@@ -125,7 +141,8 @@ class Database:
 
         self._in_transaction = True
         try:
-            # SQLite auto-commits by default, so we start a transaction explicitly
+            # La connexion est en mode autocommit (isolation_level=None) :
+            # un BEGIN explicite ouvre la transaction, COMMIT/ROLLBACK la clôturent.
             self.conn.execute("BEGIN")
             yield
             self.conn.commit()
@@ -290,7 +307,8 @@ class Database:
         """
         )
 
-        self.conn.commit()
+        # Pas de commit explicite : la connexion est en mode autocommit
+        # (isolation_level=None), chaque DDL/executescript est déjà persisté.
 
     def _migrate_ml_features(self) -> None:
         """Add ML feature columns to audio_analysis table if they don't exist."""
@@ -367,17 +385,34 @@ class Database:
             "energy_slope": "REAL",
         }
 
+        # Types SQLite autorisés pour les colonnes de migration.
+        # SQLite ne supporte pas les paramètres liés dans les clauses DDL (ALTER TABLE),
+        # l'interpolation est donc inévitable ; on valide strictement chaque identifiant
+        # et chaque type contre une whitelist avant toute exécution pour éviter
+        # toute injection SQL via un dict ml_columns altéré.
+        allowed_types = {"REAL", "INTEGER", "TEXT", "BLOB"}
+
         # Add missing columns
         for column_name, column_type in ml_columns.items():
-            if column_name not in existing_columns:
-                try:
-                    self.conn.execute(
-                        f"ALTER TABLE audio_analysis ADD COLUMN {column_name} {column_type}"
-                    )
-                except sqlite3.OperationalError as e:
-                    logging.debug("[Database] Colonne '%s' déjà existante (migration concurrente) : %s", column_name, e)
+            if column_name in existing_columns:
+                continue
+            # Validation : identifiant SQL simple + type whitelisté.
+            if not column_name.isidentifier():
+                raise ValueError(f"Nom de colonne de migration invalide : {column_name!r}")
+            if column_type not in allowed_types:
+                raise ValueError(f"Type de colonne de migration non autorisé : {column_type!r}")
+            try:
+                self.conn.execute(
+                    f"ALTER TABLE audio_analysis ADD COLUMN {column_name} {column_type}"
+                )
+            except sqlite3.OperationalError as e:
+                logging.debug(
+                    "[Database] Colonne '%s' déjà existante (migration concurrente) : %s",
+                    column_name,
+                    e,
+                )
 
-        self.conn.commit()
+        # Mode autocommit (isolation_level=None) : pas de commit explicite requis.
 
     def _migrate_tracks_columns(self) -> None:
         """Add mode and comment columns to tracks table if they don't exist."""
@@ -394,9 +429,18 @@ class Database:
         if "comment" not in existing_columns:
             self.conn.execute("ALTER TABLE tracks ADD COLUMN comment TEXT")
             if "description" in existing_columns:
-                self.conn.execute("UPDATE tracks SET comment = description WHERE description != ''")
+                # Recopie les anciennes valeurs non vides de `description` vers `comment`.
+                # La condition couvre aussi les NULL (description != '' renvoie NULL pour un
+                # NULL, donc on filtre explicitement les valeurs réellement renseignées).
+                # La colonne `description` n'est volontairement PAS supprimée :
+                # SQLite < 3.35 ne supporte pas DROP COLUMN, et la conserver garantit
+                # un rollback applicatif possible. Elle est simplement ignorée par le code.
+                self.conn.execute(
+                    "UPDATE tracks SET comment = description "
+                    "WHERE description IS NOT NULL AND description != ''"
+                )
 
-        self.conn.commit()
+        # Mode autocommit (isolation_level=None) : pas de commit explicite requis.
 
     # ========== Legacy Methods (delegate to repositories) ==========
 

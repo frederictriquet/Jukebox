@@ -3,9 +3,15 @@
 import logging
 import time
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
-from PySide6.QtCore import QObject, QThread, QTimer, Signal  # type: ignore[import]
+from PySide6.QtCore import (
+    QCoreApplication,
+    QObject,
+    QThread,
+    QTimer,
+    Signal,
+)
 
 from jukebox.core.constants import StatusColors
 from jukebox.core.event_bus import Events
@@ -42,13 +48,18 @@ class BatchProcessor(QObject):
 
     @classmethod
     def _start_cleanup_timer(cls) -> None:
-        """Start the periodic cleanup timer if not already running."""
+        """Start the periodic cleanup timer if not already running.
+
+        Le timer est rattaché à l'instance QApplication pour garantir qu'il vit dans
+        le thread GUI et qu'il est détruit proprement à la fermeture. Sans parent, un
+        QTimer créé hors du thread principal n'émet jamais timeout.
+        """
         if cls._cleanup_timer is None:
-            cls._cleanup_timer = QTimer()
+            # parent = QApplication : ancre le timer dans le thread GUI
+            cls._cleanup_timer = QTimer(QCoreApplication.instance())
             # Connexion unique à la création — évite N slots connectés après N appels
             cls._cleanup_timer.timeout.connect(cls._cleanup_orphan_workers)
-        # cast pour que pyright réduise le type de QTimer | None à QTimer
-        timer = cast(QTimer, cls._cleanup_timer)
+        timer = cls._cleanup_timer
         if not timer.isActive():
             timer.start(ORPHAN_CLEANUP_INTERVAL_MS)
             logging.debug("[BatchProcessor] Started orphan worker cleanup timer")
@@ -96,7 +107,9 @@ class BatchProcessor(QObject):
 
         for worker in running:
             if not worker.wait(timeout_ms):
-                logging.warning("[BatchProcessor] Worker non terminé après %dms, terminate()", timeout_ms)
+                logging.warning(
+                    "[BatchProcessor] Worker non terminé après %dms, terminate()", timeout_ms
+                )
                 worker.terminate()
                 worker.wait(1000)
 

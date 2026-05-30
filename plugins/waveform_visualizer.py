@@ -163,7 +163,7 @@ class WaveformVisualizerPlugin(SettingsSyncMixin):
             try:
                 waveform = deserialize_waveform(cached_data)
                 self.waveform_widget.display_waveform(waveform)
-            except (ValueError, Exception) as e:
+            except Exception as e:
                 logging.warning("[WaveformVisualizer] Cache corrompu, effacement : %s", e)
                 self.context.database.waveforms.delete(track_id)
                 self.waveform_widget.clear_waveform()
@@ -174,12 +174,12 @@ class WaveformVisualizerPlugin(SettingsSyncMixin):
             if (
                 WaveformVisualizerPlugin._batch_processor
                 and WaveformVisualizerPlugin._batch_processor.is_running
+                and track
             ):
-                if track:
-                    item = (track_id, track["filepath"])
-                    added = WaveformVisualizerPlugin._batch_processor.add_priority_item(item)
-                    if added:
-                        logging.info(f"[Waveform] Track {track_id} added to priority queue")
+                item = (track_id, track["filepath"])
+                added = WaveformVisualizerPlugin._batch_processor.add_priority_item(item)
+                if added:
+                    logging.info("[Waveform] Track %s added to priority queue", track_id)
 
     def _regenerate_waveform(self, track: dict[str, Any]) -> None:
         """Regenerate waveform for a specific track.
@@ -197,10 +197,10 @@ class WaveformVisualizerPlugin(SettingsSyncMixin):
         import os
 
         if not os.path.isfile(filepath):
-            logging.warning(f"[Waveform] Cannot regenerate: file not found: {filepath}")
+            logging.warning("[Waveform] Cannot regenerate: file not found: %s", filepath)
             return
 
-        logging.info(f"[Waveform] Regenerating waveform for track {track_id}")
+        logging.info("[Waveform] Regenerating waveform for track %s", track_id)
 
         # Delete existing waveform from cache
         self.context.database.waveforms.delete(track_id)
@@ -246,7 +246,7 @@ class WaveformVisualizerPlugin(SettingsSyncMixin):
         def needs_waveform(track_id: int, filepath: str) -> bool:
             """Check if track needs waveform generation (and file still exists)."""
             if not os.path.isfile(filepath):
-                logging.warning(f"[Waveform] Skipping missing file: {filepath}")
+                logging.warning("[Waveform] Skipping missing file: %s", filepath)
                 return False
             return self.context.database.waveforms.get(track_id) is None
 
@@ -287,6 +287,7 @@ class WaveformVisualizerPlugin(SettingsSyncMixin):
         # Save to database (safe in main thread)
         try:
             import os
+
             from jukebox.utils.waveform_serializer import serialize_waveform
 
             # Cache waveform
@@ -308,18 +309,21 @@ class WaveformVisualizerPlugin(SettingsSyncMixin):
             # If this is the currently displayed track, show the waveform
             if track_id == self.current_track_id and self.waveform_widget:
                 self.waveform_widget.display_waveform(result["waveform_data"])
-                logging.debug(f"[Waveform] Displayed waveform for current track {track_id}")
+                logging.debug("[Waveform] Displayed waveform for current track %s", track_id)
 
             # Emit event to notify waveform complete
             self.context.emit(Events.WAVEFORM_COMPLETE, track_id=track_id)
 
             # DEBUG level: show filename
             filename = os.path.basename(filepath)
-            logging.debug(f"[Batch Waveform] Saved: {filename}")
+            logging.debug("[Batch Waveform] Saved: %s", filename)
 
         except Exception as e:
             logging.error(
-                f"[Batch Waveform] Failed to save results for track {track_id}: {e}", exc_info=True
+                "[Batch Waveform] Failed to save results for track %s: %s",
+                track_id,
+                e,
+                exc_info=True,
             )
 
     def _on_batch_waveform_error(self, item: tuple[int, str], error: str) -> None:
@@ -329,17 +333,17 @@ class WaveformVisualizerPlugin(SettingsSyncMixin):
 
         filename = os.path.basename(filepath)
         # DEBUG level: show which file failed (BatchProcessor already logged the error)
-        logging.debug(f"[Batch Waveform] Failed file: {filename}")
+        logging.debug("[Batch Waveform] Failed file: %s", filename)
 
     def activate(self, mode: str) -> None:
         """Activate plugin for this mode."""
         # Waveform always visible in both modes
-        logging.debug(f"[Waveform] Activated for {mode} mode")
+        logging.debug("[Waveform] Activated for %s mode", mode)
 
     def deactivate(self, mode: str) -> None:
         """Deactivate plugin for this mode."""
         # Never called since active in both modes
-        logging.debug(f"[Waveform] Deactivated for {mode} mode")
+        logging.debug("[Waveform] Deactivated for %s mode", mode)
 
     def shutdown(self) -> None:
         """Cleanup on application exit."""
@@ -363,6 +367,7 @@ class WaveformVisualizerPlugin(SettingsSyncMixin):
 
         # Attendre tous les workers orphelins avant que Qt ne détruise les QThreads
         from jukebox.core.batch_processor import BatchProcessor
+
         BatchProcessor.shutdown_all_workers(timeout_ms=WORKER_WAIT_TIMEOUT_MS)
 
     _config_attr = "waveform"
@@ -510,7 +515,11 @@ class WaveformWidget(QWidget):
 
             # Set range to fit data exactly
             self.plot_widget.setXRange(0, len(bass), padding=0)  # type: ignore[call-arg]
-            self.plot_widget.setYRange(0, np.max(treble_total) * 1.05, padding=0)  # type: ignore[call-arg]
+            # Garde : array vide → ValueError ; max nul → setYRange(0, 0) crashe pyqtgraph
+            max_total = float(np.max(treble_total)) if len(treble_total) > 0 else 0.0
+            if max_total <= 0.0:
+                max_total = 1.0
+            self.plot_widget.setYRange(0, max_total * 1.05, padding=0)  # type: ignore[call-arg]
 
         # Re-add cursor line after clear (cleared removes it)
         if self.cursor_line:
@@ -545,12 +554,17 @@ class WaveformWidget(QWidget):
         if self.waveform_data is None:
             return
 
+        # Garde contre une waveform vide pour éviter une division par zéro
+        waveform_length = len(self.waveform_data)
+        if waveform_length == 0:
+            return
+
         # Get click position
         mouse_point = self.plot_widget.plotItem.vb.mapSceneToView(event.scenePos())  # type: ignore[union-attr]
         x = mouse_point.x()
 
         # Convert to position (0.0-1.0)
-        position = x / len(self.waveform_data)
+        position = x / waveform_length
         position = max(0.0, min(1.0, position))
 
         self.position_clicked.emit(position)
@@ -589,7 +603,7 @@ class CompleteWaveformWorker(QThread):
             # Check file exists before expensive librosa import/processing
             if not os.path.isfile(self.filepath):
                 filename = os.path.basename(self.filepath)
-                logging.warning(f"[WaveformWorker] File not found, skipping: {self.filepath}")
+                logging.warning("[WaveformWorker] File not found, skipping: %s", self.filepath)
                 self.error.emit(f"File not found: {filename}")
                 return
 
@@ -609,7 +623,9 @@ class CompleteWaveformWorker(QThread):
 
             # Pre-calculate filter coefficients
             sos_bass = signal.butter(4, FREQ_BASS_HIGH, "lp", fs=sr, output="sos")
-            sos_mid = signal.butter(4, [FREQ_BASS_HIGH, FREQ_MID_HIGH], "bandpass", fs=sr, output="sos")
+            sos_mid = signal.butter(
+                4, [FREQ_BASS_HIGH, FREQ_MID_HIGH], "bandpass", fs=sr, output="sos"
+            )
             sos_treble = signal.butter(4, FREQ_MID_HIGH, "hp", fs=sr, output="sos")
 
             # Pre-allocate arrays
@@ -744,10 +760,9 @@ class CompleteWaveformWorker(QThread):
 
         except Exception as e:
             import os
-            import traceback
 
             filename = os.path.basename(self.filepath)
             error_msg = f"Error processing {filename}: {e}"
-            logging.error(f"[WaveformWorker] {error_msg}", exc_info=True)
-            logging.error(f"[WaveformWorker] Full traceback:\n{traceback.format_exc()}")
+            # exc_info=True journalise déjà la stack trace complète
+            logging.error("[WaveformWorker] %s", error_msg, exc_info=True)
             self.error.emit(error_msg)

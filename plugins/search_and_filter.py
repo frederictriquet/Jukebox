@@ -34,7 +34,13 @@ from collections.abc import Callable
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QSortFilterProxyModel, Qt  # pyright: ignore[reportMissingImports]
+from PySide6.QtCore import (  # pyright: ignore[reportMissingImports]
+    QModelIndex,
+    QPersistentModelIndex,
+    QSortFilterProxyModel,
+    Qt,
+    QTimer,
+)
 from PySide6.QtWidgets import (  # pyright: ignore[reportMissingImports]
     QComboBox,
     QFrame,
@@ -184,20 +190,40 @@ class GenreFilterProxyModel(QSortFilterProxyModel):
         self._off_genres: set[str] = set()
         self._search_text: str = ""
         self._expr_fn: GenreEval | None = None
+        self._sort_column: int = -1
+        self._sort_order: Qt.SortOrder = Qt.SortOrder.AscendingOrder
+        # Réappliquer le tri après un rechargement complet (changement de répertoire).
+        self.modelReset.connect(self._schedule_reapply_sort)
+
+    def _schedule_reapply_sort(self) -> None:
+        """Diffère _reapply_sort : modelReset se déclenche avant le rechargement des tracks."""
+        QTimer.singleShot(0, self._reapply_sort)
+
+    def _reapply_sort(self) -> None:
+        """Réapplique le tri courant sur la source après un changement de filtre."""
+        if self._sort_column < 0:
+            return
+        source = self.sourceModel()
+        if source is not None:
+            source.sort(self._sort_column, self._sort_order)
+            self.invalidate()
 
     def set_search_text(self, text: str) -> None:
         self._search_text = text.lower()
         self.invalidateFilter()
+        self._reapply_sort()
 
     def set_genre_filter(self, on_genres: set[str], off_genres: set[str]) -> None:
         self._on_genres = on_genres
         self._off_genres = off_genres
         self.invalidateFilter()
+        self._reapply_sort()
 
     def set_genre_expr(self, expr_fn: GenreEval | None) -> None:
         """Set a compiled expression filter (overrides ON/OFF buttons when not None)."""
         self._expr_fn = expr_fn
         self.invalidateFilter()
+        self._reapply_sort()
 
     def filterAcceptsRow(  # noqa: N802
         self,
@@ -244,8 +270,14 @@ class GenreFilterProxyModel(QSortFilterProxyModel):
                 return False
         return all(g not in track_genres for g in self._off_genres)
 
-    def sort(self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder) -> None:  # noqa: N802
+    def sort(
+        self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder
+    ) -> None:  # noqa: N802
         """Delegate sorting to the source model to use numeric keys (not DisplayRole strings)."""
+        # Mémoriser le tri pour pouvoir le réappliquer après un changement de filtre.
+        # column=-1 signifie "retour au tri par défaut" : on réinitialise la mémoire.
+        self._sort_column = column
+        self._sort_order = order
         source = self.sourceModel()
         if source is not None:
             source.sort(column, order)
@@ -894,7 +926,9 @@ class SearchAndFilterPlugin:
         """Handle genre button state change: persist state, update proxy, emit event."""
         active_buttons = self._drawer_buttons if self._drawer_buttons else self.genre_buttons
         on_genres, off_genres = self._build_genre_sets(active_buttons)
-        self._genre_states = {btn.code: btn.state for btn in active_buttons}
+        # Fusionne sans écraser : conserve les états des codes absents du jeu actif
+        # (ex. boutons toolbar quand le drawer est ouvert) au lieu de les perdre.
+        self._genre_states.update({btn.code: btn.state for btn in active_buttons})
 
         # When advanced mode is active the expression handles proxy filtering
         if not self._advanced_active and self.proxy:

@@ -51,34 +51,61 @@ class TrackRepository(BaseRepository):
         Returns:
             Track ID
         """
+        filepath = str(track_data["filepath"])
+        values = (
+            track_data["filename"],
+            track_data.get("title"),
+            track_data.get("artist"),
+            track_data.get("album"),
+            track_data.get("album_artist"),
+            track_data.get("genre"),
+            track_data.get("year"),
+            track_data.get("track_number"),
+            track_data.get("duration_seconds"),
+            track_data.get("bitrate"),
+            track_data.get("sample_rate"),
+            track_data.get("file_size"),
+            track_data.get("date_modified"),
+            mode,
+        )
+
+        # INSERT OR IGNORE + UPDATE conditionnel plutôt que INSERT OR REPLACE :
+        # REPLACE supprime puis recrée la ligne avec un nouvel id, ce qui déclenche
+        # ON DELETE CASCADE et efface waveform_cache + audio_analysis à chaque re-scan.
+        # Ici l'id de la piste existante est préservé, donc les données liées aussi.
         cursor = self._conn.execute(
             """
-            INSERT OR REPLACE INTO tracks (
+            INSERT OR IGNORE INTO tracks (
                 filepath, filename, title, artist, album, album_artist,
                 genre, year, track_number, duration_seconds, bitrate,
                 sample_rate, file_size, date_modified, mode
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-            (
-                str(track_data["filepath"]),
-                track_data["filename"],
-                track_data.get("title"),
-                track_data.get("artist"),
-                track_data.get("album"),
-                track_data.get("album_artist"),
-                track_data.get("genre"),
-                track_data.get("year"),
-                track_data.get("track_number"),
-                track_data.get("duration_seconds"),
-                track_data.get("bitrate"),
-                track_data.get("sample_rate"),
-                track_data.get("file_size"),
-                track_data.get("date_modified"),
-                mode,
-            ),
+            (filepath, *values),
         )
+
+        if cursor.rowcount > 0:
+            # Nouvelle piste insérée.
+            track_id = int(cursor.lastrowid) if cursor.lastrowid is not None else 0
+        else:
+            # Piste déjà présente (filepath UNIQUE) : mise à jour sur place.
+            self._conn.execute(
+                """
+                UPDATE tracks SET
+                    filename = ?, title = ?, artist = ?, album = ?, album_artist = ?,
+                    genre = ?, year = ?, track_number = ?, duration_seconds = ?,
+                    bitrate = ?, sample_rate = ?, file_size = ?, date_modified = ?, mode = ?
+                WHERE filepath = ?
+            """,
+                (*values, filepath),
+            )
+            row = self._conn.execute(
+                "SELECT id FROM tracks WHERE filepath = ?", (filepath,)
+            ).fetchone()
+            track_id = int(row["id"]) if row else 0
+
         self._commit()
-        return int(cursor.lastrowid) if cursor.lastrowid is not None else 0
+        return track_id
 
     def search(self, query: str, limit: int = 100, mode: str | None = None) -> list[dict[str, Any]]:
         """Search tracks using FTS5.
@@ -131,17 +158,18 @@ class TrackRepository(BaseRepository):
         Returns:
             List of tracks
         """
+        query = "SELECT * FROM tracks"
+        params: list[Any] = []
         if mode:
-            query = "SELECT * FROM tracks WHERE mode = ? ORDER BY date_added DESC"
-            params: tuple[str, ...] = (mode,)
-            if limit:
-                query += f" LIMIT {limit}"
-            return self._conn.execute(query, params).fetchall()
-        else:
-            query = "SELECT * FROM tracks ORDER BY date_added DESC"
-            if limit:
-                query += f" LIMIT {limit}"
-            return self._conn.execute(query).fetchall()
+            query += " WHERE mode = ?"
+            params.append(mode)
+        query += " ORDER BY date_added DESC"
+        if limit:
+            # LIMIT paramétré plutôt qu'interpolé : cohérent avec le reste du code,
+            # évite tout risque d'injection si `limit` devenait une source externe.
+            query += " LIMIT ?"
+            params.append(limit)
+        return self._conn.execute(query, params).fetchall()
 
     def get_by_id(self, track_id: int) -> dict[str, Any] | None:
         """Get track by ID.
@@ -165,7 +193,9 @@ class TrackRepository(BaseRepository):
         Returns:
             Track row or None
         """
-        cursor = self._conn.execute("SELECT * FROM tracks WHERE filepath = ?", (str(filepath),))
+        cursor = self._conn.execute(
+            "SELECT * FROM tracks WHERE filepath = ?", (Path(filepath).as_posix(),)
+        )
         result = cursor.fetchone()
         return result if result is not None else None
 
@@ -191,7 +221,9 @@ class TrackRepository(BaseRepository):
         Returns:
             True if deleted, False if track not found
         """
-        cursor = self._conn.execute("DELETE FROM tracks WHERE filepath = ?", (str(filepath),))
+        cursor = self._conn.execute(
+            "DELETE FROM tracks WHERE filepath = ?", (Path(filepath).as_posix(),)
+        )
         self._commit()
         return cursor.rowcount > 0
 
@@ -229,7 +261,11 @@ class TrackRepository(BaseRepository):
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         values = list(updates.values()) + [track_id]
 
-        cursor = self._conn.execute(f"UPDATE tracks SET {set_clause} WHERE id = ?", values)
+        # `set_clause` ne contient que des colonnes filtrées via `allowed_fields`.
+        cursor = self._conn.execute(
+            f"UPDATE tracks SET {set_clause} WHERE id = ?",  # noqa: S608
+            values,
+        )
         self._commit()
         return cursor.rowcount > 0
 
@@ -246,7 +282,7 @@ class TrackRepository(BaseRepository):
         Returns:
             True if updated, False if track not found
         """
-        new_filepath_str = str(new_filepath)
+        new_filepath_str = Path(new_filepath).as_posix()
         if new_filename is None:
             new_filename = Path(new_filepath).name
 
@@ -273,6 +309,105 @@ class TrackRepository(BaseRepository):
         )
         self._commit()
         return cursor.rowcount > 0
+
+    def get_recently_played_artists_genres(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Retourne les couples (artist, genre) distincts des pistes récemment terminées.
+
+        Args:
+            limit: Nombre maximum de lignes d'historique à considérer.
+
+        Returns:
+            Liste de dicts avec les clés `artist` et `genre`.
+        """
+        return self._conn.execute(
+            """
+            SELECT DISTINCT t.artist, t.genre
+            FROM tracks t
+            JOIN play_history ph ON t.id = ph.track_id
+            WHERE ph.completed = 1
+            ORDER BY ph.played_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    def get_random(self, limit: int) -> list[dict[str, Any]]:
+        """Retourne des pistes aléatoires.
+
+        Args:
+            limit: Nombre de pistes à retourner.
+
+        Returns:
+            Liste de pistes.
+        """
+        return self._conn.execute(
+            "SELECT * FROM tracks ORDER BY RANDOM() LIMIT ?", (limit,)
+        ).fetchall()
+
+    def get_random_by_artist_unplayed(
+        self, artist: str, limit: int, exclude_days: int = 7
+    ) -> list[dict[str, Any]]:
+        """Retourne des pistes aléatoires d'un artiste non jouées récemment.
+
+        Args:
+            artist: Nom de l'artiste.
+            limit: Nombre de pistes à retourner.
+            exclude_days: Fenêtre (en jours) d'exclusion des pistes déjà jouées.
+
+        Returns:
+            Liste de pistes.
+        """
+        return self._conn.execute(
+            """
+            SELECT * FROM tracks
+            WHERE artist = ?
+            AND id NOT IN (
+                SELECT track_id FROM play_history
+                WHERE played_at > datetime('now', ?)
+            )
+            ORDER BY RANDOM()
+            LIMIT ?
+            """,
+            (artist, f"-{exclude_days} days", limit),
+        ).fetchall()
+
+    def get_random_by_genre(self, genre: str, limit: int) -> list[dict[str, Any]]:
+        """Retourne des pistes aléatoires d'un genre donné.
+
+        Args:
+            genre: Nom du genre.
+            limit: Nombre de pistes à retourner.
+
+        Returns:
+            Liste de pistes.
+        """
+        return self._conn.execute(
+            "SELECT * FROM tracks WHERE genre = ? ORDER BY RANDOM() LIMIT ?",
+            (genre, limit),
+        ).fetchall()
+
+    def get_stats(self, mode: str | None = None) -> dict[str, Any]:
+        """Retourne les statistiques agrégées de la bibliothèque.
+
+        Args:
+            mode: Filtre optionnel par mode ("jukebox" ou "curating").
+
+        Returns:
+            Dict avec `total_tracks` (int) et `total_duration_seconds` (float).
+        """
+        query = (
+            "SELECT COUNT(*) AS total_tracks, "
+            "COALESCE(SUM(duration_seconds), 0) AS total_duration_seconds FROM tracks"
+        )
+        params: list[Any] = []
+        if mode:
+            query += " WHERE mode = ?"
+            params.append(mode)
+        row = self._conn.execute(query, params).fetchone()
+        return {
+            "total_tracks": row["total_tracks"] if row else 0,
+            "total_duration_seconds": row["total_duration_seconds"] if row else 0.0,
+        }
 
     def record_play(self, track_id: int, duration: float, completed: bool) -> None:
         """Record a play in history.
@@ -375,13 +510,85 @@ class WaveformRepository(BaseRepository):
         query += " ORDER BY t.date_added DESC"
 
         if limit:
-            query += f" LIMIT {limit}"
+            # LIMIT paramétré plutôt qu'interpolé : évite tout risque d'injection.
+            query += " LIMIT ?"
+            params.append(limit)
 
         return self._conn.execute(query, params).fetchall()
 
 
 class AnalysisRepository(BaseRepository):
     """Repository for audio analysis operations."""
+
+    # Colonnes autorisées de la table audio_analysis (hors track_id, clé primaire).
+    # Toute clé du dict `analysis` absente de cette whitelist est rejetée avant
+    # construction de la requête SQL pour éviter toute injection via les noms de colonnes.
+    _ALLOWED_COLUMNS = frozenset(
+        {
+            "tempo",
+            "energy",
+            "bass_energy",
+            "mid_energy",
+            "treble_energy",
+            "spectral_centroid",
+            "zero_crossing_rate",
+            "rms_energy",
+            "dynamic_range",
+            "rms_mean",
+            "rms_std",
+            "rms_p10",
+            "rms_p90",
+            "peak_amplitude",
+            "crest_factor",
+            "loudness_variation",
+            "sub_bass_mean",
+            "sub_bass_ratio",
+            "bass_mean",
+            "bass_ratio",
+            "low_mid_mean",
+            "low_mid_ratio",
+            "mid_mean",
+            "mid_ratio",
+            "high_mid_mean",
+            "high_mid_ratio",
+            "high_mean",
+            "high_ratio",
+            "spectral_centroid_std",
+            "spectral_bandwidth",
+            "spectral_rolloff",
+            "spectral_flatness",
+            "spectral_contrast",
+            "spectral_entropy",
+            "mfcc_1",
+            "mfcc_2",
+            "mfcc_3",
+            "mfcc_4",
+            "mfcc_5",
+            "mfcc_6",
+            "mfcc_7",
+            "mfcc_8",
+            "mfcc_9",
+            "mfcc_10",
+            "percussive_energy",
+            "harmonic_energy",
+            "perc_harm_ratio",
+            "percussive_onset_rate",
+            "onset_strength_mean",
+            "tempo_confidence",
+            "beat_interval_mean",
+            "beat_interval_std",
+            "onset_rate",
+            "tempogram_periodicity",
+            "chroma_entropy",
+            "chroma_centroid",
+            "chroma_energy_std",
+            "tonnetz_mean",
+            "intro_energy_ratio",
+            "core_energy_ratio",
+            "outro_energy_ratio",
+            "energy_slope",
+        }
+    )
 
     def get(self, track_id: int) -> dict[str, Any] | None:
         """Get audio analysis for a track.
@@ -402,7 +609,17 @@ class AnalysisRepository(BaseRepository):
         Args:
             track_id: Track ID
             analysis: Dict of analysis field names to values
+
+        Raises:
+            ValueError: Si une clé du dict n'appartient pas à la whitelist de colonnes.
         """
+        # Validation des clés contre la whitelist avant toute construction de requête :
+        # les noms de colonnes sont interpolés dans le SQL (impossible de les lier),
+        # une clé non whitelistée pourrait donc injecter du SQL arbitraire.
+        unknown = set(analysis) - self._ALLOWED_COLUMNS
+        if unknown:
+            raise ValueError(f"Colonnes d'analyse inconnues : {sorted(unknown)}")
+
         # Check if analysis exists
         existing = self._conn.execute(
             "SELECT 1 FROM audio_analysis WHERE track_id = ?", (track_id,)
@@ -413,8 +630,9 @@ class AnalysisRepository(BaseRepository):
             if analysis:
                 set_clause = ", ".join(f"{k} = ?" for k in analysis)
                 values = list(analysis.values()) + [track_id]
+                # `set_clause` ne contient que des colonnes whitelistées (cf. _ALLOWED_COLUMNS).
                 self._conn.execute(
-                    f"UPDATE audio_analysis SET {set_clause} WHERE track_id = ?",
+                    f"UPDATE audio_analysis SET {set_clause} WHERE track_id = ?",  # noqa: S608
                     values,
                 )
         else:
@@ -422,8 +640,9 @@ class AnalysisRepository(BaseRepository):
             columns = ["track_id"] + list(analysis.keys())
             placeholders = ", ".join(["?"] * len(columns))
             values = [track_id] + list(analysis.values())
+            # `columns` ne contient que des colonnes whitelistées (cf. _ALLOWED_COLUMNS).
             self._conn.execute(
-                f"INSERT INTO audio_analysis ({', '.join(columns)}) VALUES ({placeholders})",
+                f"INSERT INTO audio_analysis ({', '.join(columns)}) VALUES ({placeholders})",  # noqa: S608
                 values,
             )
 
@@ -479,9 +698,103 @@ class AnalysisRepository(BaseRepository):
         query += " ORDER BY t.date_added DESC"
 
         if limit:
-            query += f" LIMIT {limit}"
+            # LIMIT paramétré plutôt qu'interpolé : évite tout risque d'injection.
+            query += " LIMIT ?"
+            params.append(limit)
 
         return self._conn.execute(query, params).fetchall()
+
+
+class PlaylistRepository(BaseRepository):
+    """Repository for playlist operations."""
+
+    def create(self, name: str) -> int:
+        """Crée une playlist et retourne son id.
+
+        Args:
+            name: Nom de la playlist (doit être unique).
+
+        Returns:
+            Id de la playlist créée.
+        """
+        cursor = self._conn.execute("INSERT INTO playlists (name) VALUES (?)", (name,))
+        self._commit()
+        return int(cursor.lastrowid) if cursor.lastrowid is not None else 0
+
+    def get_all(self) -> list[dict[str, Any]]:
+        """Retourne toutes les playlists triées par nom."""
+        return self._conn.execute("SELECT * FROM playlists ORDER BY name").fetchall()
+
+    def get_all_with_counts(self) -> list[dict[str, Any]]:
+        """Retourne toutes les playlists avec le nombre de pistes (clé track_count)."""
+        return self._conn.execute(
+            """
+            SELECT p.*, COUNT(pt.track_id) AS track_count
+            FROM playlists p
+            LEFT JOIN playlist_tracks pt ON p.id = pt.playlist_id
+            GROUP BY p.id
+            ORDER BY p.name
+            """
+        ).fetchall()
+
+    def delete(self, playlist_id: int) -> bool:
+        """Supprime une playlist.
+
+        Args:
+            playlist_id: Id de la playlist.
+
+        Returns:
+            True si une ligne a été supprimée.
+        """
+        cursor = self._conn.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
+        self._commit()
+        return cursor.rowcount > 0
+
+    def get_tracks(self, playlist_id: int) -> list[dict[str, Any]]:
+        """Retourne les pistes d'une playlist dans l'ordre de position."""
+        return self._conn.execute(
+            """
+            SELECT t.*
+            FROM tracks t
+            JOIN playlist_tracks pt ON t.id = pt.track_id
+            WHERE pt.playlist_id = ?
+            ORDER BY pt.position
+            """,
+            (playlist_id,),
+        ).fetchall()
+
+    def contains_track(self, playlist_id: int, track_id: int) -> bool:
+        """Indique si une piste est déjà présente dans la playlist."""
+        row = self._conn.execute(
+            "SELECT 1 FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?",
+            (playlist_id, track_id),
+        ).fetchone()
+        return row is not None
+
+    def add_track(self, playlist_id: int, track_id: int) -> bool:
+        """Ajoute une piste en fin de playlist.
+
+        Args:
+            playlist_id: Id de la playlist.
+            track_id: Id de la piste.
+
+        Returns:
+            True si la piste a été ajoutée, False si elle y était déjà.
+        """
+        if self.contains_track(playlist_id, track_id):
+            return False
+        pos_row = self._conn.execute(
+            "SELECT COALESCE(MAX(position), 0) + 1 AS next_pos "
+            "FROM playlist_tracks WHERE playlist_id = ?",
+            (playlist_id,),
+        ).fetchone()
+        next_pos = pos_row["next_pos"] if pos_row else 1
+        self._conn.execute(
+            "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)",
+            (playlist_id, track_id, next_pos),
+        )
+        self._commit()
+        return True
 
 
 class PluginSettingsRepository(BaseRepository):

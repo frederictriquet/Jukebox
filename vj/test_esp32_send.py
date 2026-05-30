@@ -12,14 +12,14 @@ import time
 
 ESP32_PORT = 5005
 W, H = 64, 64
-PAYLOAD_SIZE = W * H * 3   # 12288
-CHUNK_SIZE   = 1024
+PAYLOAD_SIZE = W * H * 3  # 12288
+CHUNK_SIZE = 1024
 TOTAL_CHUNKS = PAYLOAD_SIZE // CHUNK_SIZE  # 12
 
 
 def send_frame(sock: socket.socket, ip: str, pixels: bytes, frame_n: int = 0) -> None:
     for i in range(TOTAL_CHUNKS):
-        chunk = pixels[i * CHUNK_SIZE:(i + 1) * CHUNK_SIZE]
+        chunk = pixels[i * CHUNK_SIZE : (i + 1) * CHUNK_SIZE]
         header = struct.pack(">IHH", frame_n, i, TOTAL_CHUNKS)
         sock.sendto(header + chunk, (ip, ESP32_PORT))
 
@@ -31,18 +31,20 @@ def main() -> None:
 
     ip = sys.argv[1]
     print(f"Target  : {ip}:{ESP32_PORT}")
-    print(f"Payload : {PAYLOAD_SIZE} bytes ({W}x{H} RGB), {TOTAL_CHUNKS} chunks de {CHUNK_SIZE} octets")
+    print(
+        f"Payload : {PAYLOAD_SIZE} bytes ({W}x{H} RGB), {TOTAL_CHUNKS} chunks de {CHUNK_SIZE} octets"
+    )
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
     print(f"SO_SNDBUF : {sock.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF)}")
 
     colors = [
-        ("Rouge",  bytes([255, 0, 0]   * W * H)),
-        ("Vert",   bytes([0, 255, 0]   * W * H)),
-        ("Bleu",   bytes([0, 0, 255]   * W * H)),
-        ("Blanc",  bytes([255, 255, 255] * W * H)),
-        ("Noir",   bytes([0, 0, 0]     * W * H)),
+        ("Rouge", bytes([255, 0, 0] * W * H)),
+        ("Vert", bytes([0, 255, 0] * W * H)),
+        ("Bleu", bytes([0, 0, 255] * W * H)),
+        ("Blanc", bytes([255, 255, 255] * W * H)),
+        ("Noir", bytes([0, 0, 0] * W * H)),
     ]
 
     try:

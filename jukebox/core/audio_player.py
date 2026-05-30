@@ -1,12 +1,13 @@
 """Audio player wrapper for python-vlc."""
 
 import logging
+import queue
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
-import vlc  # type: ignore[import]
-from PySide6.QtCore import QObject, Signal  # type: ignore[import]
+import vlc
+from PySide6.QtCore import QObject, QTimer, Signal
 
 
 class PlayerState(Enum):
@@ -30,12 +31,27 @@ class AudioPlayer(QObject):
         """Initialize audio player."""
         super().__init__()
         self._instance: Any = vlc.Instance()
+        # vlc.Instance() retourne None si libvlc est absent ou mal configuré.
+        if self._instance is None:
+            raise RuntimeError(
+                "Impossible d'initialiser libVLC : vlc.Instance() a retourné None. "
+                "Vérifier que VLC est installé et accessible."
+            )
         self._player: Any = self._instance.media_player_new()
         self._current_file: Path | None = None
 
+        # File thread-safe pour recevoir les événements VLC (thread ctypes sans GIL Qt)
+        self._end_reached_queue: queue.SimpleQueue[bool] = queue.SimpleQueue()
+        self._poll_timer = QTimer(self)
+        self._poll_timer.timeout.connect(self._check_end_reached)
+        self._poll_timer.start(100)
+
         # Setup event manager for track end detection
         event_manager = self._player.event_manager()
-        event_manager.event_attach(vlc.EventType.MediaPlayerEndReached, self._on_end_reached)  # type: ignore[attr-defined]
+        event_manager.event_attach(
+            vlc.EventType.MediaPlayerEndReached,  # pyright: ignore[reportAttributeAccessIssue]
+            self._on_end_reached,
+        )
 
     def load(self, filepath: Path) -> bool:
         """Load an audio file.
@@ -60,12 +76,20 @@ class AudioPlayer(QObject):
 
     def play(self) -> None:
         """Start playback."""
-        self._player.play()
+        # play() renvoie -1 en cas d'échec : ne pas émettre PLAYING si VLC a échoué.
+        if self._player.play() == -1:
+            logging.error("[AudioPlayer] Échec du démarrage de la lecture (VLC a retourné -1).")
+            return
         self.state_changed.emit(PlayerState.PLAYING.value)
 
     def pause(self) -> None:
         """Pause playback."""
+        # pause() ne renvoie pas de code d'erreur exploitable ; on vérifie l'état réel
+        # rapporté par VLC avant d'émettre PAUSED pour éviter une désynchronisation UI.
         self._player.pause()
+        if self._player.is_playing() == 1:
+            logging.error("[AudioPlayer] La mise en pause a échoué (VLC est toujours en lecture).")
+            return
         self.state_changed.emit(PlayerState.PAUSED.value)
 
     def stop(self) -> None:
@@ -118,7 +142,7 @@ class AudioPlayer(QObject):
             True if playing, False otherwise
         """
         playing = self._player.is_playing()
-        return bool(playing == 1) if playing is not None else False
+        return bool(playing) if playing is not None else False
 
     @property
     def current_file(self) -> Path | None:
@@ -134,10 +158,19 @@ class AudioPlayer(QObject):
         self._player.stop()
         self._player.set_media(None)
         self._current_file = None
+        # Les abonnés doivent savoir que la lecture est arrêtée après un unload.
+        self.state_changed.emit(PlayerState.STOPPED.value)
 
     def _on_end_reached(self, _event: Any) -> None:
-        """Handle VLC end reached event (appelé depuis le thread interne VLC).
+        """Handle VLC end reached event (appelé depuis le thread ctypes de VLC).
 
-        Qt AutoConnection détecte le cross-thread et délivre le signal dans le thread principal.
+        Pas d'appel Qt direct ici — le thread VLC ne détient pas le GIL Qt.
+        On dépose dans une file Python (thread-safe) que le timer principal videra.
         """
-        self.track_finished.emit()
+        self._end_reached_queue.put(True)
+
+    def _check_end_reached(self) -> None:
+        """Draîne la file VLC depuis le thread Qt principal (appelé par le timer)."""
+        if not self._end_reached_queue.empty():
+            self._end_reached_queue.get()
+            self.track_finished.emit()

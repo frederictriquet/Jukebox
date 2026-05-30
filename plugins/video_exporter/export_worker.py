@@ -171,7 +171,7 @@ class VideoExportWorker(QThread):
                 fade_duration=self.config.get("fade_duration", 1.0),
                 video_codec=self.config.get("ffmpeg_video_codec", "libx264"),
                 preset=self.config.get("ffmpeg_preset", "medium"),
-                crf=self.config.get("ffmpeg_crf", "23"),
+                crf=self.config.get("ffmpeg_crf", 23),
                 pixel_format=self.config.get("ffmpeg_pixel_format", "yuv420p"),
                 audio_codec=self.config.get("ffmpeg_audio_codec", "aac"),
                 audio_bitrate=self.config.get("ffmpeg_audio_bitrate", "192k"),

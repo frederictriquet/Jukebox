@@ -2,7 +2,75 @@
 """Display ID3/audio tags from any audio file."""
 
 import sys
+import traceback
 from pathlib import Path
+
+from mutagen._file import File  # type: ignore[import-untyped]
+
+# ID3v2 text frames and common Vorbis/FLAC tags (whitelist d'affichage).
+ALLOWED_TAGS = {
+    "TIT2",
+    "TPE1",
+    "TALB",
+    "TPE2",
+    "TCON",
+    "TDRC",
+    "TYER",
+    "TRCK",
+    "TPOS",
+    "TCOM",
+    "TPUB",
+    "TSRC",
+    "TENC",
+    "TCOP",
+    "TBPM",
+    "TKEY",
+    "TSST",
+    "COMM",
+    "TXXX",
+    "USLT",
+    "TIT1",
+    "TIT3",
+    "TOAL",
+    "TOFN",
+    "TOLY",
+    "TOWN",
+    "TRSN",
+    "ALBUM",
+    "ARTIST",
+    "TITLE",
+    "ALBUMARTIST",
+    "GENRE",
+    "DATE",
+    "COMMENT",
+    "COMPOSER",
+    "PUBLISHER",
+    "TRACKNUMBER",
+    "DISCNUMBER",
+    "BPM",
+    "KEY",
+}
+
+# Translation map for ID3v2 codes to readable names.
+TAG_NAMES = {
+    "TIT2": "Title",
+    "TPE1": "Artist",
+    "TALB": "Album",
+    "TPE2": "Album Artist",
+    "TCON": "Genre",
+    "TDRC": "Date",
+    "TYER": "Year",
+    "TRCK": "Track Number",
+    "TPOS": "Disc Number",
+    "TCOM": "Composer",
+    "TPUB": "Publisher",
+    "TBPM": "BPM",
+    "TKEY": "Key",
+    "COMM": "Comment",
+    "TIT1": "Content Group",
+    "TIT3": "Subtitle",
+    "TSST": "Set Subtitle",
+}
 
 
 def show_tags(filepath: str) -> None:
@@ -18,8 +86,6 @@ def show_tags(filepath: str) -> None:
         sys.exit(1)
 
     try:
-        from mutagen._file import File  # type: ignore[import-untyped]
-
         audio = File(filepath)
 
         if audio is None:
@@ -46,71 +112,6 @@ def show_tags(filepath: str) -> None:
         # Tags - whitelist approach: only show known text tags
         if audio.tags:
             print("Tags:")
-
-            # ID3v2 text frames and common Vorbis/FLAC tags
-            ALLOWED_TAGS = {
-                "TIT2",
-                "TPE1",
-                "TALB",
-                "TPE2",
-                "TCON",
-                "TDRC",
-                "TYER",
-                "TRCK",
-                "TPOS",
-                "TCOM",
-                "TPUB",
-                "TSRC",
-                "TENC",
-                "TCOP",
-                "TBPM",
-                "TKEY",
-                "TSST",
-                "COMM",
-                "TXXX",
-                "USLT",
-                "TIT1",
-                "TIT3",
-                "TOAL",
-                "TOFN",
-                "TOLY",
-                "TOWN",
-                "TRSN",
-                "ALBUM",
-                "ARTIST",
-                "TITLE",
-                "ALBUMARTIST",
-                "GENRE",
-                "DATE",
-                "COMMENT",
-                "COMPOSER",
-                "PUBLISHER",
-                "TRACKNUMBER",
-                "DISCNUMBER",
-                "BPM",
-                "KEY",
-            }
-
-            # Translation map for ID3v2 codes to readable names
-            TAG_NAMES = {
-                "TIT2": "Title",
-                "TPE1": "Artist",
-                "TALB": "Album",
-                "TPE2": "Album Artist",
-                "TCON": "Genre",
-                "TDRC": "Date",
-                "TYER": "Year",
-                "TRCK": "Track Number",
-                "TPOS": "Disc Number",
-                "TCOM": "Composer",
-                "TPUB": "Publisher",
-                "TBPM": "BPM",
-                "TKEY": "Key",
-                "COMM": "Comment",
-                "TIT1": "Content Group",
-                "TIT3": "Subtitle",
-                "TSST": "Set Subtitle",
-            }
 
             displayed_count = 0
             skipped_count = 0
@@ -150,8 +151,6 @@ def show_tags(filepath: str) -> None:
 
     except Exception as e:
         print(f"Error reading file: {e}")
-        import traceback
-
         traceback.print_exc()
         sys.exit(1)
 

@@ -2,7 +2,9 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from jukebox.core.event_bus import Events
@@ -13,6 +15,46 @@ logger = logging.getLogger(__name__)
 MODEL_PATH = Path.home() / ".jukebox" / "genre_model.pkl"
 THRESHOLD = 0.5
 TOP_N = 5
+
+
+class PredictionWorker(QThread):
+    """Worker exécutant le chargement de features et la prédiction ML hors du thread UI.
+
+    Le chargement de features (accès DB) et l'inférence du modèle peuvent être lents :
+    les exécuter sur le thread principal gèle l'interface.
+    """
+
+    # (predictions, error_message) — l'un des deux est None
+    finished_prediction = Signal(object, object)
+
+    def __init__(self, model: Any, track_id: int) -> None:
+        super().__init__()
+        self._model = model
+        self._track_id = track_id
+
+    def run(self) -> None:
+        """Charge les features puis prédit, en propageant les erreurs via le signal."""
+        try:
+            from ml.genre_classifier.data_loader import load_track_features
+
+            features = load_track_features(self._track_id)
+        except Exception:
+            logger.exception(
+                "[genre_suggester] Failed to load features for track %d", self._track_id
+            )
+            self.finished_prediction.emit(None, "Feature loading error")
+            return
+
+        if features is None:
+            self.finished_prediction.emit(None, "No ML analysis")
+            return
+
+        try:
+            predictions = self._model.predict_top_n(features, n=TOP_N)
+            self.finished_prediction.emit(predictions, None)
+        except Exception:
+            logger.exception("[genre_suggester] Prediction failed for track %d", self._track_id)
+            self.finished_prediction.emit(None, "Prediction error")
 
 
 class GenreSuggestionWidget(QWidget):
@@ -86,6 +128,7 @@ class GenreSuggesterPlugin:
         """Initialize plugin and load ML model."""
         self.context = context
         self.widget: GenreSuggestionWidget | None = None
+        self._worker: PredictionWorker | None = None
 
         # Load model
         try:
@@ -121,27 +164,38 @@ class GenreSuggesterPlugin:
             self.widget.show_unavailable("Model not found")
             return
 
-        try:
-            from ml.genre_classifier.data_loader import load_track_features
+        # Annule un éventuel worker précédent encore en cours
+        self._stop_worker()
 
-            features = load_track_features(track_id)
-        except Exception:
-            logger.exception("[genre_suggester] Failed to load features for track %d", track_id)
-            self.widget.show_unavailable("Feature loading error")
+        # Affiche l'état de chargement pendant l'inférence asynchrone
+        self.widget.show_loading()
+
+        self._worker = PredictionWorker(self.model, track_id)
+        self._worker.finished_prediction.connect(self._on_prediction_ready)
+        self._worker.start()
+
+    def _on_prediction_ready(
+        self, predictions: list[tuple[str, float]] | None, error: str | None
+    ) -> None:
+        """Réceptionne le résultat de la prédiction sur le thread UI."""
+        if self.widget is None:
             return
-
-        if features is None:
-            self.widget.show_unavailable("No ML analysis")
+        if error is not None:
+            self.widget.show_unavailable(error)
             return
-
-        try:
-            predictions = self.model.predict_top_n(features, n=TOP_N)
+        if predictions is not None:
             self.widget.display_suggestions(predictions)
-        except Exception:
-            logger.exception("[genre_suggester] Prediction failed for track %d", track_id)
-            self.widget.show_unavailable("Prediction error")
+
+    def _stop_worker(self) -> None:
+        """Arrête proprement le worker de prédiction en cours s'il existe."""
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.requestInterruption()
+            self._worker.quit()
+            self._worker.wait()
+        self._worker = None
 
     def shutdown(self) -> None:
         """Cleanup references."""
+        self._stop_worker()
         self.widget = None
         self.model = None

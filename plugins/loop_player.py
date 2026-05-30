@@ -14,6 +14,8 @@ from jukebox.core.settings_sync_mixin import SettingsSyncMixin, SyncedSetting
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
 
+logger = logging.getLogger(__name__)
+
 
 class LoopPlayerPlugin(SettingsSyncMixin):
     """Enable looping a section of the current track."""
@@ -115,7 +117,7 @@ class LoopPlayerPlugin(SettingsSyncMixin):
             # Activate loop at current position
             player = self.context.player
             if not player.current_file:
-                logging.warning("[Loop Player] No track loaded")
+                logger.warning("[Loop Player] No track loaded")
                 if self.loop_button:
                     self.loop_button.setChecked(False)
                 return
@@ -123,7 +125,7 @@ class LoopPlayerPlugin(SettingsSyncMixin):
             # Get track duration
             track_duration = self.context.get_current_track_duration()
             if not track_duration:
-                logging.warning("[Loop Player] Cannot get track duration")
+                logger.warning("[Loop Player] Cannot get track duration")
                 if self.loop_button:
                     self.loop_button.setChecked(False)
                 return
@@ -144,13 +146,14 @@ class LoopPlayerPlugin(SettingsSyncMixin):
                 self.loop_end = track_duration
 
             self.loop_active = True
-            self.position_timer.start()
+            if self.position_timer is not None:
+                self.position_timer.start()
 
             # Show loop region on waveform
             self._show_loop_region()
 
-            logging.info(
-                f"[Loop Player] Loop activated: {self.loop_start:.1f}s - {self.loop_end:.1f}s"
+            logger.info(
+                "[Loop Player] Loop activated: %.1fs - %.1fs", self.loop_start, self.loop_end
             )
 
             # Emit loop activated event
@@ -164,9 +167,10 @@ class LoopPlayerPlugin(SettingsSyncMixin):
         else:
             # Deactivate loop
             self.loop_active = False
-            self.position_timer.stop()
+            if self.position_timer is not None:
+                self.position_timer.stop()
             self._hide_loop_region()
-            logging.info("[Loop Player] Loop deactivated")
+            logger.info("[Loop Player] Loop deactivated")
 
             # Emit loop deactivated event
             self.context.emit(Events.LOOP_DEACTIVATED)
@@ -192,7 +196,7 @@ class LoopPlayerPlugin(SettingsSyncMixin):
         # If we've passed the loop end, jump back to loop start
         if current_pos >= self.loop_end:
             player.set_position(self.loop_start / track_duration)
-            logging.debug(f"[Loop Player] Looping back to {self.loop_start:.1f}s")
+            logger.debug("[Loop Player] Looping back to %.1fs", self.loop_start)
 
     def _show_loop_region(self) -> None:
         """Show loop region on waveform."""
@@ -224,7 +228,7 @@ class LoopPlayerPlugin(SettingsSyncMixin):
             self.waveform_widget.plot_widget.addItem(self.loop_region)
 
         except Exception as e:
-            logging.error(f"[Loop Player] Error showing loop region: {e}", exc_info=True)
+            logger.error("[Loop Player] Error showing loop region: %s", e, exc_info=True)
 
     def _hide_loop_region(self) -> None:
         """Hide loop region from waveform."""
@@ -233,7 +237,7 @@ class LoopPlayerPlugin(SettingsSyncMixin):
                 self.waveform_widget.plot_widget.removeItem(self.loop_region)
                 self.loop_region = None
             except Exception as e:
-                logging.error(f"[Loop Player] Error hiding loop region: {e}", exc_info=True)
+                logger.error("[Loop Player] Error hiding loop region: %s", e, exc_info=True)
 
     def _move_loop(self, delta: float) -> None:
         """Move loop position by delta seconds.
@@ -280,7 +284,7 @@ class LoopPlayerPlugin(SettingsSyncMixin):
             filepath=player.current_file,
         )
 
-        logging.debug(f"[Loop Player] Loop moved to {self.loop_start:.2f}s - {self.loop_end:.2f}s")
+        logger.debug("[Loop Player] Loop moved to %.2fs - %.2fs", self.loop_start, self.loop_end)
 
     def _move_loop_coarse_forward(self) -> None:
         """Move loop forward by coarse step."""
@@ -322,7 +326,7 @@ class LoopPlayerPlugin(SettingsSyncMixin):
             self.loop_region.setRegion([x_start, x_end])
 
         except Exception as e:
-            logging.error(f"[Loop Player] Error updating loop region: {e}", exc_info=True)
+            logger.error("[Loop Player] Error updating loop region: %s", e, exc_info=True)
 
     def _update_button_style(self) -> None:
         """Update button style based on loop state."""
@@ -338,7 +342,8 @@ class LoopPlayerPlugin(SettingsSyncMixin):
         """Reset loop when new track is loaded."""
         if self.loop_active:
             self.loop_active = False
-            self.position_timer.stop()
+            if self.position_timer is not None:
+                self.position_timer.stop()
             self._hide_loop_region()
             if self.loop_button:
                 self.loop_button.setChecked(False)
@@ -351,7 +356,7 @@ class LoopPlayerPlugin(SettingsSyncMixin):
             widget: The waveform widget instance.
         """
         self.waveform_widget = widget
-        logging.debug("[Loop Player] Waveform widget received via event")
+        logger.debug("[Loop Player] Waveform widget received via event")
 
     def activate(self, mode: str) -> None:
         """Activate plugin for mode."""
@@ -362,7 +367,8 @@ class LoopPlayerPlugin(SettingsSyncMixin):
         # Stop loop when switching modes
         if self.loop_active:
             self.loop_active = False
-            self.position_timer.stop()
+            if self.position_timer is not None:
+                self.position_timer.stop()
             self._hide_loop_region()
             if self.loop_button:
                 self.loop_button.setChecked(False)
@@ -376,7 +382,7 @@ class LoopPlayerPlugin(SettingsSyncMixin):
 
     def _on_settings_changed(self) -> None:
         """Reload config when settings change."""
-        logging.info("[Loop Player] Settings changed, reloading config from database")
+        logger.info("[Loop Player] Settings changed, reloading config from database")
         self._sync_settings_from_db()
 
     def _after_settings_sync(self, config: Any) -> None:

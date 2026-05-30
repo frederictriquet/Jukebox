@@ -117,8 +117,6 @@ class AudioAnalyzerPlugin:
         self.context = context
 
         # Subscribe to events
-        from jukebox.core.event_bus import Events
-
         context.subscribe(Events.TRACK_LOADED, self._on_track_loaded)
         context.subscribe(Events.AUDIO_ANALYSIS_COMPLETE, self._on_analysis_complete)
 
@@ -211,6 +209,11 @@ class AudioAnalyzerPlugin:
         worker.error.connect(
             lambda error: self._on_batch_analysis_error((track_id, filepath), error)
         )
+
+        # Attendre la fin du worker précédent avant de remplacer la référence :
+        # sinon le GC peut collecter le QThread encore en cours d'exécution.
+        if self._single_worker is not None and self._single_worker.isRunning():
+            self._single_worker.wait()
 
         # Store reference to prevent garbage collection
         self._single_worker = worker

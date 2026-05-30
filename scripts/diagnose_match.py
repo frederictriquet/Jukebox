@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: T201
 """Diagnostic tool for shazamix matcher false positives.
 
 Analyses why the matcher returns an incorrect track for a given mix segment.
@@ -78,6 +79,7 @@ Outputs:
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 import time
 from pathlib import Path
@@ -94,7 +96,7 @@ from shazamix.matcher import Matcher
 
 def _find_track_by_filepath(db: FingerprintDB, filepath: str) -> dict | None:
     """Find a track in the database by filepath (exact or partial match)."""
-    conn = db._get_connection()
+    conn = db._get_connection()  # type: ignore[reportAttributeAccessIssue]
 
     # Try exact match first
     row = conn.execute(
@@ -123,7 +125,7 @@ def _find_track_by_filepath(db: FingerprintDB, filepath: str) -> dict | None:
 
 def _check_features(db: FingerprintDB, track_id: int) -> dict[str, bool]:
     """Check if a track has precomputed audio features."""
-    conn = db._get_connection()
+    conn = db._get_connection()  # type: ignore[reportAttributeAccessIssue]
     rows = conn.execute(
         "SELECT feature_type FROM audio_features WHERE track_id = ?",
         (track_id,),
@@ -316,15 +318,24 @@ def _print_track(label: str, info: dict) -> None:
     print(f"    {filepath}")
 
 
-def _print_screening_entry(rank: int, track_id: int, combined: float, mfcc: float,
-                           chroma: float, db: FingerprintDB, marker: str = "") -> None:
+def _print_screening_entry(
+    rank: int,
+    track_id: int,
+    combined: float,
+    mfcc: float,
+    chroma: float,
+    db: FingerprintDB,
+    marker: str = "",
+) -> None:
     info = db.get_track_info(track_id)
     name = "?"
     if info:
         name = f"{info.get('artist', '?')} - {info.get('title', '?')}"
     marker_str = f" {marker}" if marker else ""
-    print(f"  #{rank + 1:>3d}  combined={combined:.4f}  mfcc={mfcc:.4f}  "
-          f"chroma={chroma:.4f}  | {name}{marker_str}")
+    print(
+        f"  #{rank + 1:>3d}  combined={combined:.4f}  mfcc={mfcc:.4f}  "
+        f"chroma={chroma:.4f}  | {name}{marker_str}"
+    )
 
 
 def _print_reranking_entry(label: str, data: dict) -> None:
@@ -334,13 +345,19 @@ def _print_reranking_entry(label: str, data: dict) -> None:
 
     info = data["track_info"]
     print(f"  {label}: {info.get('artist', '?')} - {info.get('title', '?')}")
-    print(f"    Combined: run={data['combined_run']} frames "
-          f"({data['combined_seconds']:.1f}s), avg_sim={data['combined_sim']:.4f}")
-    print(f"    Chroma:   run={data['chroma_run']} frames "
-          f"({data['chroma_seconds']:.1f}s), avg_sim={data['chroma_sim']:.4f}")
-    print(f"    FINAL:    score=min({data['combined_run']}, {data['chroma_run']}) = "
-          f"{data['final_score']} frames ({data['final_seconds']:.1f}s), "
-          f"sim={data['final_sim']:.4f}")
+    print(
+        f"    Combined: run={data['combined_run']} frames "
+        f"({data['combined_seconds']:.1f}s), avg_sim={data['combined_sim']:.4f}"
+    )
+    print(
+        f"    Chroma:   run={data['chroma_run']} frames "
+        f"({data['chroma_seconds']:.1f}s), avg_sim={data['chroma_sim']:.4f}"
+    )
+    print(
+        f"    FINAL:    score=min({data['combined_run']}, {data['chroma_run']}) = "
+        f"{data['final_score']} frames ({data['final_seconds']:.1f}s), "
+        f"sim={data['final_sim']:.4f}"
+    )
 
 
 # ============================================================
@@ -427,9 +444,7 @@ def _run_exp_scoring(
         ),
         (
             "harmonic_mean(run)",
-            lambda r: (
-                2 * r["comb_run"] * r["chro_run"] / max(r["comb_run"] + r["chro_run"], 1)
-            ),
+            lambda r: (2 * r["comb_run"] * r["chro_run"] / max(r["comb_run"] + r["chro_run"], 1)),
         ),
         (
             "geometric_mean(run)",
@@ -437,9 +452,7 @@ def _run_exp_scoring(
         ),
         (
             "min(run) * sim^2",
-            lambda r: (
-                min(r["comb_run"], r["chro_run"]) * min(r["comb_sim"], r["chro_sim"]) ** 2
-            ),
+            lambda r: (min(r["comb_run"], r["chro_run"]) * min(r["comb_sim"], r["chro_sim"]) ** 2),
         ),
     ]
 
@@ -546,9 +559,7 @@ def _run_exp_windows(
     for w_start_s, w_end_s in windows:
         offset_s = segment_start_ms / 1000.0 + w_start_s
         duration_s = w_end_s - w_start_s
-        y_win, _ = librosa.load(
-            mix_path, sr=sr, mono=True, offset=offset_s, duration=duration_s
-        )
+        y_win, _ = librosa.load(mix_path, sr=sr, mono=True, offset=offset_s, duration=duration_s)
         if len(y_win) == 0:
             continue
 
@@ -576,7 +587,7 @@ def _run_exp_windows(
         i_score = scores[incorrect_id]
         winner = "EXPECTED" if e_score > i_score else "incorrect" if i_score > e_score else "tie"
         marker = " <<" if winner == "EXPECTED" else ""
-        label = "{}-{}".format(w_start_s, w_end_s)
+        label = f"{w_start_s}-{w_end_s}"
         print(f"  {label:<15s}  {e_score:>10d}  {i_score:>10d}  {winner}{marker}")
 
 
@@ -810,9 +821,7 @@ def _run_exp_combined(
     rerank_duration = min(rerank_window_s, duration_s)
     print(f"\n  Step 2: Re-ranking top {len(candidates)} with {rerank_duration:.0f}s window")
 
-    y_rerank, _ = librosa.load(
-        mix_path, sr=sr, mono=True, offset=start_s, duration=rerank_duration
-    )
+    y_rerank, _ = librosa.load(mix_path, sr=sr, mono=True, offset=start_s, duration=rerank_duration)
 
     hop = 2048
     slide_step = 15
@@ -856,7 +865,8 @@ def _run_exp_combined(
             avg_sim = min(comb_sim, chro_sim) if score > 0 else 0.0
 
             rerank_results.append((tid, score, avg_sim, info))
-        except Exception:
+        except Exception as e:  # noqa: BLE001
+            logging.debug("Erreur re-ranking track %s : %s", tid, e)
             continue
 
     elapsed = time.time() - t0
@@ -922,9 +932,7 @@ def _run_exp_tempo_drift(
             print(f"\n  {label}: File not found: {filepath}")
             continue
 
-        name = "{} - {}".format(
-            track_info.get("artist", "?"), track_info.get("title", "?")
-        )
+        name = "{} - {}".format(track_info.get("artist", "?"), track_info.get("title", "?"))
         print(f"\n  --- {label}: {name} (id={track_id}) ---")
         print(
             f"  {'Ratio':>6s}  {'Comb run':>9s}  {'Comb s':>7s}  {'Comb sim':>9s}  "
@@ -989,14 +997,10 @@ def _run_exp_tempo_drift(
         # Summary for this track
         if baseline_score > 0 or best_score > 0:
             comb_improvement = (
-                (best_comb_run - baseline_comb) / baseline_comb * 100
-                if baseline_comb > 0
-                else 0
+                (best_comb_run - baseline_comb) / baseline_comb * 100 if baseline_comb > 0 else 0
             )
             score_improvement = (
-                (best_score - baseline_score) / baseline_score * 100
-                if baseline_score > 0
-                else 0
+                (best_score - baseline_score) / baseline_score * 100 if baseline_score > 0 else 0
             )
             print(f"\n  Summary for {label}:")
             print(
@@ -1016,31 +1020,13 @@ def _run_exp_tempo_drift(
     print(f"\n  {'=' * 70}")
     print("  TEMPO DRIFT VERDICT")
     print(f"  {'=' * 70}")
-    print(
-        "\n  If the EXPECTED track shows a dramatic improvement (>100%) at a "
-        "specific ratio"
-    )
-    print(
-        "  while the INCORRECT track shows only moderate variation (<50%), "
-        "this confirms"
-    )
+    print("\n  If the EXPECTED track shows a dramatic improvement (>100%) at a " "specific ratio")
+    print("  while the INCORRECT track shows only moderate variation (<50%), " "this confirms")
     print("  that TEMPO DRIFT is the root cause of the false positive.")
-    print(
-        "\n  Mechanism: The DJ played the track at a different tempo. "
-        "match_segment_by_mfcc()"
-    )
-    print(
-        "  does NOT time-stretch references (unlike Stage 1 fingerprinting "
-        "which tests"
-    )
-    print(
-        "  15 ratios). The progressive frame misalignment limits the sustained "
-        "run for"
-    )
-    print(
-        "  the true match, allowing coincidental false positives to win by "
-        "narrow margins."
-    )
+    print("\n  Mechanism: The DJ played the track at a different tempo. " "match_segment_by_mfcc()")
+    print("  does NOT time-stretch references (unlike Stage 1 fingerprinting " "which tests")
+    print("  15 ratios). The progressive frame misalignment limits the sustained " "run for")
+    print("  the true match, allowing coincidental false positives to win by " "narrow margins.")
 
 
 def main() -> None:
@@ -1056,29 +1042,48 @@ def main() -> None:
     parser.add_argument("--incorrect", help="Filepath of the incorrectly matched track")
     parser.add_argument("--db", default=str(DEFAULT_DB_PATH), help="Database path")
     parser.add_argument("--top-n", type=int, default=200, help="Screening candidates (default 200)")
-    parser.add_argument("--show-top", type=int, default=20,
-                        help="Number of top screening results to display (default 20)")
-    parser.add_argument("--screening-only", action="store_true",
-                        help="Only run Stage 2a screening, skip re-ranking")
+    parser.add_argument(
+        "--show-top",
+        type=int,
+        default=20,
+        help="Number of top screening results to display (default 20)",
+    )
+    parser.add_argument(
+        "--screening-only", action="store_true", help="Only run Stage 2a screening, skip re-ranking"
+    )
 
     # Experiment modes
     exp_group = parser.add_argument_group("experiments")
-    exp_group.add_argument("--exp-scoring", action="store_true",
-                           help="Exp 1: Compare alternative scoring formulas")
-    exp_group.add_argument("--exp-windows", action="store_true",
-                           help="Exp 2: Test multiple sub-segment time windows")
-    exp_group.add_argument("--exp-windowed-screening", action="store_true",
-                           help="Exp 3: Windowed screening (split query into windows)")
-    exp_group.add_argument("--exp-combined", action="store_true",
-                           help="Exp 4: Combined improved pipeline")
-    exp_group.add_argument("--exp-tempo-drift", action="store_true",
-                           help="Exp 5: Tempo drift root cause analysis")
-    exp_group.add_argument("--exp-all", action="store_true",
-                           help="Run ALL experiments")
-    exp_group.add_argument("--window-size", type=int, default=30,
-                           help="Window size in seconds for windowed experiments (default 30)")
-    exp_group.add_argument("--rerank-window", type=int, default=90,
-                           help="Re-ranking window in seconds for combined pipeline (default 90)")
+    exp_group.add_argument(
+        "--exp-scoring", action="store_true", help="Exp 1: Compare alternative scoring formulas"
+    )
+    exp_group.add_argument(
+        "--exp-windows", action="store_true", help="Exp 2: Test multiple sub-segment time windows"
+    )
+    exp_group.add_argument(
+        "--exp-windowed-screening",
+        action="store_true",
+        help="Exp 3: Windowed screening (split query into windows)",
+    )
+    exp_group.add_argument(
+        "--exp-combined", action="store_true", help="Exp 4: Combined improved pipeline"
+    )
+    exp_group.add_argument(
+        "--exp-tempo-drift", action="store_true", help="Exp 5: Tempo drift root cause analysis"
+    )
+    exp_group.add_argument("--exp-all", action="store_true", help="Run ALL experiments")
+    exp_group.add_argument(
+        "--window-size",
+        type=int,
+        default=30,
+        help="Window size in seconds for windowed experiments (default 30)",
+    )
+    exp_group.add_argument(
+        "--rerank-window",
+        type=int,
+        default=90,
+        help="Re-ranking window in seconds for combined pipeline (default 90)",
+    )
 
     args = parser.parse_args()
 
@@ -1091,8 +1096,10 @@ def main() -> None:
         args.exp_tempo_drift = True
 
     any_experiment = (
-        args.exp_scoring or args.exp_windows
-        or args.exp_windowed_screening or args.exp_combined
+        args.exp_scoring
+        or args.exp_windows
+        or args.exp_windowed_screening
+        or args.exp_combined
         or args.exp_tempo_drift
     )
 
@@ -1107,8 +1114,7 @@ def main() -> None:
 
     _print_header("MATCH DIAGNOSTIC")
     print(f"  Mix: {mix_path}")
-    print(f"  Segment: {args.start}ms - {args.end}ms "
-          f"({(args.end - args.start) / 1000:.1f}s)")
+    print(f"  Segment: {args.start}ms - {args.end}ms " f"({(args.end - args.start) / 1000:.1f}s)")
 
     # Resolve tracks of interest
     tracks_of_interest: dict[str, dict] = {}
@@ -1121,8 +1127,10 @@ def main() -> None:
             track_ids_of_interest.append(info["id"])
             features = _check_features(db, info["id"])
             _print_track("Expected (correct) track", info)
-            print(f"    Features: mfcc={features['mfcc_summary']}, "
-                  f"chroma={features['chroma_summary']}")
+            print(
+                f"    Features: mfcc={features['mfcc_summary']}, "
+                f"chroma={features['chroma_summary']}"
+            )
         else:
             print(f"\n  WARNING: Expected track not found in DB: {args.expected}")
 
@@ -1133,8 +1141,10 @@ def main() -> None:
             track_ids_of_interest.append(info["id"])
             features = _check_features(db, info["id"])
             _print_track("Incorrect (false positive) track", info)
-            print(f"    Features: mfcc={features['mfcc_summary']}, "
-                  f"chroma={features['chroma_summary']}")
+            print(
+                f"    Features: mfcc={features['mfcc_summary']}, "
+                f"chroma={features['chroma_summary']}"
+            )
         else:
             print(f"\n  WARNING: Incorrect track not found in DB: {args.incorrect}")
 
@@ -1156,21 +1166,22 @@ def main() -> None:
 
     # Show positions of tracks of interest
     if track_ids_of_interest:
-        print(f"\n  Tracks of interest in screening ranking:")
+        print("\n  Tracks of interest in screening ranking:")
         for label, tinfo in tracks_of_interest.items():
             tid = tinfo["id"]
             pos = screening["positions"].get(tid, -1)
             if pos >= 0:
                 entry = screening["all_scores"][pos]
-                print(f"    {label} (id={tid}): rank #{pos + 1}, "
-                      f"combined={entry[1]:.4f}, mfcc={entry[2]:.4f}, chroma={entry[3]:.4f}")
+                print(
+                    f"    {label} (id={tid}): rank #{pos + 1}, "
+                    f"combined={entry[1]:.4f}, mfcc={entry[2]:.4f}, chroma={entry[3]:.4f}"
+                )
             else:
                 print(f"    {label} (id={tid}): NOT FOUND in scores (missing features?)")
 
     # Show top results
-    top = screening["top_n"][:args.show_top]
+    top = screening["top_n"][: args.show_top]
     print(f"\n  Top {len(top)} screening results:")
-    interest_ids = {t["id"] for t in tracks_of_interest.values()}
     for i, (tid, combined, mfcc, chroma) in enumerate(top):
         marker = ""
         for label, tinfo in tracks_of_interest.items():
@@ -1194,26 +1205,41 @@ def main() -> None:
         inc_id = tracks_of_interest["INCORRECT"]["id"]
 
         if args.exp_scoring:
-            _run_exp_scoring(
-                matcher, screening["audio"], screening["sr"], exp_id, inc_id
-            )
+            _run_exp_scoring(matcher, screening["audio"], screening["sr"], exp_id, inc_id)
         if args.exp_windows:
-            _run_exp_windows(
-                matcher, str(mix_path), args.start, args.end, exp_id, inc_id
-            )
+            _run_exp_windows(matcher, str(mix_path), args.start, args.end, exp_id, inc_id)
         if args.exp_windowed_screening:
             _run_exp_windowed_screening(
-                matcher, str(mix_path), args.start, args.end, args.window_size,
-                args.top_n, track_ids_of_interest, args.show_top, db,
+                matcher,
+                str(mix_path),
+                args.start,
+                args.end,
+                args.window_size,
+                args.top_n,
+                track_ids_of_interest,
+                args.show_top,
+                db,
             )
         if args.exp_combined:
             _run_exp_combined(
-                matcher, str(mix_path), args.start, args.end, args.window_size,
-                args.rerank_window, args.top_n, track_ids_of_interest, db,
+                matcher,
+                str(mix_path),
+                args.start,
+                args.end,
+                args.window_size,
+                args.rerank_window,
+                args.top_n,
+                track_ids_of_interest,
+                db,
             )
         if args.exp_tempo_drift:
             _run_exp_tempo_drift(
-                matcher, screening["audio"], screening["sr"], exp_id, inc_id, db,
+                matcher,
+                screening["audio"],
+                screening["sr"],
+                exp_id,
+                inc_id,
+                db,
             )
         return
 
@@ -1228,15 +1254,13 @@ def main() -> None:
 
     print(f"  Re-ranking {len(rerank_ids)} tracks...")
     t0 = time.time()
-    reranking = _run_reranking(
-        matcher, screening["audio"], screening["sr"], rerank_ids
-    )
+    reranking = _run_reranking(matcher, screening["audio"], screening["sr"], rerank_ids)
     elapsed = time.time() - t0
     print(f"  Time: {elapsed:.1f}s")
 
     # Print results for tracks of interest first
     if tracks_of_interest:
-        print(f"\n  Tracks of interest:")
+        print("\n  Tracks of interest:")
         for label, tinfo in tracks_of_interest.items():
             tid = tinfo["id"]
             if tid in reranking:
@@ -1245,9 +1269,11 @@ def main() -> None:
                 print(f"  {label}: not re-ranked")
 
     # Print other top candidates
-    others = [tid for tid in rerank_ids if tid not in {t["id"] for t in tracks_of_interest.values()}]
+    others = [
+        tid for tid in rerank_ids if tid not in {t["id"] for t in tracks_of_interest.values()}
+    ]
     if others:
-        print(f"\n  Other top screening candidates:")
+        print("\n  Other top screening candidates:")
         for tid in others:
             if tid in reranking:
                 _print_reranking_entry(f"Track {tid}", reranking[tid])
@@ -1268,9 +1294,11 @@ def main() -> None:
                 if tinfo["id"] == tid:
                     marker = f" << {label}"
                     break
-            print(f"  #{i + 1}  score={score} ({data['final_seconds']:.1f}s) "
-                  f"sim={sim:.4f} | "
-                  f"{info.get('artist', '?')} - {info.get('title', '?')}{marker}")
+            print(
+                f"  #{i + 1}  score={score} ({data['final_seconds']:.1f}s) "
+                f"sim={sim:.4f} | "
+                f"{info.get('artist', '?')} - {info.get('title', '?')}{marker}"
+            )
 
     # ---- Diagnosis summary ----
     if "EXPECTED" in tracks_of_interest and "INCORRECT" in tracks_of_interest:
@@ -1290,7 +1318,7 @@ def main() -> None:
 
             if exp_pos >= args.top_n:
                 print(f"  >> EXPECTED TRACK NOT IN TOP-{args.top_n} CANDIDATES!")
-                print(f"     This means the correct track is filtered out before re-ranking.")
+                print("     This means the correct track is filtered out before re-ranking.")
                 print(f"     Consider: --top-n {max(args.top_n * 2, exp_pos + 50)}")
 
             exp_cs = exp_data.get("combined_run", 0)
@@ -1300,33 +1328,47 @@ def main() -> None:
             exp_fs = exp_data.get("final_score", 0)
             inc_fs = inc_data.get("final_score", 0)
 
-            print(f"\n  Combined run:  expected={exp_cs} vs incorrect={inc_cs}  "
-                  f"({'expected wins' if exp_cs > inc_cs else 'incorrect wins' if inc_cs > exp_cs else 'tie'})")
-            print(f"  Chroma run:    expected={exp_cr} vs incorrect={inc_cr}  "
-                  f"({'expected wins' if exp_cr > inc_cr else 'incorrect wins' if inc_cr > exp_cr else 'tie'})")
-            print(f"  Final score:   expected={exp_fs} vs incorrect={inc_fs}  "
-                  f"({'expected wins' if exp_fs > inc_fs else 'INCORRECT WINS' if inc_fs > exp_fs else 'tie'})")
+            print(
+                f"\n  Combined run:  expected={exp_cs} vs incorrect={inc_cs}  "
+                f"({'expected wins' if exp_cs > inc_cs else 'incorrect wins' if inc_cs > exp_cs else 'tie'})"
+            )
+            print(
+                f"  Chroma run:    expected={exp_cr} vs incorrect={inc_cr}  "
+                f"({'expected wins' if exp_cr > inc_cr else 'incorrect wins' if inc_cr > exp_cr else 'tie'})"
+            )
+            print(
+                f"  Final score:   expected={exp_fs} vs incorrect={inc_fs}  "
+                f"({'expected wins' if exp_fs > inc_fs else 'INCORRECT WINS' if inc_fs > exp_fs else 'tie'})"
+            )
 
             if inc_fs > exp_fs:
-                print(f"\n  CONCLUSION: False positive confirmed.")
+                print("\n  CONCLUSION: False positive confirmed.")
                 if exp_cs > inc_cs and exp_cr < inc_cr:
-                    print("  Root cause: Expected track wins on timbre (combined) but "
-                          "loses on harmony (chroma).")
+                    print(
+                        "  Root cause: Expected track wins on timbre (combined) but "
+                        "loses on harmony (chroma)."
+                    )
                     print("  Possible fix: Adjust chroma threshold or weighting.")
                 elif exp_cs < inc_cs and exp_cr > inc_cr:
-                    print("  Root cause: Expected track wins on harmony (chroma) but "
-                          "loses on timbre (combined).")
+                    print(
+                        "  Root cause: Expected track wins on harmony (chroma) but "
+                        "loses on timbre (combined)."
+                    )
                     print("  Possible fix: Adjust combined threshold or weighting.")
                 elif exp_cs < inc_cs and exp_cr < inc_cr:
                     print("  Root cause: Expected track loses on BOTH metrics.")
-                    print("  Possible causes: tempo shift, key change, or different "
-                          "version/remix in DB.")
+                    print(
+                        "  Possible causes: tempo shift, key change, or different "
+                        "version/remix in DB."
+                    )
                 else:
                     print("  Root cause: Needs further investigation.")
             elif exp_fs > inc_fs:
-                print(f"\n  CONCLUSION: Expected track scores HIGHER in re-ranking.")
-                print("  The false positive may be a Stage 2a screening issue "
-                      "(expected track filtered out).")
+                print("\n  CONCLUSION: Expected track scores HIGHER in re-ranking.")
+                print(
+                    "  The false positive may be a Stage 2a screening issue "
+                    "(expected track filtered out)."
+                )
 
     # ---- Experiment modes ----
     if any_experiment:
@@ -1339,14 +1381,10 @@ def main() -> None:
         inc_id = tracks_of_interest["INCORRECT"]["id"]
 
         if args.exp_scoring:
-            _run_exp_scoring(
-                matcher, screening["audio"], screening["sr"], exp_id, inc_id
-            )
+            _run_exp_scoring(matcher, screening["audio"], screening["sr"], exp_id, inc_id)
 
         if args.exp_windows:
-            _run_exp_windows(
-                matcher, str(mix_path), args.start, args.end, exp_id, inc_id
-            )
+            _run_exp_windows(matcher, str(mix_path), args.start, args.end, exp_id, inc_id)
 
         if args.exp_windowed_screening:
             _run_exp_windowed_screening(
@@ -1376,7 +1414,12 @@ def main() -> None:
 
         if args.exp_tempo_drift:
             _run_exp_tempo_drift(
-                matcher, screening["audio"], screening["sr"], exp_id, inc_id, db,
+                matcher,
+                screening["audio"],
+                screening["sr"],
+                exp_id,
+                inc_id,
+                db,
             )
 
 

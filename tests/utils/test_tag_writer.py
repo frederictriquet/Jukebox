@@ -3,10 +3,7 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from jukebox.utils.tag_writer import save_audio_tags
-
 
 # The tag_writer imports mutagen.File, mutagen.easyid3.EasyID3, and mutagen.id3.ID3NoHeaderError
 # lazily inside the function body, so we patch them at their source locations.
@@ -27,7 +24,9 @@ class TestSaveAudioTagsMP3:
         mock_audio.__contains__ = MagicMock(return_value=False)
 
         with patch(_PATCH_EASYID3, return_value=mock_audio):
-            result = save_audio_tags(str(mp3_path), {"artist": "Test Artist", "title": "Test Title"})
+            result = save_audio_tags(
+                str(mp3_path), {"artist": "Test Artist", "title": "Test Title"}
+            )
 
         assert result is True
         mock_audio.__setitem__.assert_any_call("artist", ["Test Artist"])

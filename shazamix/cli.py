@@ -7,19 +7,23 @@ Commands:
     stats     - Show indexing statistics
     clear     - Clear all fingerprints
 """
+
 # ruff: noqa: T201  # print() intentionnel dans un module CLI
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
-from .database import FingerprintDB, DEFAULT_DB_PATH  # type: ignore[import]
+from .database import DEFAULT_DB_PATH, FingerprintDB  # type: ignore[import]
+
+logger = logging.getLogger(__name__)
 
 
 def _notify_done(message: str, has_errors: bool = False) -> None:
@@ -50,8 +54,8 @@ def cmd_stats(args: argparse.Namespace) -> int:
     print(f"Avg fingerprints/track:     {stats['avg_fingerprints_per_track']:.0f}")
     print()
 
-    if stats['total_tracks'] > 0:
-        progress = stats['indexed_tracks'] / stats['total_tracks'] * 100
+    if stats["total_tracks"] > 0:
+        progress = stats["indexed_tracks"] / stats["total_tracks"] * 100
         print(f"Indexing progress:          {progress:.1f}%")
 
     return 0
@@ -100,12 +104,24 @@ def cmd_index(args: argparse.Namespace) -> int:
     # Process with multiprocessing
     with ProcessPoolExecutor(max_workers=args.workers) as executor:
         futures = {
-            executor.submit(_index_single_track, (t["id"], t["filepath"])): t
-            for t in tracks
+            executor.submit(_index_single_track, (t["id"], t["filepath"])): t for t in tracks
         }
 
         for future in as_completed(futures):
-            track_id, filepath, fingerprints, error = future.result()
+            try:
+                track_id, filepath, fingerprints, error = future.result()
+            except Exception as exc:
+                # Un crash de worker (BrokenProcessPool, etc.) ne doit pas planter
+                # toute l'indexation : on récupère la piste associée et on continue.
+                track = futures[future]
+                logger.warning(
+                    "Worker crash lors de l'indexation de %s : %s",
+                    track.get("filepath", "?"),
+                    exc,
+                    exc_info=True,
+                )
+                errors += 1
+                continue
             filename = os.path.basename(filepath)
 
             if fingerprints is not None:
@@ -130,7 +146,7 @@ def cmd_index(args: argparse.Namespace) -> int:
                     f"({indexed} ok, {errors} errors) "
                     f"- {rate:.1f}/sec "
                     f"- ETA: {remaining/60:.1f} min",
-                    end="\r"
+                    end="\r",
                 )
 
     print()
@@ -174,7 +190,7 @@ def cmd_identify(args: argparse.Namespace) -> int:
     print(f"Found {len(matches)} match(es) in {elapsed:.1f}s:")
     print()
 
-    for i, m in enumerate(matches[:args.top_n], 1):
+    for i, m in enumerate(matches[: args.top_n], 1):
         if m.artist and m.title:
             track_str = f"{m.artist} - {m.title}"
         elif m.title:
@@ -209,6 +225,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     print()
 
     last_progress = [0]  # Use list for closure
+    start = time.time()
 
     def progress_callback(current: int, total: int, message: str) -> None:
         """Display progress."""
@@ -224,14 +241,22 @@ def cmd_analyze(args: argparse.Namespace) -> int:
                 print(f"[{current}/{total}] {message} - {rate:.1f} seg/s - ETA: {remaining:.0f}s")
                 last_progress[0] = current
 
-    # Try loading cached fingerprints
-    from plugins.cue_maker.cache import load_cached_fingerprints, save_fingerprints_cache
+    # Le cache de fingerprints est fourni par le plugin cue_maker, optionnel :
+    # shazamix doit rester utilisable seul, sans dépendance dure vers les plugins.
+    try:
+        from plugins.cue_maker.cache import (  # type: ignore[import]
+            load_cached_fingerprints,
+            save_fingerprints_cache,
+        )
+    except ImportError:
+        logger.info("Plugin cue_maker absent — analyse sans cache de fingerprints")
+        load_cached_fingerprints = None  # type: ignore[assignment]
+        save_fingerprints_cache = None  # type: ignore[assignment]
 
-    cached_fps = load_cached_fingerprints(args.file)
+    cached_fps = load_cached_fingerprints(args.file) if load_cached_fingerprints else None
     if cached_fps is not None:
         print(f"[*] Using cached fingerprints ({len(cached_fps)} segments)")
 
-    start = time.time()
     matches, fingerprints = matcher.analyze_mix(
         args.file,
         segment_duration_sec=args.segment,
@@ -243,7 +268,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     elapsed = time.time() - start
 
     # Save fingerprints to cache if freshly extracted
-    if cached_fps is None and fingerprints:
+    if cached_fps is None and fingerprints and save_fingerprints_cache:
         save_fingerprints_cache(args.file, fingerprints)
 
     if not matches:
@@ -317,23 +342,27 @@ def main() -> int:
     # index command
     index_parser = subparsers.add_parser("index", help="Index tracks from Jukebox")
     index_parser.add_argument(
-        "--mode", "-m",
+        "--mode",
+        "-m",
         choices=["jukebox", "curating"],
         help="Only index tracks in this mode",
     )
     index_parser.add_argument(
-        "--limit", "-l",
+        "--limit",
+        "-l",
         type=int,
         help="Limit to N tracks",
     )
     index_parser.add_argument(
-        "--workers", "-w",
+        "--workers",
+        "-w",
         type=int,
         default=max(1, (os.cpu_count() or 2) - 1),
         help=f"Number of parallel workers (default: {max(1, (os.cpu_count() or 2) - 1)})",
     )
     index_parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         help="Show detailed progress",
     )
@@ -343,7 +372,8 @@ def main() -> int:
     identify_parser = subparsers.add_parser("identify", help="Identify a single audio file")
     identify_parser.add_argument("file", help="Audio file to identify")
     identify_parser.add_argument(
-        "--top-n", "-n",
+        "--top-n",
+        "-n",
         type=int,
         default=5,
         help="Show top N matches (default: 5)",
@@ -360,11 +390,13 @@ def main() -> int:
     analyze_parser = subparsers.add_parser("analyze", help="Analyze a mix file")
     analyze_parser.add_argument("file", help="Mix file to analyze")
     analyze_parser.add_argument(
-        "--output", "-o",
+        "--output",
+        "-o",
         help="Save cue sheet to file",
     )
     analyze_parser.add_argument(
-        "--segment", "-s",
+        "--segment",
+        "-s",
         type=float,
         default=30.0,
         help="Segment duration in seconds (default: 30)",
@@ -388,7 +420,8 @@ def main() -> int:
         help="Minimum confidence to report (default: 0.1)",
     )
     analyze_parser.add_argument(
-        "--workers", "-w",
+        "--workers",
+        "-w",
         type=int,
         default=4,
         help="Number of parallel workers (default: 4)",
@@ -402,7 +435,8 @@ def main() -> int:
     # clear command
     clear_parser = subparsers.add_parser("clear", help="Clear all fingerprints")
     clear_parser.add_argument(
-        "--force", "-f",
+        "--force",
+        "-f",
         action="store_true",
         help="Skip confirmation",
     )

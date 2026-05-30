@@ -236,12 +236,14 @@ class FrameRenderer:
                 )
                 self.layers.append(layer)
                 logging.info("[Frame Renderer] MilkDrop layer enabled")
-            except Exception as e:
-                logging.exception("[Frame Renderer] Échec d'initialisation MilkDrop")
-                raise RuntimeError(
-                    f"Impossible d'initialiser la couche MilkDrop : {e}\n"
+            except Exception:
+                # Désactivation du layer (comme les autres) : on logue la trace
+                # complète et on continue l'export sans MilkDrop plutôt que de
+                # tout faire échouer.
+                logging.exception(
+                    "[Frame Renderer] Échec d'initialisation MilkDrop — couche désactivée. "
                     "Vérifiez que libprojectM est installé et que le chemin des presets est valide."
-                ) from e
+                )
 
         # Intro overlay layer (plays once on top of everything)
         if self.intro_video_path:
@@ -255,11 +257,14 @@ class FrameRenderer:
                 )
                 self.layers.append(layer)
                 logging.info("[Frame Renderer] Intro overlay layer enabled")
-            except Exception as e:
-                logging.exception("[Frame Renderer] Échec d'initialisation de la vidéo d'intro")
-                raise RuntimeError(
-                    f"Impossible de charger la vidéo d'intro '{self.intro_video_path}' : {e}"
-                ) from e
+            except Exception:
+                # Désactivation du layer : trace complète loguée, export poursuivi
+                # sans la vidéo d'intro.
+                logging.exception(
+                    "[Frame Renderer] Échec d'initialisation de la vidéo d'intro '%s' "
+                    "— couche désactivée.",
+                    self.intro_video_path,
+                )
 
         # Sort by z-index
         self.layers.sort(key=lambda layer: layer.z_index)

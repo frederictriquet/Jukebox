@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 import math
-from random import Random
+import threading
 from dataclasses import dataclass
 from enum import Enum
+from random import Random
 from typing import TYPE_CHECKING, Any
 
 import numpy as np  # type: ignore[import-untyped]
@@ -29,6 +30,7 @@ except ImportError:
     def snoise2(x: float, y: float, **_: Any) -> float:  # type: ignore[misc]
         return 0.0
 
+
 # Try to import GPU shaders
 try:
     from plugins.video_exporter.layers.gpu_shaders import GPUShaderRenderer, get_gpu_renderer
@@ -46,7 +48,9 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray  # type: ignore[import-untyped]
 
 
-def vj_effect(display_name: str, category: str, pass_type: str = "generator") -> Callable:  # noqa: S107
+def vj_effect(
+    display_name: str, category: str, pass_type: str = "generator"
+) -> Callable:  # noqa: S107
     """Decorator to register VJing effect metadata on _render_* methods.
 
     Args:
@@ -299,13 +303,30 @@ class VJingLayer(BaseVisualLayer):
         "D": ["aurora", "nebula", "starfield", "smoke", "constellation", "feedback", "tunnel"],
         "C": ["kaleidoscope", "halftone"],
         "P": ["strobe", "pulse", "bass_warp", "lightning", "shockwave", "radar", "bloom"],
-        "T": ["fractal", "grid", "spiral", "moire", "hexgrid", "fft_rings", "timestretch", "attractor"],
+        "T": [
+            "fractal",
+            "grid",
+            "spiral",
+            "moire",
+            "hexgrid",
+            "fft_rings",
+            "timestretch",
+            "attractor",
+        ],
         "H": ["pulse", "fft_bars", "neon", "shutters"],
         "G": ["flow_field", "water", "swarm"],
         "I": ["neon", "bloom", "circuit", "hexgrid"],
         "A": ["wave", "bokeh"],
         "W": ["plasma", "spiral", "metaballs", "nebula", "feedback", "starfield"],
-        "B": ["explosion", "bass_warp", "lightning", "shockwave", "chromatic", "glitch", "shutters"],
+        "B": [
+            "explosion",
+            "bass_warp",
+            "lightning",
+            "shockwave",
+            "chromatic",
+            "glitch",
+            "shutters",
+        ],
         "F": ["particles", "pixelate", "swarm"],
         "R": ["vinyl", "scanlines", "halftone", "pixelate"],
         "L": ["lissajous", "moire", "spiral"],
@@ -537,6 +558,12 @@ class VJingLayer(BaseVisualLayer):
         self._cached_generators: list[str] = []
         self._cached_post_processors: list[str] = []
         self._cached_final_pass: list[str] = []
+
+        # Verrou sérialisant render() : feedback_buffer, particles, ripples,
+        # explosion_* et _current_intensity sont des états mutables partagés.
+        # L'export appelle render() depuis un ThreadPoolExecutor (jusqu'à 8 threads),
+        # ce qui provoquerait des data races sans ce verrou.
+        self._render_lock = threading.Lock()
 
         # beats as set for O(1) lookup (beats list kept for reversed iteration in effects)
         self._beats_set: set[int] = set()
@@ -782,9 +809,17 @@ class VJingLayer(BaseVisualLayer):
 
         # If a preset is selected, use its effects
         if self.preset and self.preset in self.presets:
-            effects = self.presets[self.preset]
+            raw_effects = self.presets[self.preset]
+            # Filtre par AVAILABLE_EFFECTS : une typo dans un preset YAML ne doit pas
+            # passer un effet inexistant au dispatch de render().
+            effects = [e for e in raw_effects if e in self.AVAILABLE_EFFECTS]
+            unknown = [e for e in raw_effects if e not in self.AVAILABLE_EFFECTS]
+            if unknown:
+                logging.warning(
+                    f"[VJingLayer] Preset '{self.preset}' : effets inconnus ignorés {unknown}"
+                )
             logging.info(f"[VJingLayer] Using preset '{self.preset}': {effects}")
-            return effects
+            return effects if effects else ["wave"]
 
         # Otherwise, use genre-based mapping
         if not self.genre:
@@ -1017,6 +1052,10 @@ class VJingLayer(BaseVisualLayer):
     def render(self, frame_idx: int, time_pos: float) -> Image.Image:
         """Render VJing effects for the current frame.
 
+        Sérialisé par ``self._render_lock`` : l'export appelle render() depuis
+        plusieurs threads, or les états mutables (feedback_buffer, particles,
+        ripples, _current_intensity, etc.) sont partagés. Voir [C22].
+
         Args:
             frame_idx: Frame index.
             time_pos: Time position in seconds.
@@ -1024,6 +1063,11 @@ class VJingLayer(BaseVisualLayer):
         Returns:
             RGBA image with VJing effects.
         """
+        with self._render_lock:
+            return self._render_locked(frame_idx, time_pos)
+
+    def _render_locked(self, frame_idx: int, time_pos: float) -> Image.Image:
+        """Corps de render(), exécuté sous ``self._render_lock``."""
         img = self.create_transparent_image()
 
         # Get current energy values
@@ -1058,16 +1102,19 @@ class VJingLayer(BaseVisualLayer):
             # Post-processors come exclusively from enabled_post_processing (UI checkboxes),
             # not from genre/preset mappings. Order follows AVAILABLE_EFFECTS definition.
             self._cached_post_processors = [
-                e for e in self.AVAILABLE_EFFECTS
-                if e in self.enabled_post_processing
+                e for e in self.AVAILABLE_EFFECTS if e in self.enabled_post_processing
             ]
             self._cached_final_pass = [
                 e for e in self.active_effects if e in self.FINAL_PASS_EFFECTS
             ]
             self._cached_active_effects = self.active_effects
-            logging.debug("[VJingLayer] frame=%d generators=%s post=%s final=%s",
-                          frame_idx, self._cached_generators,
-                          self._cached_post_processors, self._cached_final_pass)
+            logging.debug(
+                "[VJingLayer] frame=%d generators=%s post=%s final=%s",
+                frame_idx,
+                self._cached_generators,
+                self._cached_post_processors,
+                self._cached_final_pass,
+            )
         generators = self._cached_generators
         post_processors = self._cached_post_processors
         final_pass = self._cached_final_pass
@@ -1087,7 +1134,9 @@ class VJingLayer(BaseVisualLayer):
                 try:
                     effect_method(effect_img, frame_idx, time_pos, ctx)
                 except Exception:
-                    logging.exception("[VJingLayer] Effect '%s' failed (frame %d)", effect_name, frame_idx)
+                    logging.exception(
+                        "[VJingLayer] Effect '%s' failed (frame %d)", effect_name, frame_idx
+                    )
                     continue
                 img.alpha_composite(effect_img)
 
@@ -1114,7 +1163,8 @@ class VJingLayer(BaseVisualLayer):
                         except Exception:
                             logging.exception(
                                 "[VJingLayer] Post-proc '%s' failed (frame %d)",
-                                effect_name, frame_idx,
+                                effect_name,
+                                frame_idx,
                             )
 
         # Third: final-pass effects (bloom etc.) on the fully composited image
@@ -1125,7 +1175,9 @@ class VJingLayer(BaseVisualLayer):
                 try:
                     effect_method(img, frame_idx, time_pos, ctx)
                 except Exception:
-                    logging.exception("[VJingLayer] Final-pass '%s' failed (frame %d)", effect_name, frame_idx)
+                    logging.exception(
+                        "[VJingLayer] Final-pass '%s' failed (frame %d)", effect_name, frame_idx
+                    )
 
         return img
 
@@ -1222,7 +1274,9 @@ class VJingLayer(BaseVisualLayer):
             try:
                 effect_method(effect_img, frame_idx, time_pos, ctx)
             except Exception:
-                logging.exception("[VJingLayer] Effect '%s' failed (frame %d)", effect_name, frame_idx)
+                logging.exception(
+                    "[VJingLayer] Effect '%s' failed (frame %d)", effect_name, frame_idx
+                )
                 continue
 
             # Composite via PIL straight-alpha (correct Porter-Duff "over").
@@ -1691,7 +1745,7 @@ class VJingLayer(BaseVisualLayer):
         ts = np.linspace(0, 1.2 * math.pi, n_pts)
         xs = center[0] + amplitude_x * np.cos(a * ts + delta)
         ys = center[1] + amplitude_y * np.sin(b * ts + delta)
-        points = list(zip(xs.tolist(), ys.tolist()))
+        points = list(zip(xs.tolist(), ys.tolist(), strict=False))
 
         # Draw segment by segment with interpolated color
         for i in range(len(points) - 1):
@@ -1803,7 +1857,7 @@ class VJingLayer(BaseVisualLayer):
         radii = progress * max_radius * scale_mod
         xs = center[0] + radii * np.cos(angles)
         ys = center[1] + radii * np.sin(angles)
-        points = list(zip(xs.tolist(), ys.tolist()))
+        points = list(zip(xs.tolist(), ys.tolist(), strict=False))
 
         # Draw with gradient color from palette, shifted by LFO
         line_w = max(1, int(2 * s))
@@ -2204,7 +2258,7 @@ class VJingLayer(BaseVisualLayer):
                 + np.sin(xs_arr * 0.02 + phase) * amplitude
                 + np.sin(xs_arr * 0.01 - time_pos) * amplitude * 0.5
             )
-            points = list(zip(xs_arr.tolist(), ys_arr.astype(int).tolist()))
+            points = list(zip(xs_arr.tolist(), ys_arr.astype(int).tolist(), strict=False))
 
             if len(points) >= 2:
                 # Increased alpha from 100 to 200, reduced division factor
@@ -2273,7 +2327,7 @@ class VJingLayer(BaseVisualLayer):
             xs = center[0] + radius * np.cos(angles)
             ys = center[1] + radius * np.sin(angles)
             grays = (180 + 20 * np.sin(angles * 5)).astype(int)
-            for x, y, gray in zip(xs.tolist(), ys.tolist(), grays.tolist()):
+            for x, y, gray in zip(xs.tolist(), ys.tolist(), grays.tolist(), strict=False):
                 draw.ellipse(
                     [x - dot_r, y - dot_r, x + dot_r, y + dot_r],
                     fill=(gray, gray, gray, alpha),
@@ -2304,12 +2358,8 @@ class VJingLayer(BaseVisualLayer):
         self.fractal_palette = self._create_fractal_palette()
 
         # Pre-allocate scratch arrays for Julia iteration loop
-        self._fractal_iters = np.zeros(
-            (self.fractal_height, self.fractal_width), dtype=np.int32
-        )
-        self._fractal_mask = np.ones(
-            (self.fractal_height, self.fractal_width), dtype=bool
-        )
+        self._fractal_iters = np.zeros((self.fractal_height, self.fractal_width), dtype=np.int32)
+        self._fractal_mask = np.ones((self.fractal_height, self.fractal_width), dtype=bool)
 
     def _create_fractal_palette(self) -> NDArray:
         """Create a color palette for fractal coloring based on current palette.
@@ -2400,7 +2450,7 @@ class VJingLayer(BaseVisualLayer):
         for i in range(max_iter):
             # np.where évite l'assignation par indexation booléenne
             # (z[mask] = z[mask]**2+c est instable quand mask est modifié entre lecture et écriture)
-            z = np.where(mask, z ** 2 + c, z)
+            z = np.where(mask, z**2 + c, z)
             escaped = np.abs(z) > 4
             new_escaped = escaped & mask
             iterations[new_escaped] = i
@@ -3133,8 +3183,8 @@ class VJingLayer(BaseVisualLayer):
         # (n, h, w) distance squared arrays
         dx_all = self.metaball_x[np.newaxis, :, :] - self._mb_x[:, np.newaxis, np.newaxis]
         dy_all = self.metaball_y[np.newaxis, :, :] - self._mb_y[:, np.newaxis, np.newaxis]
-        dist_sq = dx_all ** 2 + dy_all ** 2 + 1
-        field = ((radii ** 2)[:, np.newaxis, np.newaxis] / dist_sq).sum(axis=0)
+        dist_sq = dx_all**2 + dy_all**2 + 1
+        field = ((radii**2)[:, np.newaxis, np.newaxis] / dist_sq).sum(axis=0)
 
         threshold = 1.0
         inside = field > threshold
@@ -4330,9 +4380,9 @@ class VJingLayer(BaseVisualLayer):
 
         # Separation (vectorised O(n) per boid → O(n²) overall but pure numpy)
         sep_dist_sq = separation_dist * separation_dist
-        dx_mat = bx[:, np.newaxis] - bx[np.newaxis, :]   # (n, n)
+        dx_mat = bx[:, np.newaxis] - bx[np.newaxis, :]  # (n, n)
         dy_mat = by[:, np.newaxis] - by[np.newaxis, :]
-        d2_mat = dx_mat ** 2 + dy_mat ** 2
+        d2_mat = dx_mat**2 + dy_mat**2
         np.fill_diagonal(d2_mat, sep_dist_sq + 1)  # exclude self
         close = (d2_mat > 0) & (d2_mat < sep_dist_sq)
         d_mat = np.where(close, np.sqrt(np.maximum(d2_mat, 1e-9)), 1.0)
@@ -4347,7 +4397,7 @@ class VJingLayer(BaseVisualLayer):
             bvy += (cy - by) * center_pull
 
         # Clamp speed
-        speeds = np.sqrt(bvx ** 2 + bvy ** 2)
+        speeds = np.sqrt(bvx**2 + bvy**2)
         too_fast = speeds > max_speed
         bvx = np.where(too_fast, bvx / np.where(speeds > 0, speeds, 1.0) * max_speed, bvx)
         bvy = np.where(too_fast, bvy / np.where(speeds > 0, speeds, 1.0) * max_speed, bvy)
@@ -4365,18 +4415,16 @@ class VJingLayer(BaseVisualLayer):
         # Reuse d2_mat (computed above but with diag patched; recompute cleanly)
         dx2 = self._swarm_x[:, np.newaxis] - self._swarm_x[np.newaxis, :]
         dy2 = self._swarm_y[:, np.newaxis] - self._swarm_y[np.newaxis, :]
-        d2_link = dx2 ** 2 + dy2 ** 2
+        d2_link = dx2**2 + dy2**2
         # Only upper triangle to avoid drawing each pair twice
-        i_idx, j_idx = np.where(
-            np.triu((d2_link < link_dist_sq) & (d2_link > 0), k=1)
-        )
+        i_idx, j_idx = np.where(np.triu((d2_link < link_dist_sq) & (d2_link > 0), k=1))
         if len(i_idx) > 0:
             dists = np.sqrt(d2_link[i_idx, j_idx])
             fades = 1.0 - dists / link_dist
             alphas = (fades * 60 * intensity).astype(int)
             xs = self._swarm_x.astype(int)
             ys = self._swarm_y.astype(int)
-            for ii, jj, la in zip(i_idx, j_idx, alphas):
+            for ii, jj, la in zip(i_idx, j_idx, alphas, strict=False):
                 if la > 3:
                     color = self._get_palette_color(int(self._swarm_color_idx[ii]))
                     draw.line(
@@ -4554,8 +4602,8 @@ class VJingLayer(BaseVisualLayer):
         col_idx = np.arange(cols + 1, dtype=np.float32)
         row_idx = np.arange(rows + 1, dtype=np.float32)
         # gx[r, c], gy[r, c] — base grid coords
-        gx = col_idx[np.newaxis, :] * cell_w          # (rows+1, cols+1)
-        gy = row_idx[:, np.newaxis] * cell_h           # (rows+1, cols+1)
+        gx = col_idx[np.newaxis, :] * cell_w  # (rows+1, cols+1)
+        gy = row_idx[:, np.newaxis] * cell_h  # (rows+1, cols+1)
 
         # Base slow undulation — broadcast to full (rows+1, cols+1) so ripple += works
         zeros = np.zeros((rows + 1, cols + 1), dtype=np.float32)
@@ -4569,7 +4617,7 @@ class VJingLayer(BaseVisualLayer):
             dist2 = (gx - rcx) ** 2 + (gy - rcy) ** 2
             dist = np.sqrt(dist2)
             wave_front = age * 300 * s
-            amplitude = np.exp(-((dist - wave_front) ** 2) / (2 * spread ** 2))
+            amplitude = np.exp(-((dist - wave_front) ** 2) / (2 * spread**2))
             decay = math.exp(-age * 1.5)
             disp = amplitude * decay * 25 * s * bass * intensity
             safe_dist = np.where(dist > 0, dist, 1.0)
@@ -4578,7 +4626,7 @@ class VJingLayer(BaseVisualLayer):
 
         px_grid = (gx + dx).tolist()  # list of (rows+1) lists of (cols+1) floats
         py_grid = (gy + dy).tolist()
-        points = [list(zip(px_grid[r], py_grid[r])) for r in range(rows + 1)]
+        points = [list(zip(px_grid[r], py_grid[r], strict=False)) for r in range(rows + 1)]
 
         # Draw grid lines
         line_w = max(1, int(1.5 * s))
@@ -4914,16 +4962,12 @@ class VJingLayer(BaseVisualLayer):
         np.maximum.at(buf[:, :, 2], (py[pos], px[pos]), colors[:, 2])
 
         rgb = np.clip(buf, 0, 255).astype(np.uint8)
-        alpha = np.minimum(
-            np.max(rgb, axis=2), min(255, int(220 * self._current_intensity))
-        )
+        alpha = np.minimum(np.max(rgb, axis=2), min(255, int(220 * self._current_intensity)))
         result = Image.fromarray(np.dstack([rgb, alpha]), "RGBA")
         img.paste(result, (0, 0), result)
 
     @vj_effect("Sphere", "Geometric")
-    def _render_sphere(
-        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
-    ) -> None:
+    def _render_sphere(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Multi-axis rotating sphere — transcribed from dwitter.net d/34247 by KilledByAPixel.
 
         Coloured points on a transparent/black background with smooth palette transitions.
@@ -4942,7 +4986,7 @@ class VJingLayer(BaseVisualLayer):
         r = np.sqrt(r_sq)
 
         # Azimuthal angle: i³ − t·2 (float64; precision loss at large i is intentional)
-        a = i_arr ** 3 - time_pos * 2.0
+        a = i_arr**3 - time_pos * 2.0
         X = r * np.cos(a)
         Y = r * np.sin(a)
 
@@ -4954,7 +4998,7 @@ class VJingLayer(BaseVisualLayer):
 
         # Rotation 2: Y axis, angle t (fast) + back-face culling
         st, ct = math.sin(time_pos), math.cos(time_pos)
-        depth = X * ct - W * st          # ∈ (0, 1] for visible front hemisphere
+        depth = X * ct - W * st  # ∈ (0, 1] for visible front hemisphere
         visible = valid & (depth > 0.0)
 
         scale = min(w, h) * (450.0 / 1080.0)
@@ -4989,9 +5033,7 @@ class VJingLayer(BaseVisualLayer):
         colors = self._sphere_lut[lut_idx]  # (N_vis, 3)
 
         # Alpha: limb darkening (bright at centre, fade toward silhouette edge)
-        alpha = np.clip(
-            depth_v * 240.0 * self._current_intensity, 30, 240
-        ).astype(np.uint8)
+        alpha = np.clip(depth_v * 240.0 * self._current_intensity, 30, 240).astype(np.uint8)
 
         # Draw 2×2 pixel blocks
         arr = np.zeros((h, w, 4), dtype=np.uint8)
@@ -5072,9 +5114,7 @@ class VJingLayer(BaseVisualLayer):
         img.paste(result, (0, 0), result)
 
     @vj_effect("Galaxy", "Particules")
-    def _render_galaxy(
-        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
-    ) -> None:
+    def _render_galaxy(self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict) -> None:
         """Galaxy spiral — transcribed from dwitter.net d/34920.
 
         2 000 particles placed in polar coordinates:

@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from jukebox.core.event_bus import Events
+
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
 
@@ -47,7 +49,10 @@ class TabEventFilter(QObject):
             focused_widget = QApplication.focusWidget()
 
             if event.key() == Qt.Key.Key_Tab:
-                if isinstance(focused_widget, QLineEdit) and focused_widget in self.metadata_widget.field_widgets:
+                if (
+                    isinstance(focused_widget, QLineEdit)
+                    and focused_widget in self.metadata_widget.field_widgets
+                ):
                     current_index = self.metadata_widget.field_widgets.index(focused_widget)
                     if current_index == len(self.metadata_widget.field_widgets) - 1:
                         focused_widget.clearFocus()
@@ -57,7 +62,11 @@ class TabEventFilter(QObject):
                     self.metadata_widget.field_widgets[0].setFocus()
                 return True
 
-            elif event.key() == Qt.Key.Key_Backtab and isinstance(focused_widget, QLineEdit) and focused_widget in self.metadata_widget.field_widgets:
+            elif (
+                event.key() == Qt.Key.Key_Backtab
+                and isinstance(focused_widget, QLineEdit)
+                and focused_widget in self.metadata_widget.field_widgets
+            ):
                 current_index = self.metadata_widget.field_widgets.index(focused_widget)
                 prev_index = (current_index - 1) % len(self.metadata_widget.field_widgets)
                 self.metadata_widget.field_widgets[prev_index].setFocus()
@@ -96,8 +105,6 @@ class MetadataEditorPlugin:
         self.context = context
 
         # Subscribe to track loaded event
-        from jukebox.core.event_bus import Events
-
         context.subscribe(Events.TRACK_LOADED, self._on_track_loaded)
 
     def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
@@ -149,6 +156,12 @@ class MetadataEditorPlugin:
                         file_meta = MetadataExtractor.extract(Path(track["filepath"]))
                         comment = file_meta.get("comment", "") or ""
                     except Exception:
+                        # M31 : ne pas avaler silencieusement l'erreur d'extraction
+                        logging.warning(
+                            "Failed to extract comment from %s, defaulting to empty",
+                            track["filepath"],
+                            exc_info=True,
+                        )
                         comment = ""
                     self.context.database.tracks.update_metadata(track_id, {"comment": comment})
                     values["comment"] = comment
@@ -179,33 +192,32 @@ class MetadataEditorPlugin:
 
         sanitized_values = {name: sanitize(value) for name, value in field_values.items()}
 
-        # Update database with mapped column names
+        # M32 : écrire d'abord le tag fichier, puis la DB. Si l'écriture fichier
+        # échoue, on n'altère pas la DB afin d'éviter une divergence DB/fichier.
+        from jukebox.utils.tag_writer import save_audio_tags
+
+        success = save_audio_tags(filepath, sanitized_values)
+        if not success:
+            logging.error("Failed to save file tags: %s", filepath)
+            # Retour visuel dans la status bar en cas d'échec de sauvegarde
+            self.context.emit(
+                Events.STATUS_MESSAGE,
+                message=f"Erreur : impossible de sauvegarder les métadonnées dans {Path(filepath).name}",
+            )
+            return
+
+        # Le fichier est à jour : on synchronise la DB avec les colonnes mappées
         db_updates = {}
         for tag, value in sanitized_values.items():
             db_column = TAG_TO_DB_COLUMN.get(tag, tag)
-            # Convert year to integer if it's a number
+            # Convertir year en entier si c'est un nombre
             if db_column == "year" and value.isdigit():
                 db_updates[db_column] = int(value)
             else:
                 db_updates[db_column] = value
 
         self.context.database.tracks.update_metadata(self.current_track_id, db_updates)
-
-        # Update file tags
-        from jukebox.utils.tag_writer import save_audio_tags
-
-        success = save_audio_tags(filepath, sanitized_values)
-        if success:
-            logging.info("Saved metadata for track %d", self.current_track_id)
-        else:
-            logging.error("Failed to save file tags: %s", filepath)
-            # Retour visuel dans la status bar en cas d'échec de sauvegarde
-            from jukebox.core.event_bus import Events
-
-            self.context.emit(
-                Events.STATUS_MESSAGE,
-                message=f"Erreur : impossible de sauvegarder les métadonnées dans {Path(filepath).name}",
-            )
+        logging.info("Saved metadata for track %d", self.current_track_id)
 
         # Note: We don't emit TRACKS_ADDED here to avoid reloading the entire track list
         # The track list display will update on next full reload
@@ -229,8 +241,16 @@ class MetadataEditorPlugin:
         logging.debug("[Metadata Editor] Deactivated for %s mode", mode)
 
     def shutdown(self) -> None:
-        """Cleanup on application exit. No cleanup needed for this plugin."""
-        ...
+        """Cleanup on application exit."""
+        # Retire le filtre TAB de QApplication pour éviter une fuite mémoire
+        # et un overhead sur tous les événements clavier (le widget peut être
+        # encore visible au moment du shutdown, donc hideEvent n'a pas suffi).
+        if self.tab_event_filter is not None:
+            from PySide6.QtWidgets import QApplication
+
+            app = QApplication.instance()
+            if app:
+                app.removeEventFilter(self.tab_event_filter)
 
 
 class MetadataEditorWidget(QWidget):

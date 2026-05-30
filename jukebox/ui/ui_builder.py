@@ -157,8 +157,12 @@ class UIBuilder:
             # Remove widget from its parent layout first
             if widget.parent():
                 parent = widget.parent()
-                if hasattr(parent, "layout") and parent.layout():  # type: ignore[attr-defined]
-                    parent.layout().removeWidget(widget)  # type: ignore[attr-defined]
+                if (
+                    hasattr(parent, "layout") and parent.layout()
+                ):  # pyright: ignore[reportAttributeAccessIssue]
+                    parent.layout().removeWidget(
+                        widget
+                    )  # pyright: ignore[reportAttributeAccessIssue]
 
             # Hide widget immediately before deletion
             widget.hide()

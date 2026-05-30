@@ -11,6 +11,7 @@ from jukebox.core.config import GenreCodeConfig
 from jukebox.core.event_bus import Events
 from jukebox.core.settings_sync_mixin import SettingsSyncMixin, SyncedJsonList, SyncedSetting
 from jukebox.core.shortcut_mixin import ShortcutMixin
+from jukebox.ui.components.track_cell_renderer import GENRE_PATTERN
 
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
@@ -76,14 +77,14 @@ class GenreEditorPlugin(SettingsSyncMixin, ShortcutMixin):
         # Validate genre format - if invalid, reset to empty
         if track and track["genre"]:
             genre = track["genre"]
-            # Validate against pattern (same as GenreStyler)
-            # Note: *0 is not allowed, only *1 to *5
-            genre_pattern = r"^([A-Z])(-[A-Z])*(-\*[1-5])?$"
-            if re.match(genre_pattern, genre):
+            # Validation via le pattern partagé avec GenreStyler
+            if GENRE_PATTERN.match(genre):
                 self.current_genre = genre
             else:
                 # Invalid genre - reset to empty
-                logging.info(f"Invalid genre format '{genre}' for track {track_id}, resetting to empty")
+                logging.info(
+                    "Invalid genre format '%s' for track %s, resetting to empty", genre, track_id
+                )
                 self.current_genre = ""
         else:
             self.current_genre = ""
@@ -153,10 +154,7 @@ class GenreEditorPlugin(SettingsSyncMixin, ShortcutMixin):
             match = re.match(r"\*(\d)", current)
             if match:
                 current_num = int(match.group(1))
-                if current_num >= 5:
-                    new_rating = ""  # Cycle back to no rating
-                else:
-                    new_rating = f"*{current_num + 1}"
+                new_rating = "" if current_num >= 5 else f"*{current_num + 1}"
             else:
                 new_rating = "*1"
 
@@ -182,25 +180,24 @@ class GenreEditorPlugin(SettingsSyncMixin, ShortcutMixin):
 
         filepath = track["filepath"]
 
-        # Update database
-        self.context.database.tracks.update_metadata(self.current_track_id, {"genre": new_genre})
-
-        # Emit event to update track list display
-        self.context.emit(Events.TRACK_METADATA_UPDATED, filepath=Path(filepath))
-
-        # Update file tags
+        # M29 : écrire d'abord le tag fichier, puis la DB. Si l'écriture fichier
+        # échoue, on n'altère pas la DB afin d'éviter une divergence DB/fichier.
         from jukebox.utils.tag_writer import save_audio_tags
 
         success = save_audio_tags(filepath, {"genre": new_genre})
-        if success:
-            logging.info(f"Saved genre '{new_genre}' for track {self.current_track_id}")
-        else:
-            logging.error(f"Failed to save genre to file: {filepath}")
+        if not success:
+            logging.error("Failed to save genre to file: %s", filepath)
             # Retour visuel dans la status bar en cas d'échec de sauvegarde
             self.context.emit(
                 Events.STATUS_MESSAGE,
                 message=f"Erreur : impossible de sauvegarder le genre dans {Path(filepath).name}",
             )
+            return
+
+        # Le fichier est à jour : on synchronise la DB et l'affichage
+        self.context.database.tracks.update_metadata(self.current_track_id, {"genre": new_genre})
+        self.context.emit(Events.TRACK_METADATA_UPDATED, filepath=Path(filepath))
+        logging.info("Saved genre '%s' for track %s", new_genre, self.current_track_id)
 
         # Note: We don't emit TRACKS_ADDED here to avoid reloading the entire track list
         # The track list display will update on next full reload
@@ -208,12 +205,12 @@ class GenreEditorPlugin(SettingsSyncMixin, ShortcutMixin):
     def activate(self, mode: str) -> None:
         """Activate plugin for this mode."""
         self._activate_shortcuts()
-        logging.debug(f"[Genre Editor] Activated for {mode} mode")
+        logging.debug("[Genre Editor] Activated for %s mode", mode)
 
     def deactivate(self, mode: str) -> None:
         """Deactivate plugin for this mode."""
         self._deactivate_shortcuts()
-        logging.debug(f"[Genre Editor] Deactivated for {mode} mode")
+        logging.debug("[Genre Editor] Deactivated for %s mode", mode)
 
     def shutdown(self) -> None:
         """Cleanup on application exit. No cleanup needed for this plugin."""

@@ -26,7 +26,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
     print(f"Tracks with genre: {stats['tracks_with_genre']}")
     print(f"Tracks with basic analysis: {stats['tracks_with_analysis']}")
     print(f"Tracks with ML features: {stats['tracks_with_ml_features']}")
-    missing_ml = stats['tracks_with_analysis'] - stats['tracks_with_ml_features']
+    missing_ml = stats["tracks_with_analysis"] - stats["tracks_with_ml_features"]
     if missing_ml > 0:
         print(f"  → {missing_ml} tracks need ML analysis (run: analyze)")
     print(f"Usable for training: {stats['usable_for_training']}")
@@ -170,7 +170,6 @@ def cmd_info(args: argparse.Namespace) -> int:
     return 0
 
 
-
 def _analyze_track(args: tuple[int, str]) -> tuple[int, str, dict | None, str | None]:
     """Analyze a single track (worker function for multiprocessing).
 
@@ -206,12 +205,16 @@ def _save_analysis(db_path: Path, track_id: int, features: dict) -> None:
     col_names = ", ".join(["track_id"] + columns)
     values = [track_id] + list(features.values())
 
-    conn.execute(f"""
+    conn.execute(
+        f"""
         INSERT OR REPLACE INTO audio_analysis ({col_names})
         VALUES ({placeholders})
-    """, values)
+    """,
+        values,
+    )
     conn.commit()
     conn.close()
+
 
 def _notify_analyze_done(success: int, errors: int, elapsed: float) -> None:
     """Send a Telegram notification when analysis is done."""
@@ -300,10 +303,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
 
     with ProcessPoolExecutor(max_workers=args.workers, max_tasks_per_child=1) as executor:
         # Submit all tasks
-        futures = {
-            executor.submit(_analyze_track, track): track
-            for track in valid_tracks
-        }
+        futures = {executor.submit(_analyze_track, track): track for track in valid_tracks}
 
         # Process results as they complete
         try:
@@ -337,11 +337,14 @@ def cmd_analyze(args: argparse.Namespace) -> int:
                     )
         except Exception as exc:
             from concurrent.futures.process import BrokenProcessPool
+
             if isinstance(exc, BrokenProcessPool):
                 broken_pool = True
-                print(f"\n\n⚠️  Worker process killed (out of memory?).", file=sys.stderr)
+                print("\n\n⚠️  Worker process killed (out of memory?).", file=sys.stderr)
                 print(f"   Saved {success} tracks so far.", file=sys.stderr)
-                print(f"   Try fewer workers: --workers {max(1, args.workers // 2)}", file=sys.stderr)
+                print(
+                    f"   Try fewer workers: --workers {max(1, args.workers // 2)}", file=sys.stderr
+                )
             else:
                 raise
 

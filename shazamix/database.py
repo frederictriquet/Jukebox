@@ -7,6 +7,8 @@ for fingerprints that references the existing tracks table.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -40,66 +42,78 @@ class FingerprintDB:
         self.db_path = Path(db_path)
         self._ensure_tables()
 
-    def _get_connection(self) -> sqlite3.Connection:
-        """Get a database connection."""
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        """Fournit une connexion fermée automatiquement, même en cas d'exception."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = _dict_factory  # type: ignore[assignment]
         conn.execute("PRAGMA foreign_keys = ON")
-        return conn
+        try:
+            yield conn
+        finally:
+            conn.close()
 
     def _ensure_tables(self) -> None:
         """Create fingerprint tables if they don't exist."""
-        conn = self._get_connection()
-
-        # Main fingerprints table
-        # Using hash as primary lookup, with index for fast querying
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS fingerprints (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                track_id INTEGER NOT NULL,
-                hash INTEGER NOT NULL,
-                time_offset_ms INTEGER NOT NULL,
-                freq_bin INTEGER,
-                FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+        with self._connection() as conn:
+            # Main fingerprints table
+            # Using hash as primary lookup, with index for fast querying
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS fingerprints (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    track_id INTEGER NOT NULL,
+                    hash INTEGER NOT NULL,
+                    time_offset_ms INTEGER NOT NULL,
+                    freq_bin INTEGER,
+                    FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+                )
+            """
             )
-        """)
 
-        # Index on hash for fast lookup during matching
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_fingerprints_hash
-            ON fingerprints(hash)
-        """)
-
-        # Index on track_id for fast deletion/lookup by track
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_fingerprints_track_id
-            ON fingerprints(track_id)
-        """)
-
-        # Track indexing status
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS fingerprint_status (
-                track_id INTEGER PRIMARY KEY,
-                fingerprint_count INTEGER NOT NULL,
-                indexed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+            # Index on hash for fast lookup during matching
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_fingerprints_hash
+                ON fingerprints(hash)
+            """
             )
-        """)
 
-        # Audio feature summaries (MFCC etc.) for similarity matching
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS audio_features (
-                track_id INTEGER NOT NULL,
-                feature_type TEXT NOT NULL,
-                feature_data BLOB NOT NULL,
-                computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (track_id, feature_type),
-                FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+            # Index on track_id for fast deletion/lookup by track
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_fingerprints_track_id
+                ON fingerprints(track_id)
+            """
             )
-        """)
 
-        conn.commit()
-        conn.close()
+            # Track indexing status
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS fingerprint_status (
+                    track_id INTEGER PRIMARY KEY,
+                    fingerprint_count INTEGER NOT NULL,
+                    indexed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+                )
+            """
+            )
+
+            # Audio feature summaries (MFCC etc.) for similarity matching
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS audio_features (
+                    track_id INTEGER NOT NULL,
+                    feature_type TEXT NOT NULL,
+                    feature_data BLOB NOT NULL,
+                    computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (track_id, feature_type),
+                    FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
+                )
+            """
+            )
+
+            conn.commit()
 
     def is_indexed(self, track_id: int) -> bool:
         """Check if a track has been fingerprinted.
@@ -110,12 +124,10 @@ class FingerprintDB:
         Returns:
             True if track has fingerprints
         """
-        conn = self._get_connection()
-        row = conn.execute(
-            "SELECT 1 FROM fingerprint_status WHERE track_id = ?",
-            (track_id,)
-        ).fetchone()
-        conn.close()
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM fingerprint_status WHERE track_id = ?", (track_id,)
+            ).fetchone()
         return row is not None
 
     def store_fingerprints(
@@ -134,35 +146,30 @@ class FingerprintDB:
         Returns:
             Number of fingerprints stored
         """
-        conn = self._get_connection()
+        with self._connection() as conn:
+            if replace:
+                conn.execute("DELETE FROM fingerprints WHERE track_id = ?", (track_id,))
+                conn.execute("DELETE FROM fingerprint_status WHERE track_id = ?", (track_id,))
 
-        if replace:
-            conn.execute("DELETE FROM fingerprints WHERE track_id = ?", (track_id,))
-            conn.execute("DELETE FROM fingerprint_status WHERE track_id = ?", (track_id,))
+            # Batch insert fingerprints
+            conn.executemany(
+                """
+                INSERT INTO fingerprints (track_id, hash, time_offset_ms, freq_bin)
+                VALUES (?, ?, ?, ?)
+                """,
+                [(track_id, fp.hash, fp.time_offset_ms, fp.freq_bin) for fp in fingerprints],
+            )
 
-        # Batch insert fingerprints
-        conn.executemany(
-            """
-            INSERT INTO fingerprints (track_id, hash, time_offset_ms, freq_bin)
-            VALUES (?, ?, ?, ?)
-            """,
-            [
-                (track_id, fp.hash, fp.time_offset_ms, fp.freq_bin)
-                for fp in fingerprints
-            ]
-        )
+            # Update status
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO fingerprint_status (track_id, fingerprint_count)
+                VALUES (?, ?)
+                """,
+                (track_id, len(fingerprints)),
+            )
 
-        # Update status
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO fingerprint_status (track_id, fingerprint_count)
-            VALUES (?, ?)
-            """,
-            (track_id, len(fingerprints))
-        )
-
-        conn.commit()
-        conn.close()
+            conn.commit()
 
         return len(fingerprints)
 
@@ -183,29 +190,26 @@ class FingerprintDB:
         if not hashes:
             return []
 
-        conn = self._get_connection()
+        with self._connection() as conn:
+            # Use temporary table + JOIN for better performance with large hash lists
+            conn.execute("CREATE TEMP TABLE IF NOT EXISTS query_hashes (hash INTEGER PRIMARY KEY)")
+            conn.execute("DELETE FROM query_hashes")
 
-        # Use temporary table + JOIN for better performance with large hash lists
-        conn.execute("CREATE TEMP TABLE IF NOT EXISTS query_hashes (hash INTEGER PRIMARY KEY)")
-        conn.execute("DELETE FROM query_hashes")
+            # Batch insert hashes into temp table
+            conn.executemany(
+                "INSERT OR IGNORE INTO query_hashes (hash) VALUES (?)", [(h,) for h in hashes]
+            )
 
-        # Batch insert hashes into temp table
-        conn.executemany(
-            "INSERT OR IGNORE INTO query_hashes (hash) VALUES (?)",
-            [(h,) for h in hashes]
-        )
+            # JOIN is faster than IN clause for large lists
+            rows = conn.execute(
+                """
+                SELECT f.track_id, f.time_offset_ms, f.hash
+                FROM fingerprints f
+                INNER JOIN query_hashes q ON f.hash = q.hash
+                """
+            ).fetchall()
 
-        # JOIN is faster than IN clause for large lists
-        rows = conn.execute(
-            """
-            SELECT f.track_id, f.time_offset_ms, f.hash
-            FROM fingerprints f
-            INNER JOIN query_hashes q ON f.hash = q.hash
-            """
-        ).fetchall()
-
-        conn.execute("DELETE FROM query_hashes")
-        conn.close()
+            conn.execute("DELETE FROM query_hashes")
 
         return [(row["track_id"], row["time_offset_ms"], row["hash"]) for row in rows]
 
@@ -218,16 +222,15 @@ class FingerprintDB:
         Returns:
             Dict with track info or None
         """
-        conn = self._get_connection()
-        row = conn.execute(
-            """
-            SELECT id, filepath, filename, title, artist, album, duration_seconds
-            FROM tracks
-            WHERE id = ?
-            """,
-            (track_id,)
-        ).fetchone()
-        conn.close()
+        with self._connection() as conn:
+            row = conn.execute(
+                """
+                SELECT id, filepath, filename, title, artist, album, duration_seconds
+                FROM tracks
+                WHERE id = ?
+                """,
+                (track_id,),
+            ).fetchone()
 
         if row:
             return dict(row)
@@ -243,8 +246,6 @@ class FingerprintDB:
         Returns:
             List of track dicts with id and filepath
         """
-        conn = self._get_connection()
-
         query = """
             SELECT t.id, t.filepath, t.filename
             FROM tracks t
@@ -258,10 +259,12 @@ class FingerprintDB:
             params.append(mode)
 
         if limit:
-            query += f" LIMIT {limit}"
+            # LIMIT paramétré plutôt qu'interpolé : évite tout risque d'injection.
+            query += " LIMIT ?"
+            params.append(limit)
 
-        rows = conn.execute(query, params).fetchall()
-        conn.close()
+        with self._connection() as conn:
+            rows = conn.execute(query, params).fetchall()
 
         return [dict(row) for row in rows]
 
@@ -271,17 +274,16 @@ class FingerprintDB:
         Returns:
             List of track dicts
         """
-        conn = self._get_connection()
-        rows = conn.execute(
-            """
-            SELECT t.id, t.filepath, t.filename, t.title, t.artist,
-                   fs.fingerprint_count, fs.indexed_at
-            FROM tracks t
-            JOIN fingerprint_status fs ON t.id = fs.track_id
-            ORDER BY fs.indexed_at DESC
-            """
-        ).fetchall()
-        conn.close()
+        with self._connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT t.id, t.filepath, t.filename, t.title, t.artist,
+                       fs.fingerprint_count, fs.indexed_at
+                FROM tracks t
+                JOIN fingerprint_status fs ON t.id = fs.track_id
+                ORDER BY fs.indexed_at DESC
+                """
+            ).fetchall()
 
         return [dict(row) for row in rows]
 
@@ -291,15 +293,14 @@ class FingerprintDB:
         Returns:
             Dict with stats
         """
-        conn = self._get_connection()
-
-        total_tracks = conn.execute("SELECT COUNT(*) AS count FROM tracks").fetchone()["count"]
-        indexed_tracks = conn.execute(
-            "SELECT COUNT(*) AS count FROM fingerprint_status"
-        ).fetchone()["count"]
-        total_fingerprints = conn.execute("SELECT COUNT(*) AS count FROM fingerprints").fetchone()["count"]
-
-        conn.close()
+        with self._connection() as conn:
+            total_tracks = conn.execute("SELECT COUNT(*) AS count FROM tracks").fetchone()["count"]
+            indexed_tracks = conn.execute(
+                "SELECT COUNT(*) AS count FROM fingerprint_status"
+            ).fetchone()["count"]
+            total_fingerprints = conn.execute(
+                "SELECT COUNT(*) AS count FROM fingerprints"
+            ).fetchone()["count"]
 
         return {
             "total_tracks": total_tracks,
@@ -317,11 +318,10 @@ class FingerprintDB:
         Args:
             track_id: Track ID
         """
-        conn = self._get_connection()
-        conn.execute("DELETE FROM fingerprints WHERE track_id = ?", (track_id,))
-        conn.execute("DELETE FROM fingerprint_status WHERE track_id = ?", (track_id,))
-        conn.commit()
-        conn.close()
+        with self._connection() as conn:
+            conn.execute("DELETE FROM fingerprints WHERE track_id = ?", (track_id,))
+            conn.execute("DELETE FROM fingerprint_status WHERE track_id = ?", (track_id,))
+            conn.commit()
 
     def cleanup_orphans(self) -> dict[str, int]:
         """Delete fingerprint data for tracks that no longer exist in the tracks table.
@@ -329,31 +329,33 @@ class FingerprintDB:
         Returns:
             Dict with counts of deleted rows per table.
         """
-        conn = self._get_connection()
-        r_status = conn.execute(
-            "DELETE FROM fingerprint_status WHERE track_id NOT IN (SELECT id FROM tracks)"
-        )
-        r_fp = conn.execute(
-            "DELETE FROM fingerprints WHERE track_id NOT IN (SELECT id FROM tracks)"
-        )
-        conn.commit()
-        conn.close()
+        with self._connection() as conn:
+            r_status = conn.execute(
+                "DELETE FROM fingerprint_status WHERE track_id NOT IN (SELECT id FROM tracks)"
+            )
+            r_fp = conn.execute(
+                "DELETE FROM fingerprints WHERE track_id NOT IN (SELECT id FROM tracks)"
+            )
+            conn.commit()
+            status_count = r_status.rowcount
+            fp_count = r_fp.rowcount
+
+        # VACUUM doit s'exécuter hors transaction, sur une connexion dédiée.
         vacuum_conn = sqlite3.connect(self.db_path)
-        vacuum_conn.execute("VACUUM")
-        vacuum_conn.close()
-        return {"fingerprint_status": r_status.rowcount, "fingerprints": r_fp.rowcount}
+        try:
+            vacuum_conn.execute("VACUUM")
+        finally:
+            vacuum_conn.close()
+        return {"fingerprint_status": status_count, "fingerprints": fp_count}
 
     def clear_all_fingerprints(self) -> None:
         """Delete all fingerprints from the database."""
-        conn = self._get_connection()
-        conn.execute("DELETE FROM fingerprints")
-        conn.execute("DELETE FROM fingerprint_status")
-        conn.commit()
-        conn.close()
+        with self._connection() as conn:
+            conn.execute("DELETE FROM fingerprints")
+            conn.execute("DELETE FROM fingerprint_status")
+            conn.commit()
 
-    def store_audio_features(
-        self, track_id: int, feature_type: str, features: np.ndarray
-    ) -> None:
+    def store_audio_features(self, track_id: int, feature_type: str, features: np.ndarray) -> None:
         """Store audio feature vector for a track.
 
         Args:
@@ -363,20 +365,17 @@ class FingerprintDB:
         """
         import numpy as np
 
-        conn = self._get_connection()
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO audio_features (track_id, feature_type, feature_data)
-            VALUES (?, ?, ?)
-            """,
-            (track_id, feature_type, features.astype(np.float32).tobytes()),
-        )
-        conn.commit()
-        conn.close()
+        with self._connection() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO audio_features (track_id, feature_type, feature_data)
+                VALUES (?, ?, ?)
+                """,
+                (track_id, feature_type, features.astype(np.float32).tobytes()),
+            )
+            conn.commit()
 
-    def get_all_audio_features(
-        self, feature_type: str
-    ) -> dict[int, np.ndarray]:
+    def get_all_audio_features(self, feature_type: str) -> dict[int, np.ndarray]:
         """Load all audio features of a given type.
 
         Args:
@@ -387,12 +386,11 @@ class FingerprintDB:
         """
         import numpy as np
 
-        conn = self._get_connection()
-        rows = conn.execute(
-            "SELECT track_id, feature_data FROM audio_features WHERE feature_type = ?",
-            (feature_type,),
-        ).fetchall()
-        conn.close()
+        with self._connection() as conn:
+            rows = conn.execute(
+                "SELECT track_id, feature_data FROM audio_features WHERE feature_type = ?",
+                (feature_type,),
+            ).fetchall()
 
         result: dict[int, np.ndarray] = {}
         for row in rows:
@@ -408,10 +406,9 @@ class FingerprintDB:
         Returns:
             Number of tracks with this feature type stored
         """
-        conn = self._get_connection()
-        row = conn.execute(
-            "SELECT COUNT(*) FROM audio_features WHERE feature_type = ?",
-            (feature_type,),
-        ).fetchone()
-        conn.close()
-        return row["COUNT(*)"] if row else 0
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM audio_features WHERE feature_type = ?",
+                (feature_type,),
+            ).fetchone()
+        return row["cnt"] if row else 0
