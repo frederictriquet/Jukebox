@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from mutagen import File as MutagenFile  # type: ignore[import]
+from mutagen import File as MutagenFile  # pyright: ignore[reportPrivateImportUsage]
 
 
 class MetadataExtractor:
@@ -29,12 +29,7 @@ class MetadataExtractor:
                 logging.warning(f"Mutagen returned None for {filepath}")
                 raise ValueError(f"Invalid audio file: {filepath}")
 
-            metadata: dict[str, Any] = {
-                "filepath": str(filepath),
-                "filename": filepath.name,
-                "file_size": filepath.stat().st_size,
-                "date_modified": filepath.stat().st_mtime,
-            }
+            metadata: dict[str, Any] = MetadataExtractor._basic_info(filepath)
 
             # Duration - validate that file has content
             if hasattr(audio.info, "length"):
@@ -151,9 +146,11 @@ class MetadataExtractor:
         Returns:
             Basic file information
         """
+        # Un seul appel à stat() pour éviter deux syscalls
+        stat_result = filepath.stat()
         return {
             "filepath": str(filepath),
             "filename": filepath.name,
-            "file_size": filepath.stat().st_size,
-            "date_modified": filepath.stat().st_mtime,
+            "file_size": stat_result.st_size,
+            "date_modified": stat_result.st_mtime,
         }

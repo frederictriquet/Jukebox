@@ -555,8 +555,12 @@ class Matcher:
                     results.append((track_id, max_run_this, avg_at_best))
 
             except Exception as exc:
-                logger = logging.getLogger(__name__)
-                logger.warning("[Matcher] _alignment_rerank: erreur sur track_id=%s : %s", track_id, exc)
+                logger.warning(
+                    "[Matcher] _alignment_rerank: erreur sur track_id=%s : %s",
+                    track_id,
+                    exc,
+                    exc_info=True,
+                )
                 continue
 
             if log and (idx + 1) % log_every == 0:
@@ -792,7 +796,7 @@ class Matcher:
                     results.append((track_id, best_score_this, best_sim_this, best_ratio_this))
 
             except Exception:
-                logger.debug(
+                logger.warning(
                     "Failed to load/process track %d (%s), skipping",
                     track_id,
                     filepath,
@@ -884,7 +888,7 @@ class Matcher:
                 continue
 
             try:
-                y, sr_loaded = librosa.load(
+                y, _ = librosa.load(
                     filepath,
                     sr=self.fingerprinter.sample_rate,
                     mono=True,
@@ -893,7 +897,7 @@ class Matcher:
                 )
                 if len(y) < self.fingerprinter.sample_rate * 5:
                     # Track too short, load from beginning
-                    y, sr_loaded = librosa.load(
+                    y, _ = librosa.load(
                         filepath,
                         sr=self.fingerprinter.sample_rate,
                         mono=True,
@@ -1056,7 +1060,16 @@ class Matcher:
                     return [], []
 
                 idx = future_to_idx[future]
-                segment_fps_list[idx] = future.result()
+                try:
+                    segment_fps_list[idx] = future.result()
+                except Exception:
+                    # Un crash de worker (BrokenProcessPool, etc.) ne doit pas planter
+                    # toute l'analyse : on logue et on laisse le segment vide.
+                    logger.warning(
+                        "[Matcher] Extraction du segment %d échouée, segment ignoré",
+                        idx,
+                        exc_info=True,
+                    )
                 completed += 1
                 if progress_callback:
                     progress_callback(
@@ -1280,11 +1293,6 @@ class Matcher:
         Returns:
             List of raw matches from all segments
         """
-        import logging
-        from collections import defaultdict
-
-        logger = logging.getLogger(__name__)
-
         total = len(segment_fps_list)
 
         # Collect ALL unique hashes across all segments
@@ -1546,44 +1554,6 @@ class Matcher:
         matches = [m for m in matches if m.confidence >= threshold][:50]
 
         return matches
-
-    def _find_offset_clusters(
-        self,
-        offsets: list[int],
-        bin_width_ms: int = 100,
-    ) -> list[tuple[int, int, list[int]]]:
-        """Find clusters of time offsets using histogram binning.
-
-        Args:
-            offsets: List of time offsets in milliseconds
-            bin_width_ms: Width of histogram bins
-
-        Returns:
-            List of (center_offset, count, offsets_in_cluster) tuples
-        """
-        if not offsets:
-            return []
-
-        # Bin offsets into histogram
-        min_offset = min(offsets)
-
-        # Create bins
-        bins: dict[int, list[int]] = defaultdict(list)
-        for offset in offsets:
-            bin_idx = (offset - min_offset) // bin_width_ms
-            bins[bin_idx].append(offset)
-
-        # Find peaks (bins with many entries)
-        clusters = []
-        for bin_idx, bin_offsets in bins.items():
-            if len(bin_offsets) >= self.min_matches:
-                center = min_offset + bin_idx * bin_width_ms + bin_width_ms // 2
-                clusters.append((center, len(bin_offsets), bin_offsets))
-
-        # Sort by count descending
-        clusters.sort(key=lambda x: -x[1])
-
-        return clusters
 
     def _merge_matches(self, matches: list[Match]) -> list[Match]:
         """Merge overlapping matches for the same track.

@@ -387,7 +387,13 @@ class GPUShaderRenderer:
             return
 
         try:
-            self._init_context()
+            # _init_context() appelle get_shared_gl_context() qui crée le contexte
+            # GL via create_standalone_context(). Cet appel DOIT être sérialisé par
+            # _gpu_lock : la création de contexte touche l'état CGL global du
+            # processus et n'est pas thread-safe (conflit potentiel sur macOS si
+            # deux threads d'export l'instancient simultanément). Voir [C23].
+            with _gpu_lock:
+                self._init_context()
             self._creator_thread_id = threading.get_ident()
             self._initialized = True
             logging.info(f"[GPU Renderer] Initialized {width}x{height}")
@@ -446,7 +452,9 @@ class GPUShaderRenderer:
                 )
                 logging.debug(f"[GPU Renderer] Compiled shader: {name}")
             except Exception as e:
-                logging.warning(f"[GPU Renderer] Failed to compile {name}: {e}")
+                logging.warning(
+                    f"[GPU Renderer] Failed to compile {name}: {e}", exc_info=True
+                )
 
     @property
     def available(self) -> bool:

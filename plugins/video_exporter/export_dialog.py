@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import secrets
 from pathlib import Path
@@ -444,8 +445,10 @@ class ExportDialog(QDialog):
         self.worker = None
 
         # Deterministic seed for reproducible VJing effects across preview and export
+        # SHA-256 plutôt que hash() : hash() est randomisé par PYTHONHASHSEED, ce qui
+        # casserait la reproductibilité d'une session à l'autre.
         seed_str = f"{track_metadata.get('title', '')}:{track_metadata.get('genre', '')}"
-        self._rng_seed = hash(seed_str) & 0xFFFFFFFF
+        self._rng_seed = int.from_bytes(hashlib.sha256(seed_str.encode()).digest()[:4], "big")
 
         # Preview state
         self._preview_renderer = None
@@ -1474,7 +1477,9 @@ class ExportDialog(QDialog):
             "width": resolution[0],
             "height": resolution[1],
             "fps": self.fps_spin.value(),
-            "output_path": Path(self.output_dir_edit.text()) / self.filename_edit.text(),
+            # Path(...).name supprime tout segment de chemin (../, /etc/…) saisi par
+            # l'utilisateur : le fichier reste confiné dans output_dir.
+            "output_path": Path(self.output_dir_edit.text()) / Path(self.filename_edit.text()).name,
             "track_metadata": self.track_metadata,
             "layers": {
                 "waveform": self.waveform_check.isChecked(),

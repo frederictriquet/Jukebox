@@ -47,7 +47,12 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
     def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register UI elements."""
         main_window = self.context.app
-        controls = main_window.controls
+        # Couplage tolérant : si la fenêtre principale n'expose pas de barre de
+        # controls (refactor, mode headless…), on n'ajoute simplement pas le bouton.
+        controls = getattr(main_window, "controls", None)
+        if controls is None:
+            logging.warning("[File Manager] main_window.controls absent, bouton Remove non ajouté")
+            return
 
         if controls.layout():
             # Add remove button for jukebox mode (removes from library but keeps file)
@@ -105,7 +110,9 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
         # Get filepath from database
         track = self.context.database.tracks.get_by_id(track_id)
         self.current_filepath = Path(track["filepath"]) if track else None
-        logging.debug(f"[File Manager] Track loaded: id={track_id}, filepath={self.current_filepath}")
+        logging.debug(
+            "[File Manager] Track loaded: id=%s, filepath=%s", track_id, self.current_filepath
+        )
 
     _synced_settings = [
         SyncedSetting("trash_directory", str),
@@ -126,7 +133,7 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
             return
 
         if not self.current_filepath.exists():
-            logging.error(f"Source file does not exist: {self.current_filepath}")
+            logging.error("Source file does not exist: %s", self.current_filepath)
             self.context.emit(Events.STATUS_MESSAGE, message="Error: File not found")
             return
 
@@ -134,7 +141,7 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
         track = self.context.database.tracks.get_by_id(self.current_track_id)
 
         if not track:
-            logging.error(f"Track {self.current_track_id} not found in database")
+            logging.error("Track %s not found in database", self.current_track_id)
             return
 
         artist = track["artist"]
@@ -148,7 +155,9 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
             if not title:
                 missing.append("title")
             error_msg = f"Cannot copy: missing {' and '.join(missing)}"
-            logging.warning(f"[File Manager] {error_msg} for track {self.current_track_id}")
+            logging.warning(
+                "[File Manager] %s for track %s", error_msg, self.current_track_id
+            )
             self.context.emit(Events.STATUS_MESSAGE, message=error_msg)
             return
 
@@ -166,7 +175,7 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
 
         # Check if destination already exists
         if dest_path.exists():
-            logging.error(f"Destination file already exists: {dest_path}")
+            logging.error("Destination file already exists: %s", dest_path)
             self.context.emit(
                 Events.STATUS_MESSAGE, message=f"Error: File already exists in {dest_config.name}"
             )
@@ -179,15 +188,33 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
 
             # Copy and rename file to destination
             shutil.copy2(str(self.current_filepath), str(dest_path))
-            logging.info(f"Copied {old_filepath} -> {dest_path}")
+            logging.info("Copied %s -> %s", old_filepath, dest_path)
+
+            # M27 : vérifier l'intégrité de la copie avant de supprimer la source.
+            # Sans ce contrôle, une copie tronquée suivie d'un unlink détruit les données.
+            source_size = old_filepath.stat().st_size
+            dest_size = dest_path.stat().st_size
+            if source_size != dest_size:
+                logging.error(
+                    "Copy integrity check failed: source=%s bytes, "
+                    "dest=%s bytes. Aborting before deletion.",
+                    source_size,
+                    dest_size,
+                )
+                # Nettoyer la copie corrompue, ne pas toucher à la source
+                dest_path.unlink(missing_ok=True)
+                self.context.emit(
+                    Events.STATUS_MESSAGE, message="Error: copy integrity check failed"
+                )
+                return
 
             # Delete from database (waveform and analysis removed by CASCADE)
             self.context.database.tracks.delete(old_track_id)
-            logging.info(f"Deleted track {old_track_id} from database")
+            logging.info("Deleted track %s from database", old_track_id)
 
             # Delete original file from disk
             old_filepath.unlink()
-            logging.info(f"Deleted original file: {old_filepath}")
+            logging.info("Deleted original file: %s", old_filepath)
 
             # Reset current track BEFORE emitting event
             # (because event handlers might load a new track)
@@ -204,7 +231,7 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
             )
 
         except Exception as e:
-            logging.error(f"Failed to move file: {e}", exc_info=True)
+            logging.error("Failed to move file: %s", e, exc_info=True)
             self.context.emit(Events.STATUS_MESSAGE, message=f"Error moving file: {e}")
 
     def _move_to_trash(self) -> None:
@@ -214,7 +241,7 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
             return
 
         if not self.current_filepath.exists():
-            logging.error(f"Source file does not exist: {self.current_filepath}")
+            logging.error("Source file does not exist: %s", self.current_filepath)
             self.context.emit(Events.STATUS_MESSAGE, message="Error: File not found")
             return
 
@@ -227,7 +254,7 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
 
         # Check if destination already exists
         if dest_path.exists():
-            logging.error(f"File already exists in trash: {dest_path}")
+            logging.error("File already exists in trash: %s", dest_path)
             self.context.emit(Events.STATUS_MESSAGE, message="Error: File already exists in trash")
             return
 
@@ -237,12 +264,12 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
 
             # Move file to trash
             shutil.move(str(self.current_filepath), str(dest_path))
-            logging.info(f"Moved to trash: {old_filepath} -> {dest_path}")
+            logging.info("Moved to trash: %s -> %s", old_filepath, dest_path)
 
             # Delete from database (and waveform_cache via CASCADE)
             track_id = self.current_track_id
             self.context.database.tracks.delete(track_id)
-            logging.info(f"Deleted track {track_id} from database")
+            logging.info("Deleted track %s from database", track_id)
 
             # Reset current track BEFORE emitting event
             # (because event handlers might load a new track)
@@ -259,7 +286,7 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
             )
 
         except Exception as e:
-            logging.error(f"Failed to move file to trash: {e}")
+            logging.error("Failed to move file to trash: %s", e, exc_info=True)
             self.context.emit(Events.STATUS_MESSAGE, message=f"Error moving to trash: {e}")
 
     def _sanitize_filename(self, filename: str) -> str:
@@ -287,7 +314,9 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
 
             # Delete from database (and waveform_cache via CASCADE)
             self.context.database.tracks.delete(track_id)
-            logging.info(f"Removed track {track_id} from database (file kept: {old_filepath})")
+            logging.info(
+                "Removed track %s from database (file kept: %s)", track_id, old_filepath
+            )
 
             # Reset current track BEFORE emitting event
             self.current_track_id = None
@@ -303,7 +332,7 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
             )
 
         except Exception as e:
-            logging.error(f"Failed to remove track from library: {e}")
+            logging.error("Failed to remove track from library: %s", e, exc_info=True)
             self.context.emit(Events.STATUS_MESSAGE, message=f"Error removing track: {e}")
 
     def activate(self, mode: str) -> None:
@@ -320,7 +349,7 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
             # Show remove button in jukebox mode
             if self.remove_button:
                 self.remove_button.setVisible(True)
-        logging.debug(f"[File Manager] Activated for {mode} mode")
+        logging.debug("[File Manager] Activated for %s mode", mode)
 
     def deactivate(self, mode: str) -> None:
         """Deactivate plugin for this mode."""
@@ -331,7 +360,7 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
             # Hide remove button when leaving jukebox mode
             if self.remove_button:
                 self.remove_button.setVisible(False)
-        logging.debug(f"[File Manager] Deactivated for {mode} mode")
+        logging.debug("[File Manager] Deactivated for %s mode", mode)
 
     def shutdown(self) -> None:
         """Cleanup on application exit. No cleanup needed for this plugin."""

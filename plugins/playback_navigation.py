@@ -28,6 +28,9 @@ class PlaybackNavigationPlugin(SettingsSyncMixin):
         self.context: PluginContextProtocol = None  # type: ignore[assignment]
         self.last_seek_time: float = 0.0
         self.seek_multiplier: int = 1
+        # Sens du dernier seek ("forward"/"backward") pour réinitialiser
+        # l'accélération au changement de direction.
+        self.last_seek_direction: str | None = None
         self.auto_play_next: bool = True
         self.random_mode: bool = False
         self.auto_play_action: Any = None
@@ -47,6 +50,18 @@ class PlaybackNavigationPlugin(SettingsSyncMixin):
 
         # Load settings from DB on startup
         self._on_settings_changed()
+
+        # Restaure les préférences de lecture persistées (cohérent avec seek_amount).
+        self.auto_play_next = context.get_setting(
+            self.name, "auto_play_next", bool, self.auto_play_next
+        )
+        self.random_mode = context.get_setting(
+            self.name, "random_mode", bool, self.random_mode
+        )
+
+    def _persist_setting(self, key: str, value: bool) -> None:
+        """Persiste un réglage booléen dans la table plugin_settings."""
+        self.context.database.settings.save(self.name, key, "true" if value else "false")
 
     def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register auto-play and random mode menu and buttons."""
@@ -117,35 +132,18 @@ class PlaybackNavigationPlugin(SettingsSyncMixin):
 
     def _seek_forward(self) -> None:
         """Seek forward with acceleration (configurable base, multiplied if rapid presses)."""
-        import time
-
-        config = self.context.config.playback_navigation
-
-        current_time = time.time()
-        time_since_last = current_time - self.last_seek_time
-
-        # If pressed within threshold, increase multiplier
-        if time_since_last < config.rapid_press_threshold:
-            self.seek_multiplier = min(self.seek_multiplier + 1, config.max_seek_multiplier)
-        else:
-            self.seek_multiplier = 1
-
-        self.last_seek_time = current_time
-
-        player = self.context.player
-        if not (player.is_playing() or player.get_position() > 0):
-            return
-
-        duration = self._get_current_track_duration()
-        if duration and duration > 0:
-            current_pos = player.get_position()
-            seek_amount = config.seek_amount * self.seek_multiplier
-            new_time = (current_pos * duration) + seek_amount
-            new_pos = min(new_time / duration, 1.0)
-            player.set_position(new_pos)
+        self._seek("forward")
 
     def _seek_backward(self) -> None:
         """Seek backward with acceleration (configurable base, multiplied if rapid presses)."""
+        self._seek("backward")
+
+    def _seek(self, direction: str) -> None:
+        """Seek dans une direction avec accélération sur pressions rapides.
+
+        Args:
+            direction: "forward" ou "backward".
+        """
         import time
 
         config = self.context.config.playback_navigation
@@ -153,13 +151,16 @@ class PlaybackNavigationPlugin(SettingsSyncMixin):
         current_time = time.time()
         time_since_last = current_time - self.last_seek_time
 
-        # If pressed within threshold, increase multiplier
-        if time_since_last < config.rapid_press_threshold:
+        # Accélère uniquement si pressé rapidement dans la même direction ;
+        # réinitialise si le délai est dépassé OU si la direction a changé.
+        same_direction = self.last_seek_direction == direction
+        if same_direction and time_since_last < config.rapid_press_threshold:
             self.seek_multiplier = min(self.seek_multiplier + 1, config.max_seek_multiplier)
         else:
             self.seek_multiplier = 1
 
         self.last_seek_time = current_time
+        self.last_seek_direction = direction
 
         player = self.context.player
         if not (player.is_playing() or player.get_position() > 0):
@@ -169,9 +170,12 @@ class PlaybackNavigationPlugin(SettingsSyncMixin):
         if duration and duration > 0:
             current_pos = player.get_position()
             seek_amount = config.seek_amount * self.seek_multiplier
-            new_time = max((current_pos * duration) - seek_amount, 0)
-            new_pos = new_time / duration
-            player.set_position(new_pos)
+            position_seconds = current_pos * duration
+            if direction == "forward":
+                new_time = min(position_seconds + seek_amount, duration)
+            else:
+                new_time = max(position_seconds - seek_amount, 0)
+            player.set_position(new_time / duration)
 
     def _get_current_track_duration(self) -> float | None:
         """Get duration of current track from database.
@@ -218,6 +222,7 @@ class PlaybackNavigationPlugin(SettingsSyncMixin):
         if self.auto_play_button:
             self.auto_play_button.setChecked(self.auto_play_next)
             self._update_button_styles()
+        self._persist_setting("auto_play_next", self.auto_play_next)
 
     def _toggle_auto_play_from_button(self) -> None:
         """Toggle auto-play from button."""
@@ -226,6 +231,7 @@ class PlaybackNavigationPlugin(SettingsSyncMixin):
         if self.auto_play_action:
             self.auto_play_action.setChecked(self.auto_play_next)
         self._update_button_styles()
+        self._persist_setting("auto_play_next", self.auto_play_next)
 
     def _toggle_random_from_menu(self) -> None:
         """Toggle random mode from menu action."""
@@ -234,6 +240,7 @@ class PlaybackNavigationPlugin(SettingsSyncMixin):
         if self.random_button:
             self.random_button.setChecked(self.random_mode)
             self._update_button_styles()
+        self._persist_setting("random_mode", self.random_mode)
 
     def _toggle_random_from_button(self) -> None:
         """Toggle random mode from button."""
@@ -242,6 +249,7 @@ class PlaybackNavigationPlugin(SettingsSyncMixin):
         if self.random_action:
             self.random_action.setChecked(self.random_mode)
         self._update_button_styles()
+        self._persist_setting("random_mode", self.random_mode)
 
     def _update_button_styles(self) -> None:
         """Update button styles based on state."""
@@ -258,8 +266,17 @@ class PlaybackNavigationPlugin(SettingsSyncMixin):
                 self.random_button.setStyleSheet("")
 
     def shutdown(self) -> None:
-        """Cleanup on application exit. No cleanup needed for this plugin."""
-        ...
+        """Cleanup on application exit.
+
+        Déconnecte le signal track_finished pour éviter un double
+        déclenchement si le plugin est rechargé dynamiquement.
+        """
+        if self.context is not None:
+            try:
+                self.context.player.track_finished.disconnect(self._on_track_finished)
+            except (RuntimeError, TypeError) as e:
+                # Connexion déjà rompue ou objet détruit : non bloquant.
+                logging.debug("[Playback Navigation] track_finished déjà déconnecté : %s", e)
 
     _synced_settings = [
         SyncedSetting("seek_amount", int),

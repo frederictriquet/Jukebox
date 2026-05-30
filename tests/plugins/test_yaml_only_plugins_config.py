@@ -10,9 +10,9 @@ so that any future change (e.g., adding DB support) is intentional.
 """
 
 import importlib
+from unittest.mock import MagicMock
 
 import pytest
-from unittest.mock import MagicMock
 
 from jukebox.core.config import (
     DirectoryNavigatorConfig,
@@ -88,16 +88,12 @@ class TestDirectoryNavigatorReadsFromConfig:
 
         plugin = DirectoryNavigatorPlugin()
         config = MagicMock()
-        config.directory_navigator = DirectoryNavigatorConfig(
-            default_directory="CUSTOM_DIR"
-        )
+        config.directory_navigator = DirectoryNavigatorConfig(default_directory="CUSTOM_DIR")
         context = MagicMock()
         context.config = config
         plugin.initialize(context)
 
-        assert (
-            plugin.context.config.directory_navigator.default_directory == "CUSTOM_DIR"
-        )
+        assert plugin.context.config.directory_navigator.default_directory == "CUSTOM_DIR"
 
 
 class TestModeSwitcherReadsFromConfig:

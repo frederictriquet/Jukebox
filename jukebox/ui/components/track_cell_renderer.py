@@ -1,9 +1,11 @@
 """Cell renderer for track list columns."""
 
 import logging
+import re
 from collections import OrderedDict
 from typing import Any, TypeVar
 
+import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter, QPixmap
 
@@ -11,6 +13,11 @@ from jukebox.core.mode_manager import AppMode
 
 K = TypeVar("K")
 V = TypeVar("V")
+
+# Pattern de validation du format de genre (issu du projet PyQT)
+# Note : *0 n'est pas autorisé, uniquement *1 à *5
+# [A-Z]+ accepte les codes de genre multi-caractères (et pas seulement mono-caractère)
+GENRE_PATTERN = re.compile(r"^([A-Z]+)(-[A-Z]+)*(-\*[1-5])?$")
 
 
 class LRUCache(OrderedDict[K, V]):
@@ -178,6 +185,8 @@ class FilenameStyler(Styler):
 
     def display(self, data: Any, track: dict[str, Any]) -> str:
         """Display based on mode."""
+        filepath = track.get("filepath")
+        filename = filepath.name if filepath is not None else ""
         if self.mode == AppMode.JUKEBOX.value:
             # Jukebox mode: show artist - title
             artist = track.get("artist", "")
@@ -188,10 +197,10 @@ class FilenameStyler(Styler):
             elif title:
                 return str(title)
             else:
-                return str(track["filepath"].name)
+                return str(filename)
         else:
             # Curating mode: show filename
-            return str(track["filepath"].name)
+            return str(filename)
 
     def tooltip(self, data: Any, track: dict[str, Any]) -> str:
         """Show tooltip based on mode."""
@@ -214,10 +223,6 @@ class FilenameStyler(Styler):
 class GenreStyler(Styler):
     """Styler for genre column."""
 
-    # Pattern to validate genre format (from PyQT project)
-    # Note: *0 is not allowed, only *1 to *5
-    GENRE_PATTERN = r"^([A-Z])(-[A-Z])*(-\*[1-5])?$"
-
     def __init__(self, genre_names: dict[str, str]):
         """Initialize with genre name mapping.
 
@@ -228,9 +233,7 @@ class GenreStyler(Styler):
 
     def _is_valid_genre(self, genre: str) -> bool:
         """Check if genre matches the expected pattern."""
-        import re
-
-        return bool(re.match(self.GENRE_PATTERN, genre))
+        return bool(GENRE_PATTERN.match(genre))
 
     def display(self, data: Any, track: dict[str, Any]) -> str:
         """Display genre codes without rating."""
@@ -378,6 +381,15 @@ class WaveformStyler(Styler):
         """
         cls._cache = LRUCache(maxsize=cache_size)
 
+    @classmethod
+    def invalidate(cls, filepath: Any) -> None:
+        """Invalide l'entrée de cache associée à un fichier pour forcer un re-rendu.
+
+        Args:
+            filepath: Chemin du fichier dont le rendu doit être régénéré
+        """
+        cls._cache.pop(hash(str(filepath)), None)
+
     def display(self, data: Any, track: dict[str, Any]) -> str:
         """Display simple indicator if no waveform."""
         waveform_data = track.get("waveform_data")
@@ -410,8 +422,6 @@ class WaveformStyler(Styler):
         painter = QPainter(pixmap)
 
         # Draw waveform (3 stacked bands)
-        import numpy as np
-
         bass = waveform_data.get("bass", np.array([]))
         mid = waveform_data.get("mid", np.array([]))
         treble = waveform_data.get("treble", np.array([]))

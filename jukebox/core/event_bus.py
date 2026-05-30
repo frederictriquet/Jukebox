@@ -1,6 +1,7 @@
 """Event bus for inter-plugin communication."""
 
 import logging
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -11,12 +12,17 @@ class EventBus:
     def __init__(self) -> None:
         """Initialize event bus."""
         self.subscribers: dict[str, list[Callable[..., None]]] = {}
+        # Verrou protégeant `subscribers` contre les accès concurrents :
+        # BatchProcessor et autres workers QThread émettent/s'abonnent
+        # depuis des threads différents du thread UI.
+        self._lock = threading.Lock()
 
     def subscribe(self, event: str, callback: Callable[..., None]) -> None:
         """Subscribe to event."""
-        if event not in self.subscribers:
-            self.subscribers[event] = []
-        self.subscribers[event].append(callback)
+        with self._lock:
+            if event not in self.subscribers:
+                self.subscribers[event] = []
+            self.subscribers[event].append(callback)
         logging.debug(f"Subscribed to event: {event}")
 
     def unsubscribe(self, event: str, callback: Callable[..., None]) -> bool:
@@ -29,38 +35,42 @@ class EventBus:
         Returns:
             True if unsubscribed, False if not found
         """
-        if event not in self.subscribers:
-            return False
-
-        try:
-            self.subscribers[event].remove(callback)
-            logging.debug(f"Unsubscribed from event: {event}")
-            return True
-        except ValueError:
-            return False
+        with self._lock:
+            if event not in self.subscribers:
+                return False
+            try:
+                self.subscribers[event].remove(callback)
+            except ValueError:
+                return False
+        logging.debug(f"Unsubscribed from event: {event}")
+        return True
 
     def clear_all_subscribers(self) -> None:
         """Clear all subscribers from all events."""
-        self.subscribers.clear()
+        with self._lock:
+            self.subscribers.clear()
         logging.debug("Cleared all event subscribers")
 
     def emit(self, event: str, **data: Any) -> None:
         """Emit event.
 
-        Note: Copies subscriber list before iteration to allow callbacks
-        to safely subscribe/unsubscribe during emission (same-thread safety).
-        Not thread-safe for concurrent access from multiple threads.
+        Note: Copies subscriber list under lock before iteration, puis exécute
+        les callbacks hors verrou pour éviter tout interblocage si un callback
+        (ré)émet ou (dés)abonne. Sûr pour les appels cross-thread.
         """
-        if event not in self.subscribers:
-            return
+        with self._lock:
+            if event not in self.subscribers:
+                return
+            # Copie sous verrou pour autoriser une modification concurrente sûre.
+            callbacks = list(self.subscribers[event])
 
         logging.debug(f"Emitting event: {event}")
-        # Copy list to allow safe modification during iteration
-        for callback in list(self.subscribers[event]):
+        for callback in callbacks:
             try:
                 callback(**data)
             except Exception as e:
-                logging.error(f"Error in event handler for {event}: {e}")
+                # exc_info=True : conserver le traceback complet (règle projet).
+                logging.error(f"Error in event handler for {event}: {e}", exc_info=True)
 
 
 class Events:

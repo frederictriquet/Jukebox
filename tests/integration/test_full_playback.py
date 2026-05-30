@@ -1,6 +1,5 @@
 """Integration tests for full playback flow."""
 
-
 import pytest
 
 from jukebox.core.config import AudioConfig, JukeboxConfig, LoggingConfig, UIConfig

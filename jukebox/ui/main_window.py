@@ -79,6 +79,9 @@ class MainWindow(QMainWindow):
         self.fallback_position_slider: Any = None
         self._position_seeking_provided = False
 
+        # Piste à lire après la mise à jour du modèle suite à une suppression.
+        self.deleted_track_next_filepath: Path | None = None
+
         self._init_ui()
         self._connect_signals()
         self._register_shortcuts()
@@ -269,7 +272,7 @@ class MainWindow(QMainWindow):
         self.track_list.clear_tracks()
         mode = self._get_current_mode()
         tracks = self.database.get_all_tracks(mode=mode)
-        logging.debug(f"[MainWindow] Loaded {len(tracks)} tracks for mode {mode}")
+        logger.debug("[MainWindow] Loaded %s tracks for mode %s", len(tracks), mode)
         for track in tracks:
             self.track_list.add_track(
                 Path(track["filepath"]),
@@ -313,14 +316,17 @@ class MainWindow(QMainWindow):
         model = self.track_list.track_model
         deleted_row = model.find_row_by_filepath(filepath)
 
-        logging.info(
-            f"[MainWindow] Track deleted: {filepath.name}, row={deleted_row}, was_playing={was_deleted_file_playing}"
+        logger.info(
+            "[MainWindow] Track deleted: %s, row=%s, was_playing=%s",
+            filepath.name,
+            deleted_row,
+            was_deleted_file_playing,
         )
 
         # Stop current playback if the deleted file was playing
         if was_deleted_file_playing:
             self.playback.stop()
-            logging.debug("[MainWindow] Stopped playback of deleted track")
+            logger.debug("[MainWindow] Stopped playback of deleted track")
 
             # Calculate next track to play BEFORE the model removes the row
             # After deletion, row N becomes the "next" track (what was N+1)
@@ -329,7 +335,7 @@ class MainWindow(QMainWindow):
             if total_rows <= 1:
                 # This was the last track (will be 0 after deletion)
                 self.setWindowTitle(self.config.ui.window_title)
-                logging.info("[MainWindow] No more tracks after deletion")
+                logger.info("[MainWindow] No more tracks after deletion")
                 return
 
             # Determine which row to play after deletion
@@ -338,29 +344,31 @@ class MainWindow(QMainWindow):
                     # Get the filepath of the NEXT track (row+1) before deletion
                     next_index = model.index(deleted_row + 1, 0)
                     next_filepath = model.data(next_index, Qt.ItemDataRole.UserRole)
-                    logging.debug(
-                        f"[MainWindow] Next track at row {deleted_row + 1}: {next_filepath}"
+                    logger.debug(
+                        "[MainWindow] Next track at row %s: %s", deleted_row + 1, next_filepath
                     )
                 else:
                     # Was last track, get the previous track
                     prev_index = model.index(deleted_row - 1, 0)
                     next_filepath = model.data(prev_index, Qt.ItemDataRole.UserRole)
-                    logging.debug(
-                        f"[MainWindow] Was last, previous track at row {deleted_row - 1}: {next_filepath}"
+                    logger.debug(
+                        "[MainWindow] Was last, previous track at row %s: %s",
+                        deleted_row - 1,
+                        next_filepath,
                     )
             else:
                 # Couldn't find row - get first track
                 first_index = model.index(0, 0)
                 next_filepath = model.data(first_index, Qt.ItemDataRole.UserRole)
-                logging.debug(
-                    f"[MainWindow] Couldn't find row, playing first track: {next_filepath}"
+                logger.debug(
+                    "[MainWindow] Couldn't find row, playing first track: %s", next_filepath
                 )
 
             # Save filepath to play after model update (no Timer needed!)
             if next_filepath:
                 self.deleted_track_next_filepath = next_filepath
             else:
-                logging.error("[MainWindow] Could not determine next track filepath")
+                logger.error("[MainWindow] Could not determine next track filepath")
 
     def _on_row_deleted_complete(self, deleted_row_index: int) -> None:
         """Called after TrackListModel has completed row deletion.
@@ -368,22 +376,22 @@ class MainWindow(QMainWindow):
         Args:
             deleted_row_index: The row that was deleted
         """
-        # Check if we saved a filepath to play
-        if not hasattr(self, "deleted_track_next_filepath"):
+        # Vérifie si un filepath a été enregistré pour la lecture
+        next_filepath: Path | None = self.deleted_track_next_filepath
+        if next_filepath is None:
             return
 
-        next_filepath = self.deleted_track_next_filepath
-        delattr(self, "deleted_track_next_filepath")
+        self.deleted_track_next_filepath = None
 
-        # Find the row of this filepath (it has shifted after deletion)
+        # Trouve la ligne de ce filepath (elle a été décalée après la suppression)
         self.track_list.select_track_by_filepath(next_filepath)
         row = self.track_list.track_model.find_row_by_filepath(next_filepath)
 
         if row >= 0:
-            logging.debug(f"[MainWindow] Playing next track at row {row}: {next_filepath.name}")
+            logger.debug("[MainWindow] Playing next track at row %s: %s", row, next_filepath.name)
             self._load_and_play(next_filepath)
         else:
-            logging.error(f"[MainWindow] Could not find next filepath: {next_filepath}")
+            logger.error("[MainWindow] Could not find next filepath: %s", next_filepath)
 
     def _import_curating_directory(self) -> None:
         """Import tracks from the configured curating directory."""
@@ -395,14 +403,10 @@ class MainWindow(QMainWindow):
             return
         path = Path(curating_dir).expanduser()
         if not path.is_dir():
-            self.event_bus.emit(
-                Events.STATUS_MESSAGE, message=f"Directory not found: {path}"
-            )
+            self.event_bus.emit(Events.STATUS_MESSAGE, message=f"Directory not found: {path}")
             return
-        logging.info(f"[MainWindow] Importing from curating directory: {path}")
-        scanner = FileScanner(
-            self.database, self.config.audio.supported_formats, mode="curating"
-        )
+        logger.info("[MainWindow] Importing from curating directory: %s", path)
+        scanner = FileScanner(self.database, self.config.audio.supported_formats, mode="curating")
         added = scanner.scan_directory(path, recursive=True)
         if added > 0:
             self.event_bus.emit(Events.TRACKS_ADDED)
@@ -429,7 +433,7 @@ class MainWindow(QMainWindow):
                         self.database.add_track(metadata, mode=mode)
                     except ValueError as e:
                         # Empty or invalid audio file - skip it
-                        logging.warning(f"Skipping invalid file {path}: {e}")
+                        logger.warning("Skipping invalid file %s: %s", path, e)
             elif path.is_dir():
                 # Directory - scan recursively
                 scanner = FileScanner(self.database, self.config.audio.supported_formats, mode=mode)
@@ -468,37 +472,24 @@ class MainWindow(QMainWindow):
         if not ok or not name.strip():
             return
         try:
-            cursor = self.database.conn.execute(
-                "INSERT INTO playlists (name) VALUES (?)", (name.strip(),)
-            )
-            playlist_id = cursor.lastrowid
-            self.database.conn.commit()
+            playlist_id = self.database.playlists.create(name.strip())
         except Exception:
             logger.exception("Failed to create playlist")
             return
-        self._on_add_to_playlist(filepath, playlist_id)  # type: ignore[arg-type]
-        # Refresh context menu playlists
-        for plugin in self.plugin_manager.plugins.values():
-            if hasattr(plugin, "_update_context_menu"):
-                plugin._update_context_menu()
+        # La création émet PLAYLIST_CHANGED via _on_add_to_playlist.
+        self._on_add_to_playlist(filepath, playlist_id)
 
     def _on_add_to_playlist(self, filepath: Path, playlist_id: int) -> None:
         """Add a track to a playlist in the database."""
         if not self.database.conn:
             return
         # Find track ID from filepath
-        row = self.database.conn.execute(
-            "SELECT id FROM tracks WHERE filepath = ?", (str(filepath),)
-        ).fetchone()
-        if not row:
+        track = self.database.tracks.get_by_filepath(filepath)
+        if not track:
             return
-        track_id = row["id"]
-        # Check if already in playlist
-        exists = self.database.conn.execute(
-            "SELECT 1 FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?",
-            (playlist_id, track_id),
-        ).fetchone()
-        if exists:
+        track_id = track["id"]
+        added = self.database.playlists.add_track(playlist_id, track_id)
+        if not added:
             logger.debug("Track %s already in playlist %d, skipping", filepath.name, playlist_id)
             self.event_bus.emit(
                 Events.STATUS_MESSAGE,
@@ -506,22 +497,10 @@ class MainWindow(QMainWindow):
                 color="#FFA500",
             )
             return
-        # Get next position
-        pos_row = self.database.conn.execute(
-            "SELECT COALESCE(MAX(position), 0) + 1 AS next_pos FROM playlist_tracks WHERE playlist_id = ?",
-            (playlist_id,),
-        ).fetchone()
-        next_pos = pos_row["next_pos"] if pos_row else 1
-        self.database.conn.execute(
-            "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)",
-            (playlist_id, track_id, next_pos),
-        )
-        self.database.conn.commit()
         logger.info("Added track %s to playlist %d", filepath.name, playlist_id)
+        # Notifie les plugins (playlists, directory_navigator) via l'EventBus
+        # plutôt que par introspection des attributs privés des plugins.
         self.event_bus.emit(Events.PLAYLIST_CHANGED)
-        for plugin in self.plugin_manager.plugins.values():
-            if hasattr(plugin, "_update_context_menu"):
-                plugin._update_context_menu()
 
     def _load_plugins(self) -> None:
         """Load all plugins."""
@@ -533,7 +512,7 @@ class MainWindow(QMainWindow):
         # Load plugins for current mode
         current_mode = self.config.ui.mode
         loaded = self.plugin_manager.load_all_plugins(mode=current_mode)
-        logging.info(f"Loaded {loaded} plugins for {current_mode} mode")
+        logger.info("Loaded %s plugins for %s mode", loaded, current_mode)
 
         # Register plugin UIs and shortcuts
         for plugin in self.plugin_manager.get_all_plugins():
@@ -592,11 +571,12 @@ class MainWindow(QMainWindow):
 
     def _on_select_random_track(self) -> None:
         """Handle SELECT_RANDOM_TRACK event."""
-        import random
+        from random import randint
 
         model = self.track_list.model()
         if model.rowCount() > 0:
-            random_row = random.randint(0, model.rowCount() - 1)
+            # Sélection ludique d'une piste : aucun usage cryptographique.
+            random_row = randint(0, model.rowCount() - 1)  # noqa: S311
             self.track_list.selectRow(random_row)
             filepath = model.data(model.index(random_row, 0), Qt.ItemDataRole.UserRole)
             if filepath:
@@ -658,5 +638,5 @@ class MainWindow(QMainWindow):
 
         # Only act if mode_switcher plugin is not loaded
         if "mode_switcher" not in self.plugin_manager.plugins:
-            logging.info(f"[MainWindow] Mode changed to {mode.value} (no mode_switcher plugin)")
+            logger.info("[MainWindow] Mode changed to %s (no mode_switcher plugin)", mode.value)
             self._load_tracks_from_db()

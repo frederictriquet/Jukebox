@@ -30,12 +30,15 @@ def make_plugin_context(
 
     context.database.settings.get.side_effect = store.get
     context.database.settings.save.side_effect = store.save
-    context.database.get_plugin_setting.side_effect = (
-        lambda plugin_name, key: store.get(plugin_name, key)
+    context.database.get_plugin_setting.side_effect = lambda plugin_name, key: store.get(
+        plugin_name, key
     )
 
     def get_setting(
-        plugin_name: str, key: str, value_type: type, default=None,  # type: ignore[assignment]
+        plugin_name: str,
+        key: str,
+        value_type: type,
+        default=None,  # type: ignore[assignment]
     ):  # type: ignore[return]
         value = store.get(plugin_name, key)
         if value is None:

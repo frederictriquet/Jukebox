@@ -1,6 +1,6 @@
 """Tests for ShortcutMixin."""
 
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -84,11 +84,13 @@ class TestRegisterShortcuts:
 
         with (
             patch.object(
-                plugin, "_reload_plugin_config",
+                plugin,
+                "_reload_plugin_config",
                 side_effect=lambda: call_order.append("reload"),
             ),
             patch.object(
-                plugin, "_register_plugin_shortcuts",
+                plugin,
+                "_register_plugin_shortcuts",
                 side_effect=lambda: call_order.append("register"),
             ),
         ):

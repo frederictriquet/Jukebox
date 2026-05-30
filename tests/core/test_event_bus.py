@@ -132,8 +132,8 @@ class TestEventBusAdditional:
         # Must not raise
         try:
             bus.emit("event")
-        except ValueError:
-            assert False, "Exception should not propagate out of emit"
+        except ValueError as err:
+            raise AssertionError("Exception should not propagate out of emit") from err
 
     def test_reentrant_subscribe_during_emit(self) -> None:
         """Test that a callback can subscribe to a new event during emit without error."""

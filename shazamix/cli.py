@@ -13,13 +13,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
-from .database import FingerprintDB, DEFAULT_DB_PATH  # type: ignore[import]
+from .database import DEFAULT_DB_PATH, FingerprintDB  # type: ignore[import]
+
+logger = logging.getLogger(__name__)
 
 
 def _notify_done(message: str, has_errors: bool = False) -> None:
@@ -105,7 +108,20 @@ def cmd_index(args: argparse.Namespace) -> int:
         }
 
         for future in as_completed(futures):
-            track_id, filepath, fingerprints, error = future.result()
+            try:
+                track_id, filepath, fingerprints, error = future.result()
+            except Exception as exc:
+                # Un crash de worker (BrokenProcessPool, etc.) ne doit pas planter
+                # toute l'indexation : on récupère la piste associée et on continue.
+                track = futures[future]
+                logger.warning(
+                    "Worker crash lors de l'indexation de %s : %s",
+                    track.get("filepath", "?"),
+                    exc,
+                    exc_info=True,
+                )
+                errors += 1
+                continue
             filename = os.path.basename(filepath)
 
             if fingerprints is not None:
@@ -209,6 +225,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     print()
 
     last_progress = [0]  # Use list for closure
+    start = time.time()
 
     def progress_callback(current: int, total: int, message: str) -> None:
         """Display progress."""
@@ -224,14 +241,22 @@ def cmd_analyze(args: argparse.Namespace) -> int:
                 print(f"[{current}/{total}] {message} - {rate:.1f} seg/s - ETA: {remaining:.0f}s")
                 last_progress[0] = current
 
-    # Try loading cached fingerprints
-    from plugins.cue_maker.cache import load_cached_fingerprints, save_fingerprints_cache
+    # Le cache de fingerprints est fourni par le plugin cue_maker, optionnel :
+    # shazamix doit rester utilisable seul, sans dépendance dure vers les plugins.
+    try:
+        from plugins.cue_maker.cache import (  # type: ignore[import]
+            load_cached_fingerprints,
+            save_fingerprints_cache,
+        )
+    except ImportError:
+        logger.info("Plugin cue_maker absent — analyse sans cache de fingerprints")
+        load_cached_fingerprints = None  # type: ignore[assignment]
+        save_fingerprints_cache = None  # type: ignore[assignment]
 
-    cached_fps = load_cached_fingerprints(args.file)
+    cached_fps = load_cached_fingerprints(args.file) if load_cached_fingerprints else None
     if cached_fps is not None:
         print(f"[*] Using cached fingerprints ({len(cached_fps)} segments)")
 
-    start = time.time()
     matches, fingerprints = matcher.analyze_mix(
         args.file,
         segment_duration_sec=args.segment,
@@ -243,7 +268,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     elapsed = time.time() - start
 
     # Save fingerprints to cache if freshly extracted
-    if cached_fps is None and fingerprints:
+    if cached_fps is None and fingerprints and save_fingerprints_cache:
         save_fingerprints_cache(args.file, fingerprints)
 
     if not matches:

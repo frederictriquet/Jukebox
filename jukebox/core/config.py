@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AudioConfig(BaseModel):
@@ -23,6 +23,12 @@ class UIConfig(BaseModel):
     mode: str = "jukebox"
     curating_directory: str = ""
     waveform_cache_size: int = Field(ge=10, le=10000, default=500)
+
+    @field_validator("curating_directory", mode="after")
+    @classmethod
+    def _expand_user(cls, value: str) -> str:
+        """Expanse les chemins `~` non résolus par Pydantic (champ stocké en str)."""
+        return str(Path(value).expanduser()) if value else value
 
 
 class ShortcutsConfig(BaseModel):
@@ -142,6 +148,12 @@ class FileManagerConfig(BaseModel):
     trash_directory: str = ""
     trash_key: str = "Delete"
 
+    @field_validator("trash_directory", mode="after")
+    @classmethod
+    def _expand_user(cls, value: str) -> str:
+        """Expanse les chemins `~` non résolus par Pydantic (champ stocké en str)."""
+        return str(Path(value).expanduser()) if value else value
+
 
 class VJingEffectMappingConfig(BaseModel):
     """Configuration for VJing effect mapping by genre letter."""
@@ -209,7 +221,7 @@ class VideoExporterConfig(BaseModel):
     # FFmpeg encoding settings
     ffmpeg_video_codec: str = "libx264"
     ffmpeg_preset: str = "medium"
-    ffmpeg_crf: str = "23"
+    ffmpeg_crf: int = Field(ge=0, le=51, default=23)
     ffmpeg_pixel_format: str = "yuv420p"
     ffmpeg_audio_codec: str = "aac"
     ffmpeg_audio_bitrate: str = "192k"
@@ -219,6 +231,18 @@ class VideoExporterConfig(BaseModel):
     ffmpeg_bufsize: str = "7000k"
     # VJing simultaneous effects (how many effects are visible at once)
     vjing_simultaneous_effects: int = Field(ge=1, le=10, default=1)
+
+    @field_validator(
+        "output_directory",
+        "video_clips_folder",
+        "intro_video_path",
+        "milkdrop_preset_path",
+        mode="after",
+    )
+    @classmethod
+    def _expand_user(cls, value: str) -> str:
+        """Expanse les chemins `~` non résolus par Pydantic (champs stockés en str)."""
+        return str(Path(value).expanduser()) if value else value
 
 
 class CueMakerConfig(BaseModel):
@@ -230,11 +254,23 @@ class CueMakerConfig(BaseModel):
     overlap: float = Field(ge=0, default=15.0)
     max_workers: int = Field(ge=1, default=4)
 
+    @field_validator("shazamix_db_path", "mix_directory", mode="after")
+    @classmethod
+    def _expand_user(cls, value: Path) -> Path:
+        """Expanse les chemins `~` qui ne sont pas résolus par Pydantic."""
+        return value.expanduser()
+
 
 class EngineDJConfig(BaseModel):
     """Engine DJ integration configuration."""
 
     database_path: str = ""
+
+    @field_validator("database_path", mode="after")
+    @classmethod
+    def _expand_user(cls, value: str) -> str:
+        """Expanse les chemins `~` non résolus par Pydantic (champ stocké en str)."""
+        return str(Path(value).expanduser()) if value else value
 
 
 class DirectoryNavigatorConfig(BaseModel):
@@ -261,8 +297,8 @@ class PluginsConfig(BaseModel):
 class JukeboxConfig(BaseModel):
     """Main application configuration."""
 
-    audio: AudioConfig
-    ui: UIConfig
+    audio: AudioConfig = Field(default_factory=AudioConfig)
+    ui: UIConfig = Field(default_factory=UIConfig)
     shortcuts: ShortcutsConfig = Field(default_factory=ShortcutsConfig)
     playback_navigation: PlaybackNavigationConfig = Field(default_factory=PlaybackNavigationConfig)
     loop_player: LoopPlayerConfig = Field(default_factory=LoopPlayerConfig)
@@ -276,7 +312,7 @@ class JukeboxConfig(BaseModel):
     engine_dj: EngineDJConfig = Field(default_factory=EngineDJConfig)
     directory_navigator: DirectoryNavigatorConfig = Field(default_factory=DirectoryNavigatorConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
-    logging: LoggingConfig
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
 
 def load_config(config_path: Path | None = None) -> JukeboxConfig:
@@ -313,5 +349,9 @@ def load_config(config_path: Path | None = None) -> JukeboxConfig:
 
     with open(config_path) as f:
         data = yaml.safe_load(f)
+
+    # Un fichier YAML vide produit `None` ; on tombe alors sur la config par défaut.
+    if data is None:
+        data = {}
 
     return JukeboxConfig(**data)

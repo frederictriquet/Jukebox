@@ -15,6 +15,7 @@ Sections:
 """
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -97,6 +98,18 @@ SETTINGS = [
 ]
 
 
+# Champs de type Path : config.py applique Path(...).expanduser() (fix M05),
+# donc une valeur yaml "~/x" devient "/Users/.../x" une fois chargée.
+_PATH_FIELDS = {"trash_directory", "output_directory", "video_clips_folder"}
+
+
+def _expected_yaml(field: str, yaml_val: object) -> object:
+    """Valeur yaml attendue après chargement : les champs Path sont expandus."""
+    if field in _PATH_FIELDS and isinstance(yaml_val, str) and yaml_val.startswith("~"):
+        return str(Path(yaml_val).expanduser())
+    return yaml_val
+
+
 def _setting_id(case: tuple) -> str:
     return f"{case[1].replace('Plugin', '')}.{case[4]}"
 
@@ -110,34 +123,68 @@ class TestDbConfigPriority:
     """For each setting: DB overrides yaml, yaml is fallback, hot reload works."""
 
     def test_db_overrides_yaml(
-        self, module, cls_name, cfg_attr, cfg_cls, field, yaml_val, db_str, expected,
+        self,
+        module,
+        cls_name,
+        cfg_attr,
+        cfg_cls,
+        field,
+        yaml_val,
+        db_str,
+        expected,
     ) -> None:
         plugin, _ = make_plugin(
-            module, cls_name, cfg_attr, cfg_cls,
-            yaml_kwargs={field: yaml_val}, db_settings={field: db_str},
+            module,
+            cls_name,
+            cfg_attr,
+            cfg_cls,
+            yaml_kwargs={field: yaml_val},
+            db_settings={field: db_str},
         )
         actual = getattr(getattr(plugin.context.config, cfg_attr), field)
         assert actual == expected
 
     def test_falls_back_to_yaml(
-        self, module, cls_name, cfg_attr, cfg_cls, field, yaml_val, db_str, expected,
+        self,
+        module,
+        cls_name,
+        cfg_attr,
+        cfg_cls,
+        field,
+        yaml_val,
+        db_str,
+        expected,
     ) -> None:
         plugin, _ = make_plugin(
-            module, cls_name, cfg_attr, cfg_cls,
+            module,
+            cls_name,
+            cfg_attr,
+            cfg_cls,
             yaml_kwargs={field: yaml_val},
         )
         actual = getattr(getattr(plugin.context.config, cfg_attr), field)
-        assert actual == yaml_val
+        assert actual == _expected_yaml(field, yaml_val)
 
     def test_hot_reload(
-        self, module, cls_name, cfg_attr, cfg_cls, field, yaml_val, db_str, expected,
+        self,
+        module,
+        cls_name,
+        cfg_attr,
+        cfg_cls,
+        field,
+        yaml_val,
+        db_str,
+        expected,
     ) -> None:
         plugin, store = make_plugin(
-            module, cls_name, cfg_attr, cfg_cls,
+            module,
+            cls_name,
+            cfg_attr,
+            cfg_cls,
             yaml_kwargs={field: yaml_val},
         )
         actual = getattr(getattr(plugin.context.config, cfg_attr), field)
-        assert actual == yaml_val
+        assert actual == _expected_yaml(field, yaml_val)
 
         store.save(plugin.name, field, db_str)
         plugin._on_settings_changed()
@@ -154,18 +201,14 @@ class TestDbConfigPriority:
 def _yaml_dests(*dests: tuple[str, str, str]) -> dict:
     """Build yaml_kwargs for FileManagerConfig with destinations."""
     return {
-        "destinations": [
-            FileManagerDestinationConfig(name=n, path=p, key=k) for n, p, k in dests
-        ],
+        "destinations": [FileManagerDestinationConfig(name=n, path=p, key=k) for n, p, k in dests],
     }
 
 
 def _db_dests(*dests: tuple[str, str, str]) -> dict[str, str]:
     """Build db_settings with JSON-serialized destinations."""
     return {
-        "destinations": json.dumps(
-            [{"name": n, "path": p, "key": k} for n, p, k in dests]
-        ),
+        "destinations": json.dumps([{"name": n, "path": p, "key": k} for n, p, k in dests]),
     }
 
 
@@ -177,9 +220,7 @@ def _yaml_codes(*codes: tuple[str, str, str]) -> dict:
 def _db_codes(*codes: tuple[str, str, str]) -> dict[str, str]:
     """Build db_settings with JSON-serialized genre_codes."""
     return {
-        "genre_codes": json.dumps(
-            [{"key": k, "code": c, "name": n} for k, c, n in codes]
-        ),
+        "genre_codes": json.dumps([{"key": k, "code": c, "name": n} for k, c, n in codes]),
     }
 
 
@@ -200,7 +241,8 @@ class TestFileManagerDestinationsFromDb:
 
     def test_hot_reload(self) -> None:
         plugin, store = make_plugin(
-            *_FM, yaml_kwargs=_yaml_dests(("Good", "~/yaml", "@")),
+            *_FM,
+            yaml_kwargs=_yaml_dests(("Good", "~/yaml", "@")),
         )
         assert plugin.context.config.file_manager.destinations[0].path == "~/yaml"
 
@@ -305,23 +347,35 @@ COMBINED_CASES = [
         *_VE,
         {},
         {
-            "default_resolution": "vertical", "output_directory": "/tmp/out",
+            "default_resolution": "vertical",
+            "output_directory": "/tmp/out",
             "video_clips_folder": "/tmp/clips",
-            "waveform_bass_color": "#111111", "waveform_mid_color": "#222222",
-            "waveform_treble_color": "#333333", "waveform_cursor_color": "#444444",
-            "default_fps": "24", "waveform_height_ratio": "0.6",
-            "waveform_enabled": "false", "text_enabled": "false",
-            "dynamics_enabled": "false", "vjing_enabled": "true",
+            "waveform_bass_color": "#111111",
+            "waveform_mid_color": "#222222",
+            "waveform_treble_color": "#333333",
+            "waveform_cursor_color": "#444444",
+            "default_fps": "24",
+            "waveform_height_ratio": "0.6",
+            "waveform_enabled": "false",
+            "text_enabled": "false",
+            "dynamics_enabled": "false",
+            "vjing_enabled": "true",
             "video_background_enabled": "true",
         },
         {
-            "default_resolution": "vertical", "output_directory": "/tmp/out",
+            "default_resolution": "vertical",
+            "output_directory": "/tmp/out",
             "video_clips_folder": "/tmp/clips",
-            "waveform_bass_color": "#111111", "waveform_mid_color": "#222222",
-            "waveform_treble_color": "#333333", "waveform_cursor_color": "#444444",
-            "default_fps": 24, "waveform_height_ratio": 0.6,
-            "waveform_enabled": False, "text_enabled": False,
-            "dynamics_enabled": False, "vjing_enabled": True,
+            "waveform_bass_color": "#111111",
+            "waveform_mid_color": "#222222",
+            "waveform_treble_color": "#333333",
+            "waveform_cursor_color": "#444444",
+            "default_fps": 24,
+            "waveform_height_ratio": 0.6,
+            "waveform_enabled": False,
+            "text_enabled": False,
+            "dynamics_enabled": False,
+            "vjing_enabled": True,
             "video_background_enabled": True,
         },
     ),
@@ -334,18 +388,28 @@ COMBINED_CASES = [
     ids=["LoopPlayer", "PlaybackNavigation", "WaveformVisualizer", "VideoExporter"],
 )
 def test_all_settings_from_db(
-    module, cls_name, cfg_attr, cfg_cls, yaml_kw, db_settings, expected,
+    module,
+    cls_name,
+    cfg_attr,
+    cfg_cls,
+    yaml_kw,
+    db_settings,
+    expected,
 ) -> None:
     """When all settings are in DB, none come from config.yaml."""
     plugin, _ = make_plugin(
-        module, cls_name, cfg_attr, cfg_cls,
-        yaml_kwargs=yaml_kw, db_settings=db_settings,
+        module,
+        cls_name,
+        cfg_attr,
+        cfg_cls,
+        yaml_kwargs=yaml_kw,
+        db_settings=db_settings,
     )
     section = getattr(plugin.context.config, cfg_attr)
     for field, value in expected.items():
-        assert getattr(section, field) == value, (
-            f"{field}: expected {value}, got {getattr(section, field)}"
-        )
+        assert (
+            getattr(section, field) == value
+        ), f"{field}: expected {value}, got {getattr(section, field)}"
 
 
 def test_file_manager_all_settings_from_db() -> None:
@@ -398,18 +462,31 @@ TIMING_GAP_CASES = [
     ids=["FileManager.trash_directory", "GenreEditor.rating_key"],
 )
 def test_timing_gap_yaml_until_register_shortcuts(
-    module, cls_name, cfg_attr, cfg_cls, field, yaml_val, db_str, expected,
+    module,
+    cls_name,
+    cfg_attr,
+    cfg_cls,
+    field,
+    yaml_val,
+    db_str,
+    expected,
 ) -> None:
     """ShortcutMixin plugins keep yaml values after initialize().
     DB values are only loaded when register_shortcuts() is called.
     """
     plugin, _ = make_plugin(
-        module, cls_name, cfg_attr, cfg_cls,
-        yaml_kwargs={field: yaml_val}, db_settings={field: db_str},
+        module,
+        cls_name,
+        cfg_attr,
+        cfg_cls,
+        yaml_kwargs={field: yaml_val},
+        db_settings={field: db_str},
         register_shortcuts=False,
     )
     # After initialize(), still yaml
-    assert getattr(getattr(plugin.context.config, cfg_attr), field) == yaml_val
+    assert getattr(getattr(plugin.context.config, cfg_attr), field) == _expected_yaml(
+        field, yaml_val
+    )
 
     sm = make_shortcut_manager()
     plugin.register_shortcuts(sm)
@@ -545,7 +622,9 @@ def test_ffmpeg_settings_not_synced_to_db() -> None:
 def test_waveform_height_change_updates_widget() -> None:
     """When DB height changes, the waveform widget is resized."""
     plugin, store = make_plugin(
-        *_WV, yaml_kwargs={"height": 120}, db_settings={"height": "80"},
+        *_WV,
+        yaml_kwargs={"height": 120},
+        db_settings={"height": "80"},
     )
     mock_widget = MagicMock()
     plugin.waveform_widget = mock_widget
@@ -592,9 +671,9 @@ def test_synced_settings_match_schema(module: str, cls_name: str) -> None:
     plugin.context = MagicMock()
     schema_keys = set(plugin.get_settings_schema().keys())
 
-    assert synced_keys == schema_keys, (
-        f"{cls_name}: synced keys {synced_keys} != schema keys {schema_keys}"
-    )
+    assert (
+        synced_keys == schema_keys
+    ), f"{cls_name}: synced keys {synced_keys} != schema keys {schema_keys}"
 
 
 # ============================================================================
@@ -641,7 +720,12 @@ def test_invalid_json_on_hot_reload_keeps_previous() -> None:
 
 DIRECT_RELOAD_PLUGINS = [
     ("plugins.loop_player", "LoopPlayerPlugin", "loop_player", LoopPlayerConfig),
-    ("plugins.playback_navigation", "PlaybackNavigationPlugin", "playback_navigation", PlaybackNavigationConfig),
+    (
+        "plugins.playback_navigation",
+        "PlaybackNavigationPlugin",
+        "playback_navigation",
+        PlaybackNavigationConfig,
+    ),
     ("plugins.waveform_visualizer", "WaveformVisualizerPlugin", "waveform", WaveformConfig),
     ("plugins.video_exporter.plugin", "VideoExporterPlugin", "video_exporter", VideoExporterConfig),
 ]
@@ -653,7 +737,10 @@ DIRECT_RELOAD_PLUGINS = [
     ids=[c[1].replace("Plugin", "") for c in DIRECT_RELOAD_PLUGINS],
 )
 def test_initialize_loads_db_settings_at_startup(
-    module: str, cls_name: str, cfg_attr: str, cfg_cls: type,
+    module: str,
+    cls_name: str,
+    cfg_attr: str,
+    cfg_cls: type,
 ) -> None:
     """initialize() must call _on_settings_changed() so DB values are loaded at startup,
     not only when the event fires later."""
@@ -699,8 +786,7 @@ def test_rapid_press_threshold_default_fn_converts_to_ms() -> None:
     from plugins.playback_navigation import PlaybackNavigationPlugin
 
     threshold_setting = next(
-        s for s in PlaybackNavigationPlugin._synced_settings
-        if s.db_key == "rapid_press_threshold"
+        s for s in PlaybackNavigationPlugin._synced_settings if s.db_key == "rapid_press_threshold"
     )
 
     # Simulate a config with 0.5s threshold

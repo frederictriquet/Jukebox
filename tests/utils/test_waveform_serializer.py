@@ -1,9 +1,6 @@
 """Tests for waveform serialization utilities."""
 
-import io
 import pickle
-import warnings
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -115,7 +112,9 @@ class TestDeserializeWaveform:
         np.testing.assert_array_almost_equal(result["mid"], waveform["mid"])
         np.testing.assert_array_almost_equal(result["treble"], waveform["treble"])
 
-    def test_legacy_pickle_fallback_logs_deprecation(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_legacy_pickle_fallback_logs_deprecation(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Legacy pickle fallback emits a debug log about upgrading."""
         import logging
 

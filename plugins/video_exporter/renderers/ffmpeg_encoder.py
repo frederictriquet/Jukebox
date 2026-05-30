@@ -29,7 +29,7 @@ class FFmpegEncoder:
         *,
         video_codec: str = "libx264",
         preset: str = "medium",
-        crf: str = "23",
+        crf: int = 23,
         pixel_format: str = "yuv420p",
         audio_codec: str = "aac",
         audio_bitrate: str = "192k",
@@ -142,7 +142,7 @@ class FFmpegEncoder:
             "-preset",
             self.preset,
             "-crf",
-            self.crf,
+            str(self.crf),
             # Constrained CRF : impose un débit plancher sans abandonner le CRF
             "-b:v",
             self.min_video_bitrate,
@@ -276,6 +276,14 @@ class FFmpegEncoder:
     def cancel(self) -> None:
         """Cancel encoding and terminate FFmpeg process."""
         if self.process:
+            # Fermer stdin avant terminate() : un FFmpeg bloqué en lecture sur stdin
+            # ne réagit pas toujours à SIGTERM sur certains OS tant que le pipe est ouvert.
+            if self.process.stdin:
+                try:
+                    self.process.stdin.close()
+                except Exception as e:
+                    logging.debug("[FFmpeg] cancel: stdin close ignoré (pipe fermé) : %s", e)
+                self.process.stdin = None
             self.process.terminate()
             self.process.wait()
             logging.info("[FFmpeg] Encoding cancelled")

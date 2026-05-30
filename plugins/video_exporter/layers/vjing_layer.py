@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 import math
-from random import Random
+import threading
 from dataclasses import dataclass
 from enum import Enum
+from random import Random
 from typing import TYPE_CHECKING, Any
 
 import numpy as np  # type: ignore[import-untyped]
@@ -538,6 +539,12 @@ class VJingLayer(BaseVisualLayer):
         self._cached_post_processors: list[str] = []
         self._cached_final_pass: list[str] = []
 
+        # Verrou sérialisant render() : feedback_buffer, particles, ripples,
+        # explosion_* et _current_intensity sont des états mutables partagés.
+        # L'export appelle render() depuis un ThreadPoolExecutor (jusqu'à 8 threads),
+        # ce qui provoquerait des data races sans ce verrou.
+        self._render_lock = threading.Lock()
+
         # beats as set for O(1) lookup (beats list kept for reversed iteration in effects)
         self._beats_set: set[int] = set()
 
@@ -782,9 +789,17 @@ class VJingLayer(BaseVisualLayer):
 
         # If a preset is selected, use its effects
         if self.preset and self.preset in self.presets:
-            effects = self.presets[self.preset]
+            raw_effects = self.presets[self.preset]
+            # Filtre par AVAILABLE_EFFECTS : une typo dans un preset YAML ne doit pas
+            # passer un effet inexistant au dispatch de render().
+            effects = [e for e in raw_effects if e in self.AVAILABLE_EFFECTS]
+            unknown = [e for e in raw_effects if e not in self.AVAILABLE_EFFECTS]
+            if unknown:
+                logging.warning(
+                    f"[VJingLayer] Preset '{self.preset}' : effets inconnus ignorés {unknown}"
+                )
             logging.info(f"[VJingLayer] Using preset '{self.preset}': {effects}")
-            return effects
+            return effects if effects else ["wave"]
 
         # Otherwise, use genre-based mapping
         if not self.genre:
@@ -1017,6 +1032,10 @@ class VJingLayer(BaseVisualLayer):
     def render(self, frame_idx: int, time_pos: float) -> Image.Image:
         """Render VJing effects for the current frame.
 
+        Sérialisé par ``self._render_lock`` : l'export appelle render() depuis
+        plusieurs threads, or les états mutables (feedback_buffer, particles,
+        ripples, _current_intensity, etc.) sont partagés. Voir [C22].
+
         Args:
             frame_idx: Frame index.
             time_pos: Time position in seconds.
@@ -1024,6 +1043,11 @@ class VJingLayer(BaseVisualLayer):
         Returns:
             RGBA image with VJing effects.
         """
+        with self._render_lock:
+            return self._render_locked(frame_idx, time_pos)
+
+    def _render_locked(self, frame_idx: int, time_pos: float) -> Image.Image:
+        """Corps de render(), exécuté sous ``self._render_lock``."""
         img = self.create_transparent_image()
 
         # Get current energy values

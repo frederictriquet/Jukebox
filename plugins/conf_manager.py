@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -69,7 +70,7 @@ class ConfManagerPlugin:
             self.conf_dialog = ConfigDialog(self.context)
 
         self.conf_dialog.load_settings()
-        self.conf_dialog.exec_()
+        self.conf_dialog.exec()
 
     def activate(self, mode: str) -> None:
         """Activate plugin for this mode."""
@@ -157,7 +158,7 @@ class ListEditor(QWidget):
 
         # Set column widths based on field types
         header = self.table.horizontalHeader()
-        for col, (field_name, field_schema) in enumerate(item_schema.items()):
+        for col, field_schema in enumerate(item_schema.values()):
             field_type = field_schema.get("type", "string")
 
             if field_type == "shortcut":
@@ -216,7 +217,6 @@ class ListEditor(QWidget):
         delete_btn = QPushButton("🗑")
         delete_btn.setToolTip("Delete this row")
         delete_btn.setMaximumWidth(40)
-        delete_btn.setFont(delete_btn.font())  # Ensure font supports the character
         # Override the padding for this specific button
         delete_btn.setStyleSheet("padding: 4px;")
         delete_btn.clicked.connect(lambda checked, r=row: self._delete_row(r))
@@ -310,6 +310,9 @@ class ConfigDialog(QDialog):
         """Initialize dialog."""
         super().__init__()
         self.context = context
+        # Initialisé ici pour garantir l'existence avant tout appel à
+        # load_settings (qui peut précéder _add_dynamic_tab).
+        self._plugin_inputs: dict[str, dict[str, Any]] = {}
         self.setWindowTitle("Plugin Configuration")
         self.setMinimumSize(1000, 700)
 
@@ -432,8 +435,6 @@ class ConfigDialog(QDialog):
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
         # Store input widgets for this plugin
-        if not hasattr(self, "_plugin_inputs"):
-            self._plugin_inputs = {}
         self._plugin_inputs[plugin_name] = {}
 
         # Create input widgets based on schema
@@ -472,8 +473,6 @@ class ConfigDialog(QDialog):
                     input_widget.setSuffix(setting_config["suffix"])
             elif setting_type == "float":
                 # Use QDoubleSpinBox for float values
-                from PySide6.QtWidgets import QDoubleSpinBox
-
                 input_widget = QDoubleSpinBox()
                 input_widget.setRange(
                     setting_config.get("min", 0.0),
@@ -511,7 +510,10 @@ class ConfigDialog(QDialog):
             else:
                 self._engine_dj_path_input.setText(self.context.config.engine_dj.database_path)
 
-        if not hasattr(self, "_plugin_inputs"):
+        if not self._plugin_inputs:
+            return
+
+        if not hasattr(self.context, "app") or not hasattr(self.context.app, "plugin_manager"):
             return
 
         plugin_manager = self.context.app.plugin_manager
@@ -535,8 +537,6 @@ class ConfigDialog(QDialog):
                 # Set value based on widget type
                 if isinstance(input_widget, ListEditor):
                     # Parse JSON list
-                    import json
-
                     try:
                         items = json.loads(value) if value else []
                         input_widget.set_items(items)
@@ -599,39 +599,40 @@ class ConfigDialog(QDialog):
 
     def _save_settings(self) -> None:
         """Save settings to database for all plugins."""
-        # Save general settings
-        if hasattr(self, "_engine_dj_path_input"):
-            engine_dj_path = self._engine_dj_path_input.text()
-            self._set_setting("general", "engine_dj_database_path", engine_dj_path)
-            self.context.config.engine_dj.database_path = engine_dj_path
+        try:
+            # Save general settings
+            if hasattr(self, "_engine_dj_path_input"):
+                engine_dj_path = self._engine_dj_path_input.text()
+                self._set_setting("general", "engine_dj_database_path", engine_dj_path)
+                self.context.config.engine_dj.database_path = engine_dj_path
 
-        if not hasattr(self, "_plugin_inputs"):
+            # Save settings for each plugin
+            for plugin_name, inputs in self._plugin_inputs.items():
+                for setting_key, input_widget in inputs.items():
+                    # Get value from widget
+                    if isinstance(input_widget, ListEditor):
+                        # Serialize list to JSON
+                        items = input_widget.get_items()
+                        value = json.dumps(items)
+                    elif isinstance(input_widget, QComboBox):
+                        # Get selected value (use data if available, otherwise text)
+                        value = input_widget.currentData() or input_widget.currentText()
+                    elif isinstance(input_widget, QCheckBox):
+                        value = "true" if input_widget.isChecked() else "false"
+                    elif isinstance(input_widget, (DirectoryInput, ShortcutInput, QLineEdit)):
+                        value = input_widget.text()
+                    elif isinstance(input_widget, (QDoubleSpinBox, QSpinBox)):
+                        value = str(input_widget.value())
+                    else:
+                        continue
+
+                    # Save to database
+                    self._set_setting(plugin_name, setting_key, value)
+        except Exception:
+            # Une erreur DB en cours de boucle laisserait une sauvegarde partielle :
+            # on logue avec la stack trace et on n'acquitte pas le dialogue.
+            logging.error("[ConfManager] Échec de la sauvegarde des settings", exc_info=True)
             return
-
-        # Save settings for each plugin
-        for plugin_name, inputs in self._plugin_inputs.items():
-            for setting_key, input_widget in inputs.items():
-                # Get value from widget
-                if isinstance(input_widget, ListEditor):
-                    # Serialize list to JSON
-                    import json
-
-                    items = input_widget.get_items()
-                    value = json.dumps(items)
-                elif isinstance(input_widget, QComboBox):
-                    # Get selected value (use data if available, otherwise text)
-                    value = input_widget.currentData() or input_widget.currentText()
-                elif isinstance(input_widget, QCheckBox):
-                    value = "true" if input_widget.isChecked() else "false"
-                elif isinstance(input_widget, (DirectoryInput, ShortcutInput, QLineEdit)):
-                    value = input_widget.text()
-                elif isinstance(input_widget, QDoubleSpinBox) or isinstance(input_widget, QSpinBox):
-                    value = str(input_widget.value())
-                else:
-                    continue
-
-                # Save to database
-                self._set_setting(plugin_name, setting_key, value)
 
         # Emit event to notify plugins that settings changed
         self.context.emit(Events.PLUGIN_SETTINGS_CHANGED)

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import random
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from jukebox.core.event_bus import Events
 
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
@@ -34,80 +37,44 @@ class RecommendationsPlugin:
         recommendations = self._get_recommendations(limit=20)
 
         # Update UI with recommendations
-        from jukebox.core.event_bus import Events
-
         self.context.emit(Events.SEARCH_PERFORMED, results=recommendations)
 
         # Emit event to load recommendations into track list
-        from pathlib import Path
-
-        from jukebox.core.event_bus import Events
-
-        # Convert to list of filepaths
         track_filepaths = [Path(track["filepath"]) for track in recommendations]
         self.context.emit(Events.LOAD_TRACK_LIST, filepaths=track_filepaths)
 
     def _get_recommendations(self, limit: int = 10) -> list[Any]:
         """Get track recommendations."""
-        db = self.context.database
+        tracks_repo = self.context.database.tracks
 
-        # Get recently played tracks
-        recent = db.conn.execute(
-            """
-            SELECT DISTINCT t.artist, t.genre
-            FROM tracks t
-            JOIN play_history ph ON t.id = ph.track_id
-            WHERE ph.completed = 1
-            ORDER BY ph.played_at DESC
-            LIMIT 20
-        """
-        ).fetchall()
+        # Couples (artist, genre) des pistes récemment terminées.
+        recent = tracks_repo.get_recently_played_artists_genres(limit=20)
 
         if not recent:
-            # No history, return random
-            return db.conn.execute(
-                "SELECT * FROM tracks ORDER BY RANDOM() LIMIT ?", (limit,)
-            ).fetchall()
+            # Aucun historique : recommandations aléatoires.
+            return tracks_repo.get_random(limit)
 
-        # Get favorite artists and genres
+        # Artistes et genres favoris déduits de l'historique.
         artists = [r["artist"] for r in recent if r["artist"]]
         genres = [r["genre"] for r in recent if r["genre"]]
 
         recommendations = []
 
-        # Similar artists
+        # Pistes d'artistes similaires non jouées récemment.
         if artists:
             artist_sample = random.sample(artists, min(3, len(artists)))
             for artist in artist_sample:
-                tracks = db.conn.execute(
-                    """
-                    SELECT * FROM tracks
-                    WHERE artist = ?
-                    AND id NOT IN (
-                        SELECT track_id FROM play_history
-                        WHERE played_at > datetime('now', '-7 days')
-                    )
-                    ORDER BY RANDOM()
-                    LIMIT ?
-                """,
-                    (artist, limit // 3),
-                ).fetchall()
-                recommendations.extend(tracks)
+                recommendations.extend(
+                    tracks_repo.get_random_by_artist_unplayed(artist, limit // 3)
+                )
 
-        # Similar genres
+        # Pistes de genres similaires.
         if genres and len(recommendations) < limit:
             genre_sample = random.sample(genres, min(2, len(genres)))
             for genre in genre_sample:
-                tracks = db.conn.execute(
-                    """
-                    SELECT * FROM tracks
-                    WHERE genre = ?
-                    ORDER BY RANDOM()
-                    LIMIT ?
-                """,
-                    (genre, (limit - len(recommendations)) // 2),
-                ).fetchall()
-                recommendations.extend(tracks)
+                recommendations.extend(
+                    tracks_repo.get_random_by_genre(genre, (limit - len(recommendations)) // 2)
+                )
 
         random.shuffle(recommendations)
         return recommendations[:limit]

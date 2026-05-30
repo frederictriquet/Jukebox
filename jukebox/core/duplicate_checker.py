@@ -65,16 +65,25 @@ class DuplicateChecker:
     # Public API
     # ------------------------------------------------------------------
 
-    def check(self, track: dict[str, Any]) -> DuplicateResult:
+    def check(self, track: dict[str, Any], build_if_needed: bool = True) -> DuplicateResult:
         """Check if a track is a duplicate of a jukebox track.
 
         Args:
             track: Track dict with at least "artist", "title", "filename" keys.
+            build_if_needed: Si True (défaut), construit l'index en synchrone si
+                absent. Les appelants exécutés sur le thread UI doivent passer
+                False pour éviter un fetch bloquant de toute la bibliothèque ;
+                un index non construit retourne alors un résultat neutre (GREEN).
 
         Returns:
             DuplicateResult with status and optional match description.
         """
-        self._ensure_index()
+        if build_if_needed:
+            self._ensure_index()
+        elif not self._index_built:
+            # Index pas encore prêt et construction interdite (thread UI) :
+            # on ne bloque pas, on renvoie un statut neutre.
+            return DuplicateResult(DuplicateStatus.GREEN, None)
 
         artist = track.get("artist") or ""
         title = track.get("title") or ""
@@ -111,6 +120,14 @@ class DuplicateChecker:
     def invalidate_index(self) -> None:
         """Mark the index as stale so it rebuilds lazily on next check."""
         self._index_built = False
+
+    def is_index_ready(self) -> bool:
+        """Vérification non-bloquante de l'état de l'index.
+
+        Permet à un appelant sur le thread UI de savoir si check() peut être
+        invoqué sans déclencher un fetch DB synchrone.
+        """
+        return self._index_built
 
     def _ensure_index(self) -> None:
         """Build the index on first use (lazy initialization)."""

@@ -3,12 +3,11 @@
 import hashlib
 import logging
 import pickle
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-
-logger = logging.getLogger(__name__)
 
 import numpy as np
 import pandas as pd
@@ -24,6 +23,8 @@ from sklearn.model_selection import train_test_split
 from .data_loader import ML_FEATURE_COLUMNS, load_training_data  # type: ignore[import]
 from .feature_engineering import FeaturePreprocessor, MultiLabelGenreEncoder  # type: ignore[import]
 from .models import BaseGenreClassifier, get_all_models, get_model  # type: ignore[import]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -150,10 +151,14 @@ class GenreClassifierTrainer:
         self.y_test = np.asarray(split_result[3])
 
         # Preprocess features
-        self.X_train = self.preprocessor.fit_transform(x_train_raw)  # noqa: N803
+        x_train = self.preprocessor.fit_transform(x_train_raw)
+        self.X_train = x_train  # noqa: N803
         self.X_test = self.preprocessor.transform(x_test_raw)  # noqa: N803
 
-        return len(y), len(ML_FEATURE_COLUMNS), len(genres)
+        # Le nombre réel de features est la dimension de la matrice prétraitée,
+        # pas len(ML_FEATURE_COLUMNS) : ces deux valeurs divergent si les colonnes
+        # DB ne correspondent pas aux colonnes attendues.
+        return len(y), x_train.shape[1], len(genres)
 
     def evaluate_model(
         self,
@@ -228,8 +233,6 @@ class GenreClassifierTrainer:
         Returns:
             Training result with metrics
         """
-        import time
-
         if self.X_train is None or self.X_test is None:  # noqa: N803
             raise RuntimeError("Data not loaded. Call load_data() first.")
         if self.y_train is None or self.y_test is None:
@@ -403,14 +406,21 @@ class TrainedModel:
         path.with_suffix(".sha256").write_text(self._sha256(path))
 
     @classmethod
-    def load(cls, path: Path | str) -> "TrainedModel":
+    def load(cls, path: Path | str, require_hash: bool = True) -> "TrainedModel":
         """Load a trained model from disk.
 
         Args:
             path: Path to the saved model
+            require_hash: Si True (défaut), exige un fichier .sha256 valide avant
+                de désérialiser. pickle.load exécute du code arbitraire : sans
+                cette garde, un fichier modèle altéré permettrait une RCE.
 
         Returns:
             TrainedModel instance
+
+        Raises:
+            FileNotFoundError: Si le modèle ou son .sha256 (quand require_hash) est absent.
+            ValueError: Si l'empreinte SHA256 ne correspond pas.
         """
         path = Path(path)
         if not path.exists():
@@ -424,8 +434,17 @@ class TrainedModel:
                 raise ValueError(
                     f"SHA256 mismatch pour {path} — fichier corrompu ou altéré"
                 )
+        elif require_hash:
+            raise FileNotFoundError(
+                f"Fichier d'empreinte introuvable : {hash_path} — refus de "
+                f"désérialiser {path} sans vérification d'intégrité (pickle = RCE). "
+                f"Passer require_hash=False pour forcer (dangereux)."
+            )
         else:
-            logger.warning("[TrainedModel] Aucun fichier .sha256 pour %s — chargement sans vérification", path)
+            logger.warning(
+                "[TrainedModel] Aucun fichier .sha256 pour %s — chargement sans vérification (require_hash=False)",
+                path,
+            )
 
         with open(path, "rb") as f:
             data = pickle.load(f)  # noqa: S301

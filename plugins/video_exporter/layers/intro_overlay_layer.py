@@ -74,22 +74,30 @@ class IntroOverlayLayer(BaseVisualLayer):
             ) from e
 
         cap = cv2.VideoCapture(str(self.video_path))
-        video_fps = cap.get(cv2.CAP_PROP_FPS)
-        total_video_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        video_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        video_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        # try/finally : libère le VideoCapture si une exception survient avant qu'il
+        # ne soit confié à self._cap (sinon fuite de ressource OpenCV).
+        kept = False
+        try:
+            video_fps = cap.get(cv2.CAP_PROP_FPS)
+            total_video_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            video_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            video_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        logging.info(
-            "[Intro Overlay] Vidéo : %dx%d @ %.2ffps, %d frames",
-            video_width, video_height, video_fps, total_video_frames,
-        )
+            logging.info(
+                "[Intro Overlay] Vidéo : %dx%d @ %.2ffps, %d frames",
+                video_width, video_height, video_fps, total_video_frames,
+            )
 
-        self._frame_ratio = video_fps / self.fps if video_fps > 0 else 1.0
-        self.video_duration_frames = int(total_video_frames / self._frame_ratio)
-        self.fade_out_frames = int(self.fade_out_duration * self.fps)
+            self._frame_ratio = video_fps / self.fps if video_fps > 0 else 1.0
+            self.video_duration_frames = int(total_video_frames / self._frame_ratio)
+            self.fade_out_frames = int(self.fade_out_duration * self.fps)
 
-        # Garder le VideoCapture ouvert pour le seeking en render()
-        self._cap = cap
+            # Garder le VideoCapture ouvert pour le seeking en render()
+            self._cap = cap
+            kept = True
+        finally:
+            if not kept:
+                cap.release()
 
         logging.info(
             "[Intro Overlay] Prêt — %d frames de sortie (%.2fs), fade-out: %d frames",

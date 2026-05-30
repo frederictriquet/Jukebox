@@ -24,12 +24,10 @@ class TestMetadataExtractor:
         assert "date_modified" in info
 
     def test_extract_nonexistent_file(self) -> None:
-        """Test extracting from non-existent file."""
-        # Should not crash when file doesn't exist
-        try:
+        """Test extracting from non-existent file raises ValueError."""
+        # mutagen lève MutagenError pour un fichier absent, ré-emballée en ValueError
+        with pytest.raises(ValueError, match="Failed to extract metadata"):
             MetadataExtractor.extract(Path("/nonexistent/file.mp3"))
-        except Exception:
-            pass  # Expected - file doesn't exist
 
     def test_get_tag_with_list_value(self) -> None:
         """Test _get_tag with list value."""
@@ -102,3 +100,39 @@ class TestMetadataExtractor:
             pytest.raises(ValueError, match="Invalid audio file"),
         ):
             MetadataExtractor.extract(test_file)
+
+    def test_extract_nominal_path_with_tags(self, tmp_path: Path) -> None:
+        """Test du chemin nominal complet : durée, infos audio et tags extraits."""
+        test_file = tmp_path / "track.mp3"
+        test_file.write_bytes(b"dummy")
+
+        # Audio mutagen factice avec durée, bitrate, sample rate et tags ID3
+        mock_audio = MagicMock()
+        mock_audio.info.length = 180.5
+        mock_audio.info.bitrate = 320000
+        mock_audio.info.sample_rate = 44100
+
+        tag_map = {
+            "TIT2": ["My Title"],
+            "TPE1": ["My Artist"],
+            "TALB": ["My Album"],
+            "TCON": ["House"],
+            "TDRC": ["2021-05"],
+            "TRCK": ["3/12"],
+        }
+        mock_audio.__contains__.side_effect = lambda key: key in tag_map
+        mock_audio.__getitem__.side_effect = lambda key: tag_map[key]
+        mock_audio.tags = {}
+
+        with patch("jukebox.utils.metadata.MutagenFile", return_value=mock_audio):
+            metadata = MetadataExtractor.extract(test_file)
+
+        assert metadata["duration_seconds"] == 180.5
+        assert metadata["bitrate"] == 320000
+        assert metadata["sample_rate"] == 44100
+        assert metadata["title"] == "My Title"
+        assert metadata["artist"] == "My Artist"
+        assert metadata["album"] == "My Album"
+        assert metadata["genre"] == "House"
+        assert metadata["year"] == 2021
+        assert metadata["track_number"] == 3

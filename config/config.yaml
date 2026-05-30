@@ -40,13 +40,15 @@ playback_navigation:
 
 loop_player:
   duration: 30.0 # Default loop duration in seconds
+  coarse_step: 1.0 # Pas grossier en secondes (Ctrl+Flèche)
+  fine_step: 0.1 # Pas fin en secondes (Shift+Flèche)
 
 waveform:
   bass_color: "#0066FF" # Blue
   mid_color: "#00FF00" # Green
   treble_color: "#FFFFFF" # White
   cursor_color: "#FFFFFF" # White
-  height: 40
+  height: 120 # Doit rester cohérent avec le défaut Pydantic (WaveformConfig.height)
   chunk_duration: 10.0 # Duration in seconds for progressive waveform calculation
 
 metadata_editor:
@@ -143,15 +145,15 @@ video_exporter:
   default_resolution: "reels_9x16 (1080×1920)"  # Format par défaut : Instagram Reels boostable
   default_fps: 30
   output_directory: "~/Videos/Jukebox"
-  video_clips_folder: "/Users/fred/Movies/Insta-Templates/effects"
-  intro_video_path: "/Users/fred/Movies/Insta-Templates/intro/dj__frezz.mp4"
+  video_clips_folder: "~/Movies/Insta-Templates/effects"
+  intro_video_path: "~/Movies/Insta-Templates/intro/dj__frezz.mp4"
   waveform_enabled: false
   text_enabled: true
   dynamics_enabled: true
   vjing_enabled: true
   video_background_enabled: false
   milkdrop_enabled: true
-  milkdrop_preset_path: "/Users/fred/Tools/presets-cream-of-the-crop"  # Chemin vers un fichier .milk ou un répertoire de presets
+  milkdrop_preset_path: "~/Tools/presets-cream-of-the-crop"  # Chemin vers un fichier .milk ou un répertoire de presets
   milkdrop_preset_duration: 8.0  # Durée en secondes avant de passer au preset suivant
   milkdrop_hard_cut_on_beat: true  # Changement de preset sur le beat (coupe franche)
   # Encodage FFmpeg : constrained CRF pour respecter le débit minimum Instagram Reels (3500 kbps)
@@ -261,12 +263,14 @@ video_exporter:
 
 cue_maker:
   shazamix_db_path: ~/.jukebox/jukebox.db
-  mix_directory: "/Users/fred/Music/000 My mixes"
+  mix_directory: "~/Music/000 My mixes"
   segment_duration: 30.0  # Duration of analysis segments in seconds
   overlap: 15.0  # Overlap between segments in seconds
   max_workers: 4  # Parallel workers for analysis
 
 engine_dj:
+  # Chemin vers la base Engine DJ. Exemple :
+  # database_path: "~/Music/Engine Library/Database2/m.db"
   database_path: ""
 
 directory_navigator:
