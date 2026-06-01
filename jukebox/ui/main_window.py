@@ -253,15 +253,7 @@ class MainWindow(QMainWindow):
             tracks = self.database.get_all_tracks(mode=mode)
         else:
             tracks = self.database.search_tracks(query, mode=mode)
-        for track in tracks:
-            self.track_list.add_track(
-                Path(track["filepath"]),
-                track["title"],
-                track["artist"],
-                track["genre"],
-                track["duration_seconds"],
-                track.get("date_added"),
-            )
+        self.track_list.load_tracks_batch(tracks)
 
         # Restore selection of current playing track
         if current_track:
@@ -273,15 +265,7 @@ class MainWindow(QMainWindow):
         mode = self._get_current_mode()
         tracks = self.database.get_all_tracks(mode=mode)
         logger.debug("[MainWindow] Loaded %s tracks for mode %s", len(tracks), mode)
-        for track in tracks:
-            self.track_list.add_track(
-                Path(track["filepath"]),
-                track["title"],
-                track["artist"],
-                track["genre"],
-                track["duration_seconds"],
-                track.get("date_added"),
-            )
+        self.track_list.load_tracks_batch(tracks)
 
         # Re-select the currently playing track if it's in the list
         if self.player.current_file:
@@ -595,25 +579,24 @@ class MainWindow(QMainWindow):
         """
         self.track_list.clear_tracks()
 
-        if self.database.conn is None:
+        if not filepaths or self.database.conn is None:
             return
 
-        # Load track data from database for each filepath
-        for filepath in filepaths:
-            track = self.database.conn.execute(
-                "SELECT title, artist, genre, duration_seconds, date_added FROM tracks WHERE filepath = ?",
-                (str(filepath),),
-            ).fetchone()
+        # Batch SELECT par filepath (1 requête au lieu de N)
+        # Les filepaths absents de la DB sont silencieusement ignorés.
+        fp_strs = [Path(fp).as_posix() for fp in filepaths]
+        ph = ",".join("?" * len(fp_strs))
+        sql = f"SELECT * FROM tracks WHERE filepath IN ({ph})"  # noqa: S608
+        rows = self.database.conn.execute(sql, fp_strs).fetchall()
 
-            if track:
-                self.track_list.add_track(
-                    filepath,
-                    track["title"],
-                    track["artist"],
-                    track["genre"],
-                    track["duration_seconds"],
-                    track["date_added"],
-                )
+        # Préserver l'ordre demandé par l'appelant
+        fp_order = {fp: i for i, fp in enumerate(fp_strs)}
+        tracks = sorted(
+            [dict(r) for r in rows],
+            key=lambda t: fp_order.get(Path(t["filepath"]).as_posix(), len(fp_strs)),
+        )
+
+        self.track_list.load_tracks_batch(tracks)
 
         # Re-select the currently playing track if it's in the new list
         if self.player.current_file:

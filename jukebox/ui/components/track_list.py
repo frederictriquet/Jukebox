@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 from PySide6.QtCore import (
     QAbstractTableModel,
-    QMetaObject,
     QModelIndex,
     QPersistentModelIndex,
     QSortFilterProxyModel,
@@ -72,7 +71,7 @@ COLUMN_WIDTHS = {
 ROW_HEIGHT = 20
 
 
-_live_workers: list["BackgroundCheckWorker"] = []
+_live_workers: list[QThread] = []
 """Module-level registry of active background workers for cleanup at exit."""
 
 
@@ -136,6 +135,66 @@ class BackgroundCheckWorker(QThread):
         finally:
             if self in _live_workers:
                 _live_workers.remove(self)
+
+
+class WaveformBatchLoader(QThread):
+    """Récupère les bytes waveform et la présence de stats en arrière-plan.
+
+    Le coût qui figeait l'UI était le N+1 SELECT (3 requêtes par track) ; c'est ce
+    travail d'I/O qui est déporté ici via 2 requêtes batch. La désérialisation numpy
+    reste sur le thread Qt principal (numpy en thread secondaire segfaulte sur macOS
+    ARM, cf. bug librosa). Le worker ne renvoie donc que des bytes bruts.
+
+    Émet `batch_ready` ; les données sont lues via `self.result`
+    (`{track_id: (waveform_bytes | None, has_stats)}`).
+    """
+
+    batch_ready = Signal()  # notification — lire self.result pour les données
+
+    def __init__(self, db_path: Path, track_ids: list[int]) -> None:
+        super().__init__()
+        self._db_path = db_path
+        self._track_ids = track_ids
+        self.result: dict[int, tuple[bytes | None, bool]] = {}
+        _live_workers.append(self)
+
+    def run(self) -> None:
+        import sqlite3
+
+        result: dict[int, tuple[bytes | None, bool]] = {}
+        try:
+            if not self._track_ids:
+                return
+            ph = ",".join("?" * len(self._track_ids))
+            conn = sqlite3.connect(str(self._db_path))
+            conn.row_factory = sqlite3.Row
+            try:
+                sql_waveforms = f"SELECT track_id, waveform_data FROM waveform_cache WHERE track_id IN ({ph})"  # noqa: S608
+                waveform_rows = conn.execute(sql_waveforms, self._track_ids).fetchall()
+                raw_map: dict[int, bytes] = {
+                    r["track_id"]: r["waveform_data"] for r in waveform_rows
+                }
+
+                sql_stats = f"SELECT track_id FROM audio_analysis WHERE track_id IN ({ph}) AND tempo IS NOT NULL"  # noqa: S608
+                stats_rows = conn.execute(sql_stats, self._track_ids).fetchall()
+                stats_set = {r["track_id"] for r in stats_rows}
+
+                for tid in self._track_ids:
+                    if self.isInterruptionRequested():
+                        return
+                    result[tid] = (raw_map.get(tid), tid in stats_set)
+            finally:
+                conn.close()
+        except Exception as e:
+            logging.error("[WaveformBatchLoader] Erreur : %s", e, exc_info=True)
+        finally:
+            if self in _live_workers:
+                _live_workers.remove(self)
+            # N'émettre que si le chargement a abouti : une interruption laisse `result`
+            # partiel (tracks traités avant l'arrêt), il ne faut pas l'appliquer.
+            if not self.isInterruptionRequested():
+                self.result = result
+                self.batch_ready.emit()
 
 
 class TrackListModel(QAbstractTableModel):
@@ -214,13 +273,7 @@ class TrackListModel(QAbstractTableModel):
             filepath = Path(filepath)
         with self._event_lock:
             self._pending_metadata.append(filepath)
-        # PySide6 6.10 : la forme `bytes` lève une ValueError au runtime ; seule la
-        # forme `str` fonctionne, mais les stubs exigent `bytes` d'où le type: ignore.
-        QMetaObject.invokeMethod(
-            self,
-            "_process_metadata_updates",  # type: ignore[call-overload]
-            Qt.ConnectionType.QueuedConnection,
-        )
+        QTimer.singleShot(0, self._process_metadata_updates)
 
     @Slot()
     def _process_metadata_updates(self) -> None:
@@ -337,12 +390,7 @@ class TrackListModel(QAbstractTableModel):
         """
         with self._event_lock:
             self._pending_stats.append(track_id)
-        # PySide6 6.10 : voir note ci-dessus dans _on_metadata_updated.
-        QMetaObject.invokeMethod(
-            self,
-            "_process_stats_updates",  # type: ignore[call-overload]
-            Qt.ConnectionType.QueuedConnection,
-        )
+        QTimer.singleShot(0, self._process_stats_updates)
 
     @Slot()
     def _process_stats_updates(self) -> None:
@@ -586,6 +634,94 @@ class TrackListModel(QAbstractTableModel):
         # Schedule background checks (coalesced — runs once after all add_track calls)
         self._schedule_background_checks()
 
+    def load_tracks_batch(self, tracks: list[dict[str, Any]]) -> None:
+        """Charge toutes les tracks en une seule opération (sans waveforms).
+
+        Les waveforms sont chargées séparément en arrière-plan par WaveformBatchLoader.
+        Élimine le N+1 SELECT en remplaçant N beginInsertRows par un seul beginResetModel.
+        """
+        self.beginResetModel()
+        self.tracks = []
+        self.filepath_to_row = {}
+        for track in tracks:
+            filepath = Path(track["filepath"])
+            self.tracks.append(
+                {
+                    "filepath": filepath,
+                    "filename": filepath.name,
+                    "title": track.get("title"),
+                    "artist": track.get("artist"),
+                    "genre": track.get("genre") or "",
+                    "rating": track.get("genre") or "",
+                    "duration_seconds": track.get("duration_seconds"),
+                    "date_added": track.get("date_added"),
+                    "waveform_data": None,
+                    "has_stats": False,
+                    "duplicate_status": "pending",
+                    "duplicate_match": None,
+                    "file_missing": False,
+                    "_db_id": track.get("id"),
+                }
+            )
+            self.filepath_to_row[filepath] = len(self.tracks) - 1
+        self.endResetModel()
+        self._schedule_background_checks()
+
+    def apply_waveform_batch(self, data: dict[int, tuple[bytes | None, bool]]) -> None:
+        """Désérialise et applique waveforms + stats (thread Qt principal).
+
+        `data` contient les bytes bruts récupérés par WaveformBatchLoader ; la
+        désérialisation numpy a lieu ici, sur le thread principal (jamais en thread
+        secondaire — voir WaveformBatchLoader). Émet un seul dataChanged couvrant
+        toutes les lignes modifiées.
+        """
+        if not data or not self.tracks:
+            return
+        id_to_row: dict[int, int] = {}
+        for row, track in enumerate(self.tracks):
+            db_id = track.get("_db_id")
+            if db_id is not None:
+                id_to_row[db_id] = row
+
+        from jukebox.ui.components.track_cell_renderer import WaveformStyler
+        from jukebox.utils.waveform_serializer import deserialize_waveform
+
+        # Ne repeindre que les lignes réellement modifiées (waveform ou stats présents).
+        # Une ligne dont les deux restent à leur valeur par défaut (None/False) n'a pas
+        # changé visuellement : l'inclure ne ferait que provoquer un repaint inutile.
+        min_row, max_row = len(self.tracks), -1
+        for track_id, (raw_bytes, has_stats) in data.items():
+            target_row = id_to_row.get(track_id)
+            if target_row is None:
+                continue
+            waveform = None
+            if raw_bytes is not None:
+                try:
+                    waveform = deserialize_waveform(raw_bytes)
+                except Exception as e:
+                    logging.warning(
+                        "[TrackListModel] Waveform invalide pour track_id=%d : %s", track_id, e
+                    )
+            if waveform is None and not has_stats:
+                continue
+            self.tracks[target_row]["waveform_data"] = waveform
+            self.tracks[target_row]["has_stats"] = has_stats
+            if waveform is not None:
+                WaveformStyler.invalidate(self.tracks[target_row]["filepath"])
+            min_row = min(min_row, target_row)
+            max_row = max(max_row, target_row)
+
+        if min_row <= max_row:
+            self.dataChanged.emit(
+                self.index(min_row, 0),
+                self.index(max_row, self.columnCount() - 1),
+            )
+
+    @property
+    def db_path(self) -> Path | None:
+        """Chemin du fichier DB (pour les workers qui ouvrent leur propre connexion)."""
+        return self._db_path
+
     def clear(self) -> None:
         """Clear all tracks."""
         self.beginResetModel()
@@ -801,6 +937,9 @@ class TrackList(QTableView):
         # Playlists for context menu
         self.playlists: list[Any] = []
 
+        # Background waveform loader (annulé et remplacé à chaque batch load)
+        self._waveform_loader: WaveformBatchLoader | None = None
+
     @property
     def track_model(self) -> TrackListModel:
         """Get the underlying TrackListModel (bypassing any proxy)."""
@@ -818,6 +957,41 @@ class TrackList(QTableView):
     def remove_proxy_model(self) -> None:
         """Remove any proxy model and restore direct source model."""
         self.setModel(self._track_model)
+
+    def load_tracks_batch(self, tracks: list[dict[str, Any]]) -> None:
+        """Charge les tracks en batch et lance le loader de waveforms en arrière-plan."""
+        # Annuler le loader précédent s'il tourne encore
+        if self._waveform_loader is not None and self._waveform_loader.isRunning():
+            self._waveform_loader.requestInterruption()
+            self._waveform_loader.quit()
+            self._waveform_loader.wait(500)
+
+        self._track_model.load_tracks_batch(tracks)
+
+        # Lancer le chargement async des waveforms si la DB est accessible
+        db_path = self._track_model.db_path
+        track_ids: list[int] = []
+        for t in tracks:
+            tid = t.get("id")
+            if tid is not None:
+                track_ids.append(int(tid))
+        if db_path and track_ids:
+            loader = WaveformBatchLoader(db_path, track_ids)
+            self._waveform_loader = loader
+            # Connexion par méthode liée (pas de lambda) : Qt déconnecte automatiquement
+            # quand ce TrackList est détruit, évitant tout use-after-free si le loader
+            # se termine après la destruction du widget.
+            loader.batch_ready.connect(self._on_waveform_batch_loaded)
+            loader.start()
+
+    @Slot()
+    def _on_waveform_batch_loaded(self) -> None:
+        """Applique le résultat du loader émetteur, sauf s'il a été remplacé entre-temps."""
+        loader = self.sender()
+        # Ignorer un loader obsolète : un rechargement l'a remplacé et les _db_id
+        # ne correspondraient plus aux lignes actuelles du modèle.
+        if isinstance(loader, WaveformBatchLoader) and loader is self._waveform_loader:
+            self._track_model.apply_waveform_batch(loader.result)
 
     def select_track_by_filepath(self, filepath: Path) -> None:
         """Select a track by its filepath, handling proxy mapping if needed.
