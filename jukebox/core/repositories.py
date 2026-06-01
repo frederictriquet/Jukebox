@@ -721,6 +721,13 @@ class PlaylistRepository(BaseRepository):
         self._commit()
         return int(cursor.lastrowid) if cursor.lastrowid is not None else 0
 
+    def get(self, playlist_id: int) -> dict[str, Any] | None:
+        """Retourne une playlist par son ID."""
+        result = self._conn.execute(
+            "SELECT * FROM playlists WHERE id = ?", (playlist_id,)
+        ).fetchone()
+        return dict(result) if result is not None else None
+
     def get_all(self) -> list[dict[str, Any]]:
         """Retourne toutes les playlists triées par nom."""
         return self._conn.execute("SELECT * FROM playlists ORDER BY name").fetchall()

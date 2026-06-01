@@ -498,9 +498,14 @@ class MainWindow(QMainWindow):
             )
             return
         logger.info("Added track %s to playlist %d", filepath.name, playlist_id)
-        # Notifie les plugins (playlists, directory_navigator) via l'EventBus
-        # plutôt que par introspection des attributs privés des plugins.
+        playlist = self.database.playlists.get(playlist_id)
+        playlist_name = playlist["name"] if playlist else str(playlist_id)
         self.event_bus.emit(Events.PLAYLIST_CHANGED)
+        self.event_bus.emit(
+            Events.TRACK_ADDED_TO_PLAYLIST,
+            playlist_id=playlist_id,
+            playlist_name=playlist_name,
+        )
 
     def _load_plugins(self) -> None:
         """Load all plugins."""

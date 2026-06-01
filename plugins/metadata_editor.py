@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -314,6 +315,11 @@ class MetadataEditorWidget(QWidget):
                 self._split_btn.setStyleSheet("QPushButton { padding: 6px 8px; }")
                 self._split_btn.clicked.connect(self._on_split_filename)
                 h.addWidget(self._split_btn)
+                self._copy_btn = QPushButton("Copy")
+                self._copy_btn.setToolTip("Copier « Artist - Title » dans le presse-papiers")
+                self._copy_btn.setStyleSheet("QPushButton { padding: 6px 8px; }")
+                self._copy_btn.clicked.connect(self._on_copy_artist_title)
+                h.addWidget(self._copy_btn)
                 grid.addLayout(h, row, col_pair + 1, 1, col_span)
             elif config.tag == "comment":
                 h = QHBoxLayout()
@@ -370,6 +376,14 @@ class MetadataEditorWidget(QWidget):
         if widget:
             widget.clear()
             self._on_field_changed()
+
+    def _on_copy_artist_title(self) -> None:
+        """Copie « Artist - Title » dans le presse-papiers."""
+        artist = (self.field_map.get("artist") or QLineEdit()).text().strip()
+        title = (self.field_map.get("title") or QLineEdit()).text().strip()
+        text = f"{artist} - {title}" if artist and title else artist or title
+        if text:
+            QApplication.clipboard().setText(text)
 
     def _on_split_filename(self) -> None:
         """Split filename 'Artist - Title.ext' into Artist and Title fields."""

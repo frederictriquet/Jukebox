@@ -29,6 +29,9 @@ class LoopPlayerPlugin(SettingsSyncMixin):
         """Initialize plugin."""
         self.context: PluginContextProtocol = None  # type: ignore[assignment]
         self.loop_button: QPushButton | None = None
+        self.playlist_btn: QPushButton | None = None
+        self._last_playlist_id: int | None = None
+        self._last_playlist_name: str = ""
         self.loop_active: bool = False
         self.loop_start: float = 0.0  # Position in seconds
         self.loop_end: float = 0.0  # Position in seconds
@@ -48,6 +51,9 @@ class LoopPlayerPlugin(SettingsSyncMixin):
 
         # Subscribe to waveform widget ready event (decoupled from waveform_visualizer)
         self.context.subscribe(Events.WAVEFORM_WIDGET_READY, self._on_waveform_widget_ready)
+
+        # Mémoriser la dernière playlist utilisée pour le bouton de re-copie rapide.
+        self.context.subscribe(Events.TRACK_ADDED_TO_PLAYLIST, self._on_track_added_to_playlist)
 
         # Load settings from database at startup
         self._on_settings_changed()
@@ -85,6 +91,13 @@ class LoopPlayerPlugin(SettingsSyncMixin):
             # If stretch found, insert before it; otherwise append
             if stretch_index >= 0:
                 ui_builder.insert_widget_in_layout(layout, stretch_index, self.loop_button)
+                self.playlist_btn = QPushButton("→ playlist")
+                self.playlist_btn.setToolTip("Copier le morceau courant dans la dernière playlist utilisée")
+                self.playlist_btn.setMaximumWidth(100)
+                self.playlist_btn.setEnabled(False)
+                self.playlist_btn.setVisible(False)
+                self.playlist_btn.clicked.connect(self._on_copy_to_last_playlist)
+                ui_builder.insert_widget_in_layout(layout, stretch_index + 1, self.playlist_btn)
             else:
                 layout.addWidget(self.loop_button)
 
@@ -338,6 +351,24 @@ class LoopPlayerPlugin(SettingsSyncMixin):
         else:
             self.loop_button.setStyleSheet("")
 
+    def _on_track_added_to_playlist(self, playlist_id: int, playlist_name: str) -> None:
+        """Mémorise la dernière playlist utilisée et active le bouton de re-copie."""
+        self._last_playlist_id = playlist_id
+        self._last_playlist_name = playlist_name
+        if self.playlist_btn:
+            self.playlist_btn.setEnabled(True)
+            self.playlist_btn.setToolTip(f"Copier le morceau courant dans « {playlist_name} »")
+            self.playlist_btn.setText(f"→ {playlist_name}")
+
+    def _on_copy_to_last_playlist(self) -> None:
+        """Copie le morceau courant dans la dernière playlist utilisée."""
+        if self._last_playlist_id is None:
+            return
+        filepath = self.context.player.current_file
+        if not filepath:
+            return
+        self.context.app._on_add_to_playlist(filepath, self._last_playlist_id)  # type: ignore[union-attr]
+
     def _on_track_loaded(self, track_id: int) -> None:
         """Reset loop when new track is loaded."""
         if self.loop_active:
@@ -360,10 +391,13 @@ class LoopPlayerPlugin(SettingsSyncMixin):
 
     def activate(self, mode: str) -> None:
         """Activate plugin for mode."""
-        pass
+        if mode == "jukebox" and self.playlist_btn:
+            self.playlist_btn.setVisible(True)
 
     def deactivate(self, mode: str) -> None:
         """Deactivate plugin for mode."""
+        if mode == "jukebox" and self.playlist_btn:
+            self.playlist_btn.setVisible(False)
         # Stop loop when switching modes
         if self.loop_active:
             self.loop_active = False

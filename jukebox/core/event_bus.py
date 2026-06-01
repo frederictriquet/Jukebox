@@ -171,6 +171,9 @@ class Events:
 
     # Playlist events
     PLAYLIST_CHANGED = "playlist_changed"  # kwargs: None
+    TRACK_ADDED_TO_PLAYLIST = (
+        "track_added_to_playlist"  # kwargs: playlist_id (int), playlist_name (str)
+    )
 
     # Plugin events
     PLUGIN_SETTINGS_CHANGED = "plugin_settings_changed"  # kwargs: None
