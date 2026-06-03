@@ -173,4 +173,9 @@ class AudioPlayer(QObject):
         """Draîne la file VLC depuis le thread Qt principal (appelé par le timer)."""
         if not self._end_reached_queue.empty():
             self._end_reached_queue.get()
+            # En fin de morceau VLC a stoppé la lecture : on notifie l'état STOPPED
+            # pour que l'UI (icône play/pause) se remette à l'arrêt, y compris quand
+            # l'auto-play est désactivé. Émis avant track_finished afin qu'un éventuel
+            # auto-play enchaîne ensuite avec un état PLAYING qui prévaut.
+            self.state_changed.emit(PlayerState.STOPPED.value)
             self.track_finished.emit()
