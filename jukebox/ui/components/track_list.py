@@ -561,10 +561,21 @@ class TrackListModel(QAbstractTableModel):
         if (track.get("comment") or "") == new_comment:
             return False  # Pas de changement
 
-        track["comment"] = new_comment
         filepath = track.get("filepath")
 
-        # 1. Mise à jour de la base de données
+        # [M32] Invariant fichier-d'abord : on écrit le TAG du fichier audio AVANT
+        # la base de données. La DB (et le modèle en mémoire) ne sont mis à jour
+        # QUE si l'écriture du tag a réussi, afin d'éviter toute divergence
+        # DB/fichier en cas d'échec d'écriture du tag.
+        if filepath is not None:
+            from jukebox.utils.tag_writer import save_audio_tags
+
+            if not save_audio_tags(str(filepath), {"comment": new_comment}):
+                # Pas d'échec silencieux : la DB reste inchangée, on logue l'erreur.
+                logging.error("[TrackListModel] Échec d'écriture du tag comment pour %s", filepath)
+                return False
+
+        # Le tag est écrit : la DB peut être mise à jour sans risque de divergence.
         if self.database is not None and filepath is not None:
             track_id = track.get("_db_id")
             if track_id is None:
@@ -574,15 +585,15 @@ class TrackListModel(QAbstractTableModel):
             if track_id is not None:
                 self.database.tracks.update_metadata(int(track_id), {"comment": new_comment})
 
-        # 2. Écriture du tag dans le fichier audio (writer mutagen existant)
-        if filepath is not None:
-            from jukebox.utils.tag_writer import save_audio_tags
-
-            if not save_audio_tags(str(filepath), {"comment": new_comment}):
-                # Pas d'échec silencieux : la DB est à jour mais le tag fichier ne l'est pas.
-                logging.error("[TrackListModel] Échec d'écriture du tag comment pour %s", filepath)
+        # Mise à jour du modèle en mémoire seulement après les écritures réussies.
+        track["comment"] = new_comment
 
         self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole])
+
+        # Notifie les autres vues qu'une métadonnée a changé (api-contract).
+        if self.event_bus is not None and filepath is not None:
+            self.event_bus.emit(Events.TRACK_METADATA_UPDATED, filepath=filepath)
+
         return True
 
     def sort(

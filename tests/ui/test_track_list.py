@@ -264,8 +264,13 @@ class TestCommentColumn:
         mock_save.assert_not_called()
         db.close()
 
-    def test_set_comment_logs_on_tag_write_failure(self, qapp, tmp_path, caplog):  # type: ignore
-        """A failed tag write is logged (no silent failure); DB stays updated."""
+    def test_set_comment_tag_failure_leaves_db_unchanged(self, qapp, tmp_path, caplog):  # type: ignore
+        """[M32] A failed tag write must NOT touch the DB nor the in-memory model.
+
+        Le tag fichier est écrit en premier : si l'écriture échoue, la base de
+        données et le modèle restent inchangés (pas de divergence DB/fichier),
+        l'erreur est loguée (pas d'échec silencieux) et setData renvoie False.
+        """
         import logging
 
         db, model, audio, track_id = self._make_model_with_db(tmp_path)
@@ -278,11 +283,46 @@ class TestCommentColumn:
         ):
             updated = model.setData(index, "With error", Qt.ItemDataRole.EditRole)
 
-        assert updated is True  # DB update succeeded
+        assert updated is False  # Écriture du tag échouée → édition refusée
         db_track = db.tracks.get_by_id(track_id)
         assert db_track is not None
-        assert db_track["comment"] == "With error"
+        # La DB ne doit PAS avoir été modifiée.
+        assert (db_track["comment"] or "") == ""
+        # Le modèle en mémoire ne doit pas non plus refléter la valeur échouée.
+        assert (model.tracks[0].get("comment") or "") == ""
         assert any("tag comment" in rec.message for rec in caplog.records)
+        db.close()
+
+    def test_set_comment_emits_metadata_updated_event(self, qapp, tmp_path):  # type: ignore
+        """A successful inline edit notifies other views via TRACK_METADATA_UPDATED."""
+        from jukebox.core.event_bus import EventBus, Events
+
+        db = Database(tmp_path / "test.db")
+        db.connect()
+        db.initialize_schema()
+        audio = tmp_path / "song.mp3"
+        audio.write_bytes(b"fake mp3")
+        db.tracks.add(
+            {"filepath": str(audio), "filename": "song.mp3", "title": "Song"},
+            mode="jukebox",
+        )
+        event_bus = EventBus()
+        model = TrackListModel(database=db, event_bus=event_bus, mode="jukebox")
+        model.load_tracks_batch(db.tracks.get_all(mode="jukebox"))
+        comment_col = model.cell_renderer.columns.index("comment")
+        index = model.index(0, comment_col)
+
+        with (
+            patch("jukebox.utils.tag_writer.save_audio_tags", return_value=True),
+            patch.object(event_bus, "emit") as mock_emit,
+        ):
+            updated = model.setData(index, "Nice", Qt.ItemDataRole.EditRole)
+
+        assert updated is True
+        assert mock_emit.call_count == 1
+        call_args, call_kwargs = mock_emit.call_args
+        assert call_args == (Events.TRACK_METADATA_UPDATED,)
+        assert str(call_kwargs["filepath"]) == str(audio)
         db.close()
 
     def test_set_comment_ignored_in_curating_mode(self, qapp):  # type: ignore
