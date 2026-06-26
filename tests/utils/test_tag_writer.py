@@ -203,6 +203,20 @@ class TestSaveAudioTagsNonMP3:
 
         assert result is False
 
+    def test_flac_comment_saved(self, tmp_path: Path) -> None:
+        """A comment tag is written via the Vorbis comments path (FLAC)."""
+        flac_path = tmp_path / "comment.flac"
+        flac_path.write_bytes(b"fake flac")
+
+        mock_audio = MagicMock()
+        mock_audio.__contains__ = MagicMock(return_value=False)
+
+        with patch(_PATCH_FILE, return_value=mock_audio):
+            result = save_audio_tags(str(flac_path), {"comment": "Nice groove"})
+
+        assert result is True
+        mock_audio.__setitem__.assert_any_call("comment", ["Nice groove"])
+
     def test_accepts_path_object(self, tmp_path: Path) -> None:
         """save_audio_tags accepts a pathlib.Path (not just str)."""
         flac_path = tmp_path / "path_obj.flac"

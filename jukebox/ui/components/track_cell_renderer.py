@@ -75,6 +75,7 @@ class CellRenderer:
             "genre": GenreStyler(genre_names or {}),
             "rating": RatingStyler(),
             "duration": DurationStyler(),
+            "comment": CommentStyler(),
             "path": PathStyler(),
         }
 
@@ -123,6 +124,8 @@ class Styler:
         """Get styled value for a role."""
         if role == Qt.ItemDataRole.DisplayRole:
             return self.display(data, track)
+        elif role == Qt.ItemDataRole.EditRole:
+            return self.edit(data, track)
         elif role == Qt.ItemDataRole.ToolTipRole:
             return self.tooltip(data, track)
         elif role == Qt.ItemDataRole.ForegroundRole:
@@ -138,6 +141,10 @@ class Styler:
     def display(self, data: Any, track: dict[str, Any]) -> str:
         """Display text."""
         return str(data) if data is not None else ""
+
+    def edit(self, data: Any, track: dict[str, Any]) -> str:
+        """Valeur fournie à l'éditeur inline (par défaut identique à l'affichage)."""
+        return self.display(data, track)
 
     def tooltip(self, data: Any, track: dict[str, Any]) -> str | None:
         """Tooltip text."""
@@ -362,6 +369,22 @@ class DurationStyler(Styler):
     def alignment(self, data: Any, track: dict[str, Any]) -> Qt.AlignmentFlag:
         """Right-align duration."""
         return Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
+
+
+class CommentStyler(Styler):
+    """Styler pour la colonne comment (éditable inline en mode jukebox)."""
+
+    def display(self, data: Any, track: dict[str, Any]) -> str:
+        """Affiche le commentaire du morceau."""
+        return track.get("comment") or ""
+
+    def edit(self, data: Any, track: dict[str, Any]) -> str:
+        """Valeur pré-remplie dans l'éditeur inline."""
+        return track.get("comment") or ""
+
+    def tooltip(self, data: Any, track: dict[str, Any]) -> str | None:
+        """Affiche le commentaire complet en tooltip."""
+        return track.get("comment") or None
 
 
 class WaveformStyler(Styler):

@@ -40,7 +40,16 @@ if TYPE_CHECKING:
     from jukebox.ui.main_window import MainWindow
 
 # Column configuration per mode
-COLUMNS_JUKEBOX = ["waveform", "artist", "title", "genre", "rating", "duration", "stats"]
+COLUMNS_JUKEBOX = [
+    "waveform",
+    "artist",
+    "title",
+    "genre",
+    "rating",
+    "duration",
+    "comment",
+    "stats",
+]
 COLUMNS_CURATING = [
     "waveform",
     "filename",
@@ -62,6 +71,7 @@ COLUMN_WIDTHS = {
     "genre": 80,
     "rating": 80,
     "duration": 80,
+    "comment": 250,  # Free-text comment (jukebox only, editable inline)
     "stats": 30,  # Small icon column
     "duplicate": 30,  # Duplicate status indicator (curating only)
     "path": 300,  # Répertoire parent (curating only)
@@ -519,6 +529,62 @@ class TrackListModel(QAbstractTableModel):
         # Delegate to CellRenderer for all display/styling roles
         return self.cell_renderer.get_style(track, index.column(), role)
 
+    def _is_editable_comment(self, index: QModelIndex | QPersistentModelIndex) -> bool:
+        """La cellule est la colonne comment, éditable (mode jukebox uniquement)."""
+        if self._mode != AppMode.JUKEBOX.value:
+            return False
+        columns = self.cell_renderer.columns
+        col = index.column()
+        return 0 <= col < len(columns) and columns[col] == "comment"
+
+    def flags(self, index: QModelIndex | QPersistentModelIndex) -> Qt.ItemFlag:
+        """Rend la colonne comment éditable en mode jukebox."""
+        base = super().flags(index)
+        if index.isValid() and self._is_editable_comment(index):
+            return base | Qt.ItemFlag.ItemIsEditable
+        return base
+
+    def setData(
+        self,
+        index: QModelIndex | QPersistentModelIndex,
+        value: Any,
+        role: int = Qt.ItemDataRole.EditRole,
+    ) -> bool:
+        """Valide l'édition inline du commentaire : DB + tag du fichier audio."""
+        if role != Qt.ItemDataRole.EditRole or not index.isValid():
+            return False
+        if index.row() >= len(self.tracks) or not self._is_editable_comment(index):
+            return False
+
+        new_comment = str(value).strip() if value is not None else ""
+        track = self.tracks[index.row()]
+        if (track.get("comment") or "") == new_comment:
+            return False  # Pas de changement
+
+        track["comment"] = new_comment
+        filepath = track.get("filepath")
+
+        # 1. Mise à jour de la base de données
+        if self.database is not None and filepath is not None:
+            track_id = track.get("_db_id")
+            if track_id is None:
+                db_track = self.database.tracks.get_by_filepath(str(filepath))
+                if db_track:
+                    track_id = db_track.get("id")
+            if track_id is not None:
+                self.database.tracks.update_metadata(int(track_id), {"comment": new_comment})
+
+        # 2. Écriture du tag dans le fichier audio (writer mutagen existant)
+        if filepath is not None:
+            from jukebox.utils.tag_writer import save_audio_tags
+
+            if not save_audio_tags(str(filepath), {"comment": new_comment}):
+                # Pas d'échec silencieux : la DB est à jour mais le tag fichier ne l'est pas.
+                logging.error("[TrackListModel] Échec d'écriture du tag comment pour %s", filepath)
+
+        self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole])
+        return True
+
     def sort(
         self,
         column: int,
@@ -617,6 +683,7 @@ class TrackListModel(QAbstractTableModel):
             "genre": genre or "",
             "rating": genre or "",  # RatingStyler extracts from genre
             "duration_seconds": duration_seconds,
+            "comment": "",
             "date_added": date_added,
             "waveform_data": waveform,
             "has_stats": has_stats,  # For StatsStyler
@@ -654,6 +721,7 @@ class TrackListModel(QAbstractTableModel):
                     "genre": track.get("genre") or "",
                     "rating": track.get("genre") or "",
                     "duration_seconds": track.get("duration_seconds"),
+                    "comment": track.get("comment") or "",
                     "date_added": track.get("date_added"),
                     "waveform_data": None,
                     "has_stats": False,
@@ -903,6 +971,8 @@ class TrackList(QTableView):
         self.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QTableView.SelectionMode.SingleSelection)
         self.setShowGrid(False)  # No grid lines
+        # Édition inline au double-clic uniquement (colonne comment en mode jukebox).
+        self.setEditTriggers(QTableView.EditTrigger.DoubleClicked)
 
         # Vertical header shows row numbers (n/total)
         self.verticalHeader().setVisible(True)

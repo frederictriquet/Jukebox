@@ -251,6 +251,7 @@ class TrackRepository(BaseRepository):
             "sample_rate",
             "file_size",
             "date_modified",
+            "comment",
         }
 
         # Filter to allowed fields only

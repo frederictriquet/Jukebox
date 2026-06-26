@@ -1,10 +1,12 @@
 """Tests for track list widget."""
 
 from pathlib import Path
+from unittest.mock import patch
 
-from PySide6.QtCore import QSortFilterProxyModel
+from PySide6.QtCore import QSortFilterProxyModel, Qt
 
-from jukebox.ui.components.track_list import TrackList
+from jukebox.core.database import Database
+from jukebox.ui.components.track_list import TrackList, TrackListModel
 
 
 class TestTrackList:
@@ -176,3 +178,121 @@ class TestTrackList:
         track_list.set_proxy_model(proxy)
 
         assert track_list.count() == 2
+
+
+class TestCommentColumn:
+    """Tests for the editable comment column (jukebox mode only)."""
+
+    def test_comment_column_present_in_jukebox_mode(self, qapp):  # type: ignore
+        """The comment column exists in jukebox mode."""
+        model = TrackListModel(mode="jukebox")
+        assert "comment" in model.cell_renderer.columns
+
+    def test_comment_column_absent_in_curating_mode(self, qapp):  # type: ignore
+        """The comment column is not shown in curating mode."""
+        model = TrackListModel(mode="curating")
+        assert "comment" not in model.cell_renderer.columns
+
+    def test_comment_cell_is_editable_in_jukebox_mode(self, qapp):  # type: ignore
+        """The comment cell carries the editable flag in jukebox mode."""
+        model = TrackListModel(mode="jukebox")
+        model.add_track(Path("/tmp/song.mp3"))
+        comment_col = model.cell_renderer.columns.index("comment")
+        index = model.index(0, comment_col)
+        assert bool(model.flags(index) & Qt.ItemFlag.ItemIsEditable)
+
+    def test_other_cells_are_not_editable(self, qapp):  # type: ignore
+        """Non-comment cells stay read-only in jukebox mode."""
+        model = TrackListModel(mode="jukebox")
+        model.add_track(Path("/tmp/song.mp3"))
+        artist_col = model.cell_renderer.columns.index("artist")
+        index = model.index(0, artist_col)
+        assert not (model.flags(index) & Qt.ItemFlag.ItemIsEditable)
+
+    def test_comment_display_from_loaded_track(self, qapp):  # type: ignore
+        """A loaded track's comment is shown in the comment column."""
+        model = TrackListModel(mode="jukebox")
+        model.load_tracks_batch([{"filepath": "/tmp/song.mp3", "comment": "Banger"}])
+        comment_col = model.cell_renderer.columns.index("comment")
+        index = model.index(0, comment_col)
+        assert model.data(index, Qt.ItemDataRole.DisplayRole) == "Banger"
+        assert model.data(index, Qt.ItemDataRole.EditRole) == "Banger"
+
+    def _make_model_with_db(self, tmp_path):
+        """Build a jukebox-mode model backed by a real DB with one track."""
+        db = Database(tmp_path / "test.db")
+        db.connect()
+        db.initialize_schema()
+        audio = tmp_path / "song.mp3"
+        audio.write_bytes(b"fake mp3")
+        track_id = db.tracks.add(
+            {"filepath": str(audio), "filename": "song.mp3", "title": "Song"},
+            mode="jukebox",
+        )
+        model = TrackListModel(database=db, mode="jukebox")
+        model.load_tracks_batch(db.tracks.get_all(mode="jukebox"))
+        return db, model, audio, track_id
+
+    def test_set_comment_updates_db_and_tag(self, qapp, tmp_path):  # type: ignore
+        """Editing the comment writes to both the database and the file tag."""
+        db, model, audio, track_id = self._make_model_with_db(tmp_path)
+        comment_col = model.cell_renderer.columns.index("comment")
+        index = model.index(0, comment_col)
+
+        with patch("jukebox.utils.tag_writer.save_audio_tags", return_value=True) as mock_save:
+            updated = model.setData(index, "Great track", Qt.ItemDataRole.EditRole)
+
+        assert updated is True
+        mock_save.assert_called_once_with(str(audio), {"comment": "Great track"})
+        db_track = db.tracks.get_by_id(track_id)
+        assert db_track is not None
+        assert db_track["comment"] == "Great track"
+        assert model.data(index, Qt.ItemDataRole.DisplayRole) == "Great track"
+        db.close()
+
+    def test_set_comment_no_change_returns_false(self, qapp, tmp_path):  # type: ignore
+        """Setting the same comment value is a no-op and skips the tag write."""
+        db, model, audio, _ = self._make_model_with_db(tmp_path)
+        comment_col = model.cell_renderer.columns.index("comment")
+        index = model.index(0, comment_col)
+
+        with patch("jukebox.utils.tag_writer.save_audio_tags", return_value=True) as mock_save:
+            # Current comment is empty; setting empty again must be a no-op.
+            updated = model.setData(index, "", Qt.ItemDataRole.EditRole)
+
+        assert updated is False
+        mock_save.assert_not_called()
+        db.close()
+
+    def test_set_comment_logs_on_tag_write_failure(self, qapp, tmp_path, caplog):  # type: ignore
+        """A failed tag write is logged (no silent failure); DB stays updated."""
+        import logging
+
+        db, model, audio, track_id = self._make_model_with_db(tmp_path)
+        comment_col = model.cell_renderer.columns.index("comment")
+        index = model.index(0, comment_col)
+
+        with (
+            patch("jukebox.utils.tag_writer.save_audio_tags", return_value=False),
+            caplog.at_level(logging.ERROR),
+        ):
+            updated = model.setData(index, "With error", Qt.ItemDataRole.EditRole)
+
+        assert updated is True  # DB update succeeded
+        db_track = db.tracks.get_by_id(track_id)
+        assert db_track is not None
+        assert db_track["comment"] == "With error"
+        assert any("tag comment" in rec.message for rec in caplog.records)
+        db.close()
+
+    def test_set_comment_ignored_in_curating_mode(self, qapp):  # type: ignore
+        """Comment editing is rejected when the model is in curating mode."""
+        # No database: avoids spawning the curating-mode duplicate-check worker.
+        model = TrackListModel(mode="curating")
+        model.load_tracks_batch([{"filepath": "/tmp/song.mp3"}])
+        # Curating has no comment column; editing column 0 must be refused.
+        index = model.index(0, 0)
+        with patch("jukebox.utils.tag_writer.save_audio_tags", return_value=True) as mock_save:
+            updated = model.setData(index, "Nope", Qt.ItemDataRole.EditRole)
+        assert updated is False
+        mock_save.assert_not_called()
