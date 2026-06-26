@@ -73,3 +73,6 @@ jukebox.log
 
 # Claude Code state (fichiers runtime, non versionnés)
 .claude/state/
+
+# Autodev Orchestrator
+.orchestrator/
