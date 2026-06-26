@@ -29,9 +29,16 @@ class LoopPlayerPlugin(SettingsSyncMixin):
         """Initialize plugin."""
         self.context: PluginContextProtocol = None  # type: ignore[assignment]
         self.loop_button: QPushButton | None = None
+        # Boutons de raccourci vers les 3 playlists les plus récemment utilisées
+        # (slot 0 = la plus récente, slot 1 = 2e, slot 2 = 3e).
         self.playlist_btn: QPushButton | None = None
-        self._last_playlist_id: int | None = None
-        self._last_playlist_name: str = ""
+        self.playlist_btn_2: QPushButton | None = None
+        self.playlist_btn_3: QPushButton | None = None
+        self._playlist_buttons: list[QPushButton] = []
+        # Playlists récemment utilisées, plus récente en tête, dédupliquées.
+        self._recent_playlists: list[tuple[int, str]] = []
+        # Indique si les boutons doivent être visibles (mode jukebox actif).
+        self._buttons_visible: bool = False
         self.loop_active: bool = False
         self.loop_start: float = 0.0  # Position in seconds
         self.loop_end: float = 0.0  # Position in seconds
@@ -91,18 +98,23 @@ class LoopPlayerPlugin(SettingsSyncMixin):
             # If stretch found, insert before it; otherwise append
             if stretch_index >= 0:
                 ui_builder.insert_widget_in_layout(layout, stretch_index, self.loop_button)
-                self.playlist_btn = QPushButton("→ playlist")
-                self.playlist_btn.setToolTip(
-                    "Copier le morceau courant dans la dernière playlist utilisée"
-                )
-                self.playlist_btn.setMaximumWidth(100)
-                self.playlist_btn.setEnabled(False)
-                self.playlist_btn.setVisible(False)
-                self.playlist_btn.clicked.connect(self._on_copy_to_last_playlist)
-                # Ferré à droite : on insère le bouton juste après le stretch
-                # (stretch désormais à stretch_index + 1) pour qu'il se place du
-                # côté droit, juste avant le timer de replay.
-                ui_builder.insert_widget_in_layout(layout, stretch_index + 2, self.playlist_btn)
+                # Crée les 3 boutons de raccourci playlist. Ferrés à droite : on
+                # les insère juste après le stretch (désormais à stretch_index + 1)
+                # pour qu'ils se placent du côté droit, juste avant le timer de
+                # replay, et dans l'ordre cohérent (plus récente → moins récente).
+                self.playlist_btn = self._create_playlist_button(0)
+                self.playlist_btn_2 = self._create_playlist_button(1)
+                self.playlist_btn_3 = self._create_playlist_button(2)
+                self._playlist_buttons = [
+                    self.playlist_btn,
+                    self.playlist_btn_2,
+                    self.playlist_btn_3,
+                ]
+                for offset, btn in enumerate(self._playlist_buttons):
+                    ui_builder.insert_widget_in_layout(
+                        layout, stretch_index + 2 + offset, btn
+                    )
+                self._refresh_playlist_buttons()
             else:
                 layout.addWidget(self.loop_button)
 
@@ -356,23 +368,53 @@ class LoopPlayerPlugin(SettingsSyncMixin):
         else:
             self.loop_button.setStyleSheet("")
 
-    def _on_track_added_to_playlist(self, playlist_id: int, playlist_name: str) -> None:
-        """Mémorise la dernière playlist utilisée et active le bouton de re-copie."""
-        self._last_playlist_id = playlist_id
-        self._last_playlist_name = playlist_name
-        if self.playlist_btn:
-            self.playlist_btn.setEnabled(True)
-            self.playlist_btn.setToolTip(f"Copier le morceau courant dans « {playlist_name} »")
-            self.playlist_btn.setText(f"→ {playlist_name}")
+    def _create_playlist_button(self, slot: int) -> QPushButton:
+        """Crée un bouton de raccourci vers la playlist récente du slot donné.
 
-    def _on_copy_to_last_playlist(self) -> None:
-        """Copie le morceau courant dans la dernière playlist utilisée."""
-        if self._last_playlist_id is None:
+        Args:
+            slot: Index dans la liste des playlists récentes (0 = la plus récente).
+        """
+        btn = QPushButton("→ playlist")
+        btn.setToolTip("Copier le morceau courant dans une playlist récente")
+        btn.setMaximumWidth(100)
+        btn.setEnabled(False)
+        btn.setVisible(False)
+        btn.clicked.connect(lambda *_a, s=slot: self._on_copy_to_recent_playlist(s))
+        return btn
+
+    def _refresh_playlist_buttons(self) -> None:
+        """Met à jour libellé, info-bulle, activation et visibilité des boutons."""
+        for slot, btn in enumerate(self._playlist_buttons):
+            has_playlist = slot < len(self._recent_playlists)
+            if has_playlist:
+                _, name = self._recent_playlists[slot]
+                btn.setText(f"→ {name}")
+                btn.setToolTip(f"Copier le morceau courant dans « {name} »")
+            else:
+                btn.setText("→ playlist")
+                btn.setToolTip("Copier le morceau courant dans une playlist récente")
+            btn.setEnabled(has_playlist)
+            # Masqué tant qu'il n'y a pas assez de playlists récentes pour ce slot.
+            btn.setVisible(self._buttons_visible and has_playlist)
+
+    def _on_track_added_to_playlist(self, playlist_id: int, playlist_name: str) -> None:
+        """Mémorise les playlists récentes et rafraîchit les boutons de re-copie."""
+        # Place la playlist en tête, dédupliquée, et ne garde que les 3 plus récentes.
+        self._recent_playlists = [(playlist_id, playlist_name)] + [
+            (pid, pname) for pid, pname in self._recent_playlists if pid != playlist_id
+        ]
+        self._recent_playlists = self._recent_playlists[: len(self._playlist_buttons) or 3]
+        self._refresh_playlist_buttons()
+
+    def _on_copy_to_recent_playlist(self, slot: int) -> None:
+        """Copie le morceau courant dans la playlist récente du slot donné."""
+        if slot >= len(self._recent_playlists):
             return
+        playlist_id, _ = self._recent_playlists[slot]
         filepath = self.context.player.current_file
         if not filepath:
             return
-        self.context.app._on_add_to_playlist(filepath, self._last_playlist_id)  # type: ignore[union-attr]
+        self.context.app._on_add_to_playlist(filepath, playlist_id)  # type: ignore[union-attr]
 
     def _on_track_loaded(self, track_id: int) -> None:
         """Reset loop when new track is loaded."""
@@ -396,13 +438,15 @@ class LoopPlayerPlugin(SettingsSyncMixin):
 
     def activate(self, mode: str) -> None:
         """Activate plugin for mode."""
-        if mode == "jukebox" and self.playlist_btn:
-            self.playlist_btn.setVisible(True)
+        if mode == "jukebox":
+            self._buttons_visible = True
+            self._refresh_playlist_buttons()
 
     def deactivate(self, mode: str) -> None:
         """Deactivate plugin for mode."""
-        if mode == "jukebox" and self.playlist_btn:
-            self.playlist_btn.setVisible(False)
+        if mode == "jukebox":
+            self._buttons_visible = False
+            self._refresh_playlist_buttons()
         # Stop loop when switching modes
         if self.loop_active:
             self.loop_active = False
