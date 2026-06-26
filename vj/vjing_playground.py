@@ -24,10 +24,11 @@ sys.path.insert(0, str(PROJECT_ROOT / "plugins"))
 import socket
 import struct
 import threading
+import time
 
 import numpy as np
 import vlc
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 
 try:
     import sounddevice as sd
@@ -58,12 +59,20 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from video_exporter.layers.vjing_layer import VJingLayer  # type: ignore[import]
+from video_exporter.layers.vjing_layer import (  # type: ignore[import]
+    VJingLayer,
+    compute_audio_analysis,
+    log_timing,
+)
 
 from jukebox.core.config import load_config
 from jukebox.core.database import Database
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+# relativeCreated (ms depuis le démarrage du process) : permet de situer chaque
+# étape sur la timeline de lancement lors du diagnostic des lenteurs.
+logging.basicConfig(
+    level=logging.INFO, format="%(relativeCreated)8.0fms %(levelname)s: %(message)s"
+)
 log = logging.getLogger(__name__)
 
 PREVIEW_SIZE = 512
@@ -278,6 +287,14 @@ class LiveVJingLayer(VJingLayer):
 class VJingPlayground(QMainWindow):
     """Standalone VJing effects playground."""
 
+    # Signaux émis depuis le thread de décodage audio. Les signaux Qt traversant
+    # les threads sont délivrés via une connexion en file d'attente sur le thread
+    # du récepteur (ici le thread UI), contrairement à QTimer.singleShot qui,
+    # appelé depuis un thread sans boucle d'événements, ne se déclenche jamais.
+    _audio_loaded = Signal(str, object, float, object)
+    _audio_load_failed = Signal(str, object)
+
+    @log_timing
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("VJing Effects Playground")
@@ -295,6 +312,22 @@ class VJingPlayground(QMainWindow):
         self._sr: int | float = 22050
         self._duration: float = 0.0
         self._current_filepath: str = ""
+        # Analyse audio partagée entre les layers (preview + LED), calculée dans le
+        # thread de chargement pour ne pas bloquer l'UI (~9 s pour une piste de 9 min)
+        self._analysis: dict[str, Any] | None = None
+
+        # Horloge média continue : temps média (s) ancré sur perf_counter. Donne un
+        # time_pos lisse entre deux syncs VLC (granularité ~250 ms) au lieu d'un
+        # compteur de frames écrasé à chaque sync (source de saccades visibles).
+        # L'ancrage initial est différé au premier retour de position VLC (le
+        # démarrage effectif de la lecture prend ~0,5 s après play()).
+        self._media_time0: float = 0.0
+        self._media_clock_t0: float = time.perf_counter()
+        self._media_clock_started: bool = False
+
+        # Reprise sur le thread UI après décodage audio en arrière-plan
+        self._audio_loaded.connect(self._on_audio_loaded)
+        self._audio_load_failed.connect(self._on_audio_load_failed)
 
         # VJing state
         self._vjing_layer: VJingLayer | None = None
@@ -617,6 +650,7 @@ class VJingPlayground(QMainWindow):
 
     # ─── Data Loading ──────────────────────────────────────────────────
 
+    @log_timing
     def _load_tracks(self, query: str = "") -> None:
         """Load tracks from DB into the list widget."""
         try:
@@ -692,24 +726,41 @@ class VJingPlayground(QMainWindow):
             self._stop_mic_mode()
         self._stop_preview()
         self._current_filepath = filepath
+        log.info("[Timing] piste sélectionnée: %s", Path(filepath).name)
         self.statusBar().showMessage(f"Loading: {Path(filepath).name}...")
 
-        # Le décodage audio (librosa.load) est lent : on l'exécute dans un thread de
-        # fond pour ne pas geler l'UI, puis on reprend sur le thread Qt via singleShot.
+        # Le décodage audio (librosa.load) et l'analyse (énergies, beats, FFT) sont
+        # lents : on les exécute dans un thread de fond pour ne pas geler l'UI, puis
+        # on reprend sur le thread Qt via un signal (cross-thread, délivré au thread
+        # UI ; singleShot depuis ce worker ne se déclencherait jamais faute de boucle
+        # d'événements). L'analyse est partagée ensuite par les deux layers.
         def _load_audio() -> None:
             try:
+                t0 = time.perf_counter()
                 import librosa
 
-                audio, sr = librosa.load(filepath, sr=22050, mono=True)
+                log.info("[Timing] import librosa: %.2fs", time.perf_counter() - t0)
+                t0 = time.perf_counter()
+                # polyphase : ~2× plus rapide que soxr_hq ; la qualité de
+                # rééchantillonnage est sans enjeu ici (analyse visuelle
+                # uniquement, la lecture audio passe par VLC sur le fichier)
+                audio, sr = librosa.load(filepath, sr=22050, mono=True, res_type="polyphase")
+                log.info("[Timing] librosa.load: %.2fs", time.perf_counter() - t0)
+                total_frames = int((len(audio) / sr) * FPS)
+                # compute_audio_analysis logue déjà sa propre durée (@log_timing)
+                analysis = compute_audio_analysis(audio, int(sr), FPS, total_frames)
             except Exception as exc:
-                QTimer.singleShot(0, lambda err=exc: self._on_audio_load_failed(filepath, err))
+                self._audio_load_failed.emit(filepath, exc)
                 return
-            QTimer.singleShot(0, lambda a=audio, s=sr: self._on_audio_loaded(filepath, a, float(s)))
+            self._audio_loaded.emit(filepath, audio, float(sr), analysis)
 
         threading.Thread(target=_load_audio, daemon=True, name="vjing-audio-load").start()
 
-    def _on_audio_loaded(self, filepath: str, audio: np.ndarray, sr: float) -> None:
-        """Reprend le pipeline sur le thread UI une fois l'audio décodé."""
+    @log_timing
+    def _on_audio_loaded(
+        self, filepath: str, audio: np.ndarray, sr: float, analysis: dict[str, Any]
+    ) -> None:
+        """Reprend le pipeline sur le thread UI une fois l'audio décodé et analysé."""
         # La piste sélectionnée a pu changer pendant le décodage : on ignore les
         # résultats obsolètes.
         if filepath != self._current_filepath:
@@ -717,6 +768,7 @@ class VJingPlayground(QMainWindow):
         self._audio = audio
         self._sr = sr
         self._duration = len(audio) / sr
+        self._analysis = analysis
         self._build_layers()
         self._start_preview(filepath)
 
@@ -735,6 +787,7 @@ class VJingPlayground(QMainWindow):
             effects.append(selected.text())
         return effects
 
+    @log_timing
     def _build_layers(self) -> None:
         """Full rebuild of both VJingLayers (expensive — audio analysis + precompute)."""
         if self._mic_mode:
@@ -773,6 +826,9 @@ class VJingPlayground(QMainWindow):
             transitions_enabled=True,
             use_gpu=True,
             audio_sensitivity=sens,
+            # Analyse calculée une seule fois dans le thread de chargement,
+            # partagée par les deux layers (indépendante de la résolution)
+            precomputed_analysis=self._analysis,
         )
 
         try:
@@ -923,6 +979,7 @@ class VJingPlayground(QMainWindow):
         with self._milkdrop_ready_lock:
             return self._milkdrop_ready
 
+    @log_timing
     def _build_milkdrop_layer(self) -> None:
         """Instancie MilkDropLayer et lance le warmup dans un thread de fond."""
         if self._milkdrop_warmup_thread and self._milkdrop_warmup_thread.is_alive():
@@ -1129,6 +1186,7 @@ class VJingPlayground(QMainWindow):
 
     # ─── Playback ──────────────────────────────────────────────────────
 
+    @log_timing
     def _start_preview(self, filepath: str) -> None:
         """Start VLC playback + preview timer."""
         media = self._vlc_instance.media_new(str(filepath))  # type: ignore[union-attr]
@@ -1136,6 +1194,10 @@ class VJingPlayground(QMainWindow):
         self._vlc_player.play()
 
         self._frame_idx = 0
+        # L'horloge média sera ancrée au premier retour de position VLC
+        self._media_time0 = 0.0
+        self._media_clock_t0 = time.perf_counter()
+        self._media_clock_started = False
         self._timer.start()
         self._position_timer.start()
         self._btn_play.setText("Pause")
@@ -1164,8 +1226,21 @@ class VJingPlayground(QMainWindow):
             self._timer.stop()
             self._btn_play.setText("Play")
         elif self._vlc_player.get_media() is not None:
+            if self._vlc_player.get_state() == vlc.State.Ended:  # type: ignore[attr-defined]
+                # Relecture après fin de piste : VLC repart du début (ré-ancrage
+                # différé au premier retour de position, comme au lancement)
+                self._frame_idx = 0
+                self._media_time0 = 0.0
+                self._media_clock_started = False
+            else:
+                # Reprise après pause : ré-ancre l'horloge média sur la position VLC
+                pos = max(self._vlc_player.get_position(), 0.0)
+                self._media_time0 = pos * self._duration
+                self._media_clock_started = True
+            self._media_clock_t0 = time.perf_counter()
             self._vlc_player.play()
             self._timer.start()
+            self._position_timer.start()
             self._btn_play.setText("Pause")
 
     def _on_slider_pressed(self) -> None:
@@ -1175,12 +1250,24 @@ class VJingPlayground(QMainWindow):
         self._slider_dragging = False
         pos = self._position_slider.value() / 1000.0
         self._vlc_player.set_position(pos)
+        # Ré-ancre l'horloge média sur la nouvelle position (seek utilisateur)
+        self._media_time0 = pos * self._duration
+        self._media_clock_t0 = time.perf_counter()
         if self._vjing_layer:
             self._frame_idx = int(pos * self._vjing_layer.total_frames)
 
     def _sync_position_from_vlc(self) -> None:
         """Sync slider and frame_idx from VLC position."""
         if self._slider_dragging:
+            return
+        # Fin de piste : VLC fige get_position() sur sa dernière valeur alors que
+        # le timer de rendu continue d'avancer, puis chaque sync le ramène en
+        # arrière → l'effet rejoue en boucle une fenêtre de ~250 ms (saccades).
+        # On stoppe les deux timers : la dernière frame reste affichée, immobile.
+        if self._vlc_player.get_state() == vlc.State.Ended:  # type: ignore[attr-defined]
+            self._timer.stop()
+            self._position_timer.stop()
+            self._btn_play.setText("Play")
             return
         pos = self._vlc_player.get_position()
         if pos < 0:
@@ -1195,9 +1282,26 @@ class VJingPlayground(QMainWindow):
             f"{int(total_s) // 60}:{int(total_s) % 60:02d}"
         )
 
-        # Sync frame index
-        if self._vjing_layer:
-            self._frame_idx = int(pos * self._vjing_layer.total_frames)
+        # Resynchronise l'horloge média sur VLC. La position VLC est quantifiée
+        # (~250 ms) : un petit écart est corrigé en douceur pour rester invisible ;
+        # un gros écart (seek externe, décrochage) est rattrapé d'un coup.
+        media_t = pos * self._duration
+        if not self._media_clock_started:
+            if pos > 0:
+                # Premier retour de position : la lecture a réellement démarré
+                self._media_time0 = media_t
+                self._media_clock_t0 = time.perf_counter()
+                self._media_clock_started = True
+            return
+        predicted = self._media_time0 + (time.perf_counter() - self._media_clock_t0)
+        drift = media_t - predicted
+        if abs(drift) > 0.5:
+            self._media_time0 = media_t
+            self._media_clock_t0 = time.perf_counter()
+        elif abs(drift) > 0.05:
+            # Correction bornée à ±20 ms par sync (< 1 frame à 30 fps) : aucun
+            # saut visible, convergence en quelques secondes au pire
+            self._media_time0 += max(-0.02, min(0.02, drift * 0.1))
 
     # ─── Rendering ─────────────────────────────────────────────────────
 
@@ -1206,6 +1310,7 @@ class VJingPlayground(QMainWindow):
         active_layer = self._vjing_layer or self._led_layer
         if active_layer is None:
             return
+        frame_t0 = time.perf_counter()
 
         total = active_layer.total_frames
         if self._frame_idx >= total:
@@ -1221,8 +1326,18 @@ class VJingPlayground(QMainWindow):
             # Update time label for mic mode
             elapsed = self._frame_idx / FPS
             self._time_label.setText(f"{int(elapsed) // 60}:{int(elapsed) % 60:02d} (live)")
-
-        time_pos = self._frame_idx / FPS
+            time_pos = self._frame_idx / FPS
+        elif not self._media_clock_started:
+            # Lecture pas encore démarrée côté VLC : on reste sur la première frame
+            time_pos = 0.0
+            self._frame_idx = 0
+        else:
+            # Mode lecture : temps continu issu de l'horloge média (lisse même si le
+            # rendu est plus lent que le timer, là où un compteur de frames écrasé
+            # par la sync VLC toutes les 250 ms produisait des saccades de zoom)
+            time_pos = self._media_time0 + (time.perf_counter() - self._media_clock_t0)
+            time_pos = max(0.0, min(time_pos, (total - 1) / FPS))
+            self._frame_idx = int(time_pos * FPS)
 
         # Mise à jour du statut MilkDrop warmup
         milkdrop_ready = self._is_milkdrop_ready()
@@ -1286,7 +1401,15 @@ class VJingPlayground(QMainWindow):
                 log.error(f"LED render error frame {self._frame_idx}: {e}")
 
         self._highlight_active_effects(time_pos)
-        self._frame_idx += 1
+        # Trace uniquement les frames anormalement lentes (> 100 ms, budget = 33 ms
+        # à 30 fps) pour repérer les blocages sans noyer le log.
+        frame_dt = time.perf_counter() - frame_t0
+        if frame_dt > 0.1:
+            log.info("[Timing] _update_frame %d: %.2fs", self._frame_idx, frame_dt)
+        if self._mic_mode:
+            # Seul le mode micro avance par compteur ; en lecture, _frame_idx est
+            # dérivé de l'horloge média à chaque tick.
+            self._frame_idx += 1
 
     def _highlight_active_effects(self, time_pos: float) -> None:
         """Bold + green the effect names currently visible on screen."""
@@ -1335,6 +1458,8 @@ class VJingPlayground(QMainWindow):
 
 
 def main() -> None:
+    # relativeCreated ≈ 0 au chargement du module : ce log donne le coût des imports
+    log.info("[Timing] main() start (imports terminés)")
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
 
@@ -1355,6 +1480,7 @@ def main() -> None:
 
     window = VJingPlayground()
     window.show()
+    log.info("[Timing] fenêtre affichée")
     _run = getattr(app, "exec")  # noqa: B009  # Boucle d'événements Qt
     sys.exit(_run())
 

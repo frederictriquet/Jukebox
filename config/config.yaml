@@ -247,7 +247,7 @@ video_exporter:
       description: "Molten lava flow visuals"
     # Geometric / Mathematical
     - name: "Geometric"
-      effects: ["kaleidoscope", "lissajous", "voronoi", "spiral", "timestretch"]
+      effects: ["kaleidoscope", "lissajous", "voronoi", "octagrams", "spiral", "timestretch"]
       description: "Mathematical patterns"
     - name: "Spectral"
       effects: ["fft_bars", "fft_rings", "bass_warp", "timestretch"]

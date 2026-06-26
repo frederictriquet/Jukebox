@@ -1,6 +1,6 @@
 .PHONY: help install test lint format type-check clean run sync \
         analyze ml-stats ml-compare ml-train \
-        shazamix-index shazamix-stats
+        shazamix-index shazamix-stats vjing-playground
 
 # Model type for ml-train (override with: make ml-train ML_MODEL=xgboost)
 ML_MODEL ?= random_forest
@@ -15,6 +15,7 @@ help:
 	@echo "  make type-check      Run type checking"
 	@echo "  make clean           Clean build artifacts"
 	@echo "  make run             Run application"
+	@echo "  make vjing-playground Run the VJing effects playground"
 	@echo "  make ci              Run all CI checks"
 	@echo ""
 	@echo "ML (genre classifier):"
@@ -58,6 +59,10 @@ clean:
 
 run:
 	uv run python -m jukebox.main
+
+# Lance le playground VJing (prévisualisation temps réel des effets)
+vjing-playground:
+	uv run python vj/vjing_playground.py
 
 # Run all CI checks locally
 ci: format lint type-check test

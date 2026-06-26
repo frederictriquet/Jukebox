@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from typing import Any
 
 import numpy as np  # type: ignore[import-untyped]
@@ -370,6 +371,123 @@ void main() {
 """
 )
 
+# Octagrams shader (raymarching, adapté du Shadertoy « Octagrams ») avec palette
+OCTAGRAMS_SHADER = (
+    """
+#version 330 core
+
+in vec2 uv;
+out vec4 fragColor;
+
+uniform float time;
+uniform vec2 resolution;
+uniform float intensity;
+
+"""
+    + PALETTE_FUNCTIONS
+    + """
+
+// Temps global modulé par itération de raymarching (cf. shader original)
+float gTime = 0.;
+
+// 回転行列 — matrice de rotation 2D
+mat2 rot(float a) {
+    float c = cos(a), s = sin(a);
+    return mat2(c,s,-s,c);
+}
+
+// Distance signée à une boîte
+float sdBox( vec3 p, vec3 b )
+{
+    vec3 q = abs(p) - b;
+    return length(max(q,0.0)) + min(max(q.x,max(q.y,q.z)),0.0);
+}
+
+// Boîte de base mise à l'échelle puis transformée
+float box(vec3 pos, float scale) {
+    pos *= scale;
+    float base = sdBox(pos, vec3(.4,.4,.1)) /1.5;
+    pos.xy *= 5.;
+    pos.y -= 3.5;
+    pos.xy *= rot(.75);
+    float result = -base;
+    return result;
+}
+
+// Ensemble de boîtes animées formant l'octagramme
+float box_set(vec3 pos, float iTime) {
+    vec3 pos_origin = pos;
+    pos = pos_origin;
+    pos .y += sin(gTime * 0.4) * 2.5;
+    pos.xy *=   rot(.8);
+    float box1 = box(pos,2. - abs(sin(gTime * 0.4)) * 1.5);
+    pos = pos_origin;
+    pos .y -=sin(gTime * 0.4) * 2.5;
+    pos.xy *=   rot(.8);
+    float box2 = box(pos,2. - abs(sin(gTime * 0.4)) * 1.5);
+    pos = pos_origin;
+    pos .x +=sin(gTime * 0.4) * 2.5;
+    pos.xy *=   rot(.8);
+    float box3 = box(pos,2. - abs(sin(gTime * 0.4)) * 1.5);
+    pos = pos_origin;
+    pos .x -=sin(gTime * 0.4) * 2.5;
+    pos.xy *=   rot(.8);
+    float box4 = box(pos,2. - abs(sin(gTime * 0.4)) * 1.5);
+    pos = pos_origin;
+    pos.xy *=   rot(.8);
+    float box5 = box(pos,.5) * 6.;
+    pos = pos_origin;
+    float box6 = box(pos,.5) * 6.;
+    float result = max(max(max(max(max(box1,box2),box3),box4),box5),box6);
+    return result;
+}
+
+// Carte de distance globale de la scène
+float map(vec3 pos, float iTime) {
+    vec3 pos_origin = pos;
+    float box_set1 = box_set(pos, iTime);
+
+    return box_set1;
+}
+
+void main() {
+    vec2 fragCoord = uv * resolution;
+    float iTime = time;
+    vec2 p = (fragCoord * 2. - resolution) / min(resolution.x, resolution.y);
+    vec3 ro = vec3(0., -0.2 ,iTime * 4.);
+    vec3 ray = normalize(vec3(p, 1.5));
+    ray.xy = ray.xy * rot(sin(iTime * .03) * 5.);
+    ray.yz = ray.yz * rot(sin(iTime * .05) * .2);
+    float t = 0.1;
+    vec3 col = vec3(0.);
+    float ac = 0.0;
+
+    // Boucle de raymarching identique à l'original (99 itérations)
+    for (int i = 0; i < 99; i++){
+        vec3 pos = ro + ray * t;
+        pos = mod(pos-2., 4.) -2.;
+        gTime = iTime -float(i) * 0.01;
+
+        float d = map(pos, iTime);
+
+        d = max(abs(d), 0.01);
+        ac += exp(-d*23.);
+
+        t += d* 0.55;
+    }
+
+    // Recolorisation via la palette du projet
+    float glow = ac * 0.02;
+    vec3 baseCol = getPaletteColorCycled(glow, iTime * 0.05);
+    col = baseCol * glow;
+
+    // Alpha original pondéré par l'intensité
+    float a = (1.0 - t * (0.02 + 0.02 * sin(iTime))) * intensity;
+    fragColor = vec4(col, clamp(a, 0.0, 1.0));
+}
+"""
+)
+
 
 # =============================================================================
 # GPU Renderer Class
@@ -412,11 +530,18 @@ class GPUShaderRenderer:
             # _gpu_lock : la création de contexte touche l'état CGL global du
             # processus et n'est pas thread-safe (conflit potentiel sur macOS si
             # deux threads d'export l'instancient simultanément). Voir [C23].
+            t0 = time.perf_counter()
             with _gpu_lock:
                 self._init_context()
             self._creator_thread_id = threading.get_ident()
             self._initialized = True
-            logging.info(f"[GPU Renderer] Initialized {width}x{height}")
+            logging.info(
+                "[GPU Renderer] [Timing] Initialized %dx%d (contexte + compilation "
+                "des shaders): %.2fs",
+                width,
+                height,
+                time.perf_counter() - t0,
+            )
         except Exception as e:
             logging.warning(f"[GPU Renderer] Failed to initialize: {e}")
             # Libère toute ressource GL allouée avant l'échec
@@ -466,6 +591,7 @@ class GPUShaderRenderer:
             "metaballs": METABALLS_SHADER,
             "wormhole": WORMHOLE_SHADER,
             "voronoi": VORONOI_SHADER,
+            "octagrams": OCTAGRAMS_SHADER,
         }
 
         for name, fragment in shaders.items():
@@ -637,13 +763,17 @@ class GPUShaderRenderer:
         logging.debug("[GPU Renderer] Cleaned up")
 
 
-# Renderer GPU par thread : chaque thread (main, export worker…) a son propre renderer
+# Renderers GPU par thread : chaque thread (main, export worker…) a ses propres renderers
 # pour éviter tout accès GL cross-thread (= SIGSEGV sur macOS/CGL).
+# Cache par taille (width, height) : plusieurs layers de tailles différentes peuvent
+# coexister dans le même thread (ex. playground : preview 512×512 + LED panel 64×64).
+# Un slot unique provoquait l'éviction (cleanup) du renderer de l'autre taille, laissant
+# le premier layer avec une référence morte → effets GPU silencieusement absents.
 _gpu_renderer_local = threading.local()
 
 
 def get_gpu_renderer(width: int, height: int) -> GPUShaderRenderer | None:
-    """Retourne le renderer GPU du thread courant, le crée/reconfigure si nécessaire.
+    """Retourne le renderer GPU du thread courant pour cette taille, le crée si nécessaire.
 
     Args:
         width: Output width.
@@ -655,12 +785,16 @@ def get_gpu_renderer(width: int, height: int) -> GPUShaderRenderer | None:
     if not MODERNGL_AVAILABLE:
         return None
 
-    renderer: GPUShaderRenderer | None = getattr(_gpu_renderer_local, "renderer", None)
-    if renderer is None or renderer.width != width or renderer.height != height:
-        if renderer is not None:
-            # cleanup() est appelé depuis le thread créateur → sûr
-            renderer.cleanup()
+    renderers: dict[tuple[int, int], GPUShaderRenderer] | None = getattr(
+        _gpu_renderer_local, "renderers", None
+    )
+    if renderers is None:
+        renderers = {}
+        _gpu_renderer_local.renderers = renderers
+
+    renderer = renderers.get((width, height))
+    if renderer is None or not renderer._initialized:
         renderer = GPUShaderRenderer(width, height)
-        _gpu_renderer_local.renderer = renderer
+        renderers[(width, height)] = renderer
 
     return renderer if renderer.available else None

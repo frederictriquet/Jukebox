@@ -1,0 +1,1 @@
+donner la possibilité d'éditer des champs comme la description/commentaire quand on est en mode jukebox (pour pouvoir dire que Houz - Yashica c'est le remix de Robin S)

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 import math
 import threading
+import time
 from dataclasses import dataclass
 from enum import Enum
 from random import Random
@@ -47,10 +49,22 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray  # type: ignore[import-untyped]
 
+# scipy.fft (pocketfft C++) est multi-threadé via workers=-1 et n'utilise pas
+# BLAS/vecLib (pas de SIGBUS macOS ARM hors main thread). Repli sur np.fft
+# (mêmes résultats, mono-thread) si scipy est absent.
+try:
+    from scipy import fft as _fft_module  # type: ignore[import-untyped]
+
+    _FFT_KWARGS: dict[str, Any] = {"workers": -1}
+except ImportError:
+    _fft_module = np.fft  # type: ignore[assignment]
+    _FFT_KWARGS = {}
+    logging.info("[VJingLayer] scipy absent, FFT numpy mono-thread utilisée")
+
 
 def vj_effect(
-    display_name: str, category: str, pass_type: str = "generator"
-) -> Callable:  # noqa: S107
+    display_name: str, category: str, pass_type: str = "generator"  # noqa: S107
+) -> Callable:
     """Decorator to register VJing effect metadata on _render_* methods.
 
     Args:
@@ -64,6 +78,144 @@ def vj_effect(
         return func
 
     return decorator
+
+
+def log_timing(func: Callable) -> Callable:
+    """Trace la durée d'exécution des étapes coûteuses (diagnostic des lenteurs).
+
+    Logue à INFO sous la forme « [Timing] <qualname>: <durée>s », y compris en
+    cas d'exception (la durée reste utile pour le diagnostic).
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        t0 = time.perf_counter()
+        try:
+            return func(*args, **kwargs)
+        finally:
+            logging.info("[Timing] %s: %.2fs", func.__qualname__, time.perf_counter() - t0)
+
+    return wrapper
+
+
+# =============================================================================
+# Analyse audio (indépendante de la résolution)
+# =============================================================================
+
+
+@log_timing
+def compute_audio_analysis(
+    audio: NDArray[np.floating], sr: int, fps: int, total_frames: int
+) -> dict[str, Any]:
+    """Calcule l'analyse audio par frame : énergies par bande, beats, données FFT.
+
+    Ce calcul ne dépend que de (audio, sr, fps, total_frames) — jamais de la
+    résolution. Le résultat est donc partageable entre plusieurs VJingLayer
+    (ex. preview 512×512 + LED panel 64×64) via le paramètre
+    ``precomputed_analysis``, et calculable hors du thread UI (numpy pur,
+    thread-safe — pas de scipy/vecLib, cf. SIGBUS macOS ARM hors main thread).
+
+    Args:
+        audio: Échantillons audio (mono, float).
+        sr: Fréquence d'échantillonnage.
+        fps: Images par seconde de la vidéo.
+        total_frames: Nombre total de frames (int(duration * fps)).
+
+    Returns:
+        Dict avec les clés : meta, energy, bass_energy, mid_energy,
+        treble_energy, beats, fft_data.
+    """
+    samples_per_frame = len(audio) / total_frames if total_frames > 0 else len(audio)
+
+    # Séparation en bandes via FFT (scipy multi-thread si dispo) — thread-safe ;
+    # scipy.signal.filtfilt utilise BLAS qui SIGBUS sur macOS ARM (vecLib) hors
+    # du thread principal, d'où le filtrage par masque spectral.
+    # np.asarray : sans copie pour un ndarray, borne le type de retour scipy
+    fft = np.asarray(_fft_module.rfft(audio, **_FFT_KWARGS))
+    freqs = np.fft.rfftfreq(len(audio), 1.0 / sr)
+
+    def _fft_band(lo: float, hi: float | None) -> NDArray:
+        mask = freqs >= lo if hi is None else (freqs >= lo) & (freqs <= hi)
+        filtered = fft.copy()
+        filtered[~mask] = 0.0
+        out = np.asarray(_fft_module.irfft(filtered, n=len(audio), **_FFT_KWARGS))
+        return out.astype(np.float32)
+
+    bass_audio = _fft_band(20.0, 250.0)
+    mid_audio = _fft_band(250.0, 4000.0)
+    treble_audio = _fft_band(4000.0, None)
+
+    # Bornes des frames (identiques à int(idx * samples_per_frame) de l'ancienne boucle)
+    starts = (np.arange(total_frames) * samples_per_frame).astype(np.int64)
+    ends = (np.arange(1, total_frames + 1) * samples_per_frame).astype(np.int64)
+    counts = ends - starts
+
+    def _rms_per_frame(x: NDArray) -> NDArray:
+        """RMS par frame via sommes cumulées (vectorisé, ~100× plus rapide que la
+        boucle Python par frame ; mêmes valeurs au bruit float64 près)."""
+        csum = np.concatenate(([0.0], np.cumsum(x.astype(np.float64) ** 2)))
+        sums = csum[ends] - csum[starts]
+        return np.sqrt(sums / np.maximum(counts, 1))
+
+    def normalize(arr: NDArray) -> NDArray:
+        max_val = np.max(arr) if len(arr) > 0 and np.max(arr) > 0 else 1.0
+        return arr / max_val
+
+    energy_arr = normalize(_rms_per_frame(audio))
+    bass_arr = normalize(_rms_per_frame(bass_audio))
+    mid_arr = normalize(_rms_per_frame(mid_audio))
+    treble_arr = normalize(_rms_per_frame(treble_audio))
+
+    # Détection de beats : pics d'énergie basse au-dessus d'un seuil
+    beats: list[int] = []
+    threshold = 0.5
+    min_interval = fps // 4  # Frames minimum entre deux beats
+
+    last_beat = -min_interval
+    for i, e in enumerate(bass_arr):
+        if e > threshold and i - last_beat >= min_interval:
+            # Beat seulement si maximum local
+            window = 3
+            w_start = max(0, i - window)
+            w_end = min(len(bass_arr), i + window + 1)
+            if e == max(bass_arr[w_start:w_end]):
+                beats.append(i)
+                last_beat = i
+
+    # Données FFT par frame pour les effets de spectre — FFT batchée sur une
+    # matrice (frames × frame_len) au lieu d'une FFT par frame en boucle Python.
+    # Chaque frame est tronquée à frame_len échantillons (longueur uniforme,
+    # ≤ 1 échantillon perdu par frame : différence visuelle négligeable).
+    n_bands = 32
+    frame_len = int(samples_per_frame)
+    if total_frames > 0 and frame_len > 0:
+        idx = starts[:, None] + np.arange(frame_len)[None, :]
+        frames_matrix = audio[idx]
+        ffts = np.abs(np.asarray(_fft_module.rfft(frames_matrix, axis=1, **_FFT_KWARGS)))
+        band_size = ffts.shape[1] // n_bands
+        if band_size > 0:
+            bands_matrix = ffts[:, : band_size * n_bands].reshape(total_frames, n_bands, band_size)
+            fft_matrix = bands_matrix.mean(axis=2)
+        else:
+            fft_matrix = np.zeros((total_frames, n_bands))
+        max_fft = float(np.max(fft_matrix))
+        if max_fft > 0:
+            fft_matrix = fft_matrix / max_fft
+        fft_data: list[NDArray] = list(fft_matrix)
+    else:
+        fft_data = [np.zeros(n_bands) for _ in range(total_frames)]
+
+    return {
+        # Métadonnées de validation : un layer ne réutilise l'analyse que si
+        # elle correspond exactement à son audio et son cadencement.
+        "meta": {"n_samples": len(audio), "sr": sr, "fps": fps, "total_frames": total_frames},
+        "energy": energy_arr,
+        "bass_energy": bass_arr,
+        "mid_energy": mid_arr,
+        "treble_energy": treble_arr,
+        "beats": beats,
+        "fft_data": fft_data,
+    }
 
 
 # =============================================================================
@@ -473,6 +625,7 @@ class VJingLayer(BaseVisualLayer):
         enabled_post_processing: list[str] | None = None,
         use_gpu: bool = True,
         rng_seed: int = 42,
+        precomputed_analysis: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize VJing layer.
@@ -499,6 +652,9 @@ class VJingLayer(BaseVisualLayer):
             use_all_effects: If True, use all available effects regardless of genre/preset.
             use_gpu: Enable GPU-accelerated shaders when available.
             rng_seed: Seed for deterministic random number generation.
+            precomputed_analysis: Résultat de compute_audio_analysis() à réutiliser
+                (évite de recalculer l'analyse pour chaque layer du même audio).
+                Ignoré avec un warning si ses métadonnées ne correspondent pas.
             **kwargs: Additional parameters.
         """
         self._rng = Random(rng_seed)  # noqa: S311
@@ -570,6 +726,9 @@ class VJingLayer(BaseVisualLayer):
 
         # Initialize LFOs for parameter modulation
         self._init_lfos()
+
+        # Analyse audio pré-calculée à réutiliser (validée dans _precompute)
+        self._precomputed_analysis = precomputed_analysis
 
         # Store dimensions for GPU initialization (done in _precompute)
         self._pending_gpu_init = use_gpu and GPU_SHADERS_AVAILABLE
@@ -651,6 +810,7 @@ class VJingLayer(BaseVisualLayer):
         """
         return [self._get_palette_color(i) for i in range(count)]
 
+    @log_timing
     def _init_gpu_renderer(self) -> None:
         """Initialize GPU shader renderer if available.
 
@@ -839,68 +999,38 @@ class VJingLayer(BaseVisualLayer):
 
         return effects if effects else ["wave"]
 
+    @log_timing
     def _precompute(self) -> None:
         """Pre-compute effect-specific data."""
         logging.info("[VJingLayer] _precompute start (effects=%s)", self.active_effects)
-        samples_per_frame = len(self.audio) / self.total_frames
 
-        # Compute energy envelope for reactive effects
-        self.energy = []
-        self.bass_energy = []
-        self.mid_energy = []
-        self.treble_energy = []
-
-        # Band separation via FFT — thread-safe; scipy.signal.filtfilt uses BLAS which
-        # SIGBUS on macOS ARM (vecLib) when called from a non-main thread (QThread).
-        fft = np.fft.rfft(self.audio)
-        freqs = np.fft.rfftfreq(len(self.audio), 1.0 / self.sr)
-
-        def _fft_band(lo: float, hi: float | None) -> NDArray:
-            mask = freqs >= lo if hi is None else (freqs >= lo) & (freqs <= hi)
-            filtered = fft.copy()
-            filtered[~mask] = 0.0
-            return np.fft.irfft(filtered, n=len(self.audio)).astype(np.float32)
-
-        bass_audio = _fft_band(20.0, 250.0)
-        mid_audio = _fft_band(250.0, 4000.0)
-        treble_audio = _fft_band(4000.0, None)
-        self._has_frequency_bands = True
-
-        # Compute per-frame energy
-        for frame_idx in range(self.total_frames):
-            start = int(frame_idx * samples_per_frame)
-            end = int((frame_idx + 1) * samples_per_frame)
-
-            chunk = self.audio[start:end]
-            bass_chunk = bass_audio[start:end]
-            mid_chunk = mid_audio[start:end]
-            treble_chunk = treble_audio[start:end]
-
-            self.energy.append(np.sqrt(np.mean(chunk**2)) if len(chunk) > 0 else 0.0)
-            self.bass_energy.append(np.sqrt(np.mean(bass_chunk**2)) if len(bass_chunk) > 0 else 0.0)
-            self.mid_energy.append(np.sqrt(np.mean(mid_chunk**2)) if len(mid_chunk) > 0 else 0.0)
-            self.treble_energy.append(
-                np.sqrt(np.mean(treble_chunk**2)) if len(treble_chunk) > 0 else 0.0
+        # Analyse audio : réutilise le résultat fourni s'il correspond à cet audio,
+        # sinon la calcule (cas nominal hors playground).
+        analysis = self._precomputed_analysis
+        expected_meta = {
+            "n_samples": len(self.audio),
+            "sr": self.sr,
+            "fps": self.fps,
+            "total_frames": self.total_frames,
+        }
+        if analysis is not None and analysis.get("meta") != expected_meta:
+            logging.warning(
+                "[VJingLayer] precomputed_analysis incompatible (%s != %s), recalcul",
+                analysis.get("meta"),
+                expected_meta,
             )
+            analysis = None
+        if analysis is None:
+            analysis = compute_audio_analysis(self.audio, self.sr, self.fps, self.total_frames)
 
-        # Normalize
-        def normalize(arr: list) -> NDArray:
-            arr = np.array(arr)  # type: ignore[assignment]
-            max_val = np.max(arr) if np.max(arr) > 0 else 1.0
-            return arr / max_val  # type: ignore[operator]
-
-        self.energy = normalize(self.energy)
-        self.bass_energy = normalize(self.bass_energy)
-        self.mid_energy = normalize(self.mid_energy)
-        self.treble_energy = normalize(self.treble_energy)
-
-        logging.info("[VJingLayer] energy computed, running beat detection...")
-        # Beat detection (simple onset detection)
-        self._detect_beats()
-
-        # Compute FFT data for spectrum effects
-        logging.info("[VJingLayer] computing FFT data...")
-        self._compute_fft_data()
+        self.energy = analysis["energy"]
+        self.bass_energy = analysis["bass_energy"]
+        self.mid_energy = analysis["mid_energy"]
+        self.treble_energy = analysis["treble_energy"]
+        self._has_frequency_bands = True
+        self.beats = list(analysis["beats"])
+        self._beats_set = set(self.beats)
+        self.fft_data = analysis["fft_data"]
 
         logging.info("[VJingLayer] running effect init...")
         # Effect-specific initialization
@@ -924,6 +1054,8 @@ class VJingLayer(BaseVisualLayer):
             self._init_starfield()
         if "voronoi" in self.active_effects:
             self._init_voronoi()
+        if "octagrams" in self.active_effects:
+            self._init_octagrams()
         if "metaballs" in self.active_effects:
             self._init_metaballs()
         if "smoke" in self.active_effects:
@@ -947,54 +1079,6 @@ class VJingLayer(BaseVisualLayer):
         # Initialize GPU renderer if enabled
         if self._pending_gpu_init:
             self._init_gpu_renderer()
-
-    def _detect_beats(self) -> None:
-        """Simple beat detection based on energy peaks."""
-        self.beats = []
-        threshold = 0.5
-        min_interval = self.fps // 4  # Minimum frames between beats
-
-        last_beat = -min_interval
-        for i, e in enumerate(self.bass_energy):
-            if e > threshold and i - last_beat >= min_interval:
-                # Check if it's a local maximum
-                window = 3
-                start = max(0, i - window)
-                end = min(len(self.bass_energy), i + window + 1)
-                if e == max(self.bass_energy[start:end]):
-                    self.beats.append(i)
-                    last_beat = i
-        self._beats_set = set(self.beats)
-
-    def _compute_fft_data(self) -> None:
-        """Pre-compute FFT data for each frame."""
-        self.fft_data = []
-        samples_per_frame = len(self.audio) / self.total_frames
-        n_bands = 32  # Number of frequency bands
-
-        for frame_idx in range(self.total_frames):
-            start = int(frame_idx * samples_per_frame)
-            end = int((frame_idx + 1) * samples_per_frame)
-            chunk = self.audio[start:end]
-
-            if len(chunk) > 0:
-                # Compute FFT
-                fft = np.abs(np.fft.rfft(chunk))
-                # Resample to n_bands
-                band_size = len(fft) // n_bands
-                bands = []
-                for i in range(n_bands):
-                    band_start = i * band_size
-                    band_end = (i + 1) * band_size
-                    bands.append(np.mean(fft[band_start:band_end]))
-                self.fft_data.append(np.array(bands))
-            else:
-                self.fft_data.append(np.zeros(n_bands))
-
-        # Normalize FFT data
-        max_fft = max(np.max(f) for f in self.fft_data) if self.fft_data else 1.0
-        if max_fft > 0:
-            self.fft_data = [f / max_fft for f in self.fft_data]
 
     def _init_particles(self) -> None:
         """Initialize particle system."""
@@ -3112,6 +3196,39 @@ class VJingLayer(BaseVisualLayer):
         voronoi_rgba = Image.merge("RGBA", (r_ch, g_ch, b_ch, alpha))
 
         img.paste(voronoi_rgba, (0, 0), voronoi_rgba)
+
+    # ========================================================================
+    # OCTAGRAMS EFFECT
+    # ========================================================================
+
+    def _init_octagrams(self) -> None:
+        """Initialise l'effet Octagrams (GPU uniquement, rien à pré-calculer).
+
+        Présent pour homogénéité avec le bloc de dispatch d'initialisation.
+        """
+        pass
+
+    @vj_effect("Octagrams", "GPU")
+    def _render_octagrams(
+        self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
+    ) -> None:
+        """Rend l'effet Octagrams : raymarching de boîtes animées formant des octagrammes.
+
+        Tunnel infini d'octagrammes pulsants colorés via la palette du projet.
+        GPU uniquement : aucun fallback CPU (raymarcher trop lourd).
+
+        Args:
+            img: Image sur laquelle dessiner.
+            frame_idx: Index de la frame.
+            time_pos: Position temporelle en secondes.
+            ctx: Dictionnaire de contexte audio.
+        """
+        gpu_img = self._render_gpu_effect("octagrams", frame_idx, time_pos, ctx)
+        if gpu_img:
+            img.paste(gpu_img, (0, 0), gpu_img)
+            return
+        # GPU indisponible : effet sans fallback CPU (raymarcher trop lourd), no-op logué
+        logging.debug("[VJingLayer] octagrams : GPU indisponible, effet ignoré")
 
     # ========================================================================
     # METABALLS EFFECT
