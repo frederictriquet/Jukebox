@@ -87,8 +87,7 @@ class PaletteButton(QPushButton):
             stops.append(f"stop:{pos:.2f} rgb({r},{g},{b})")
 
         gradient = ", ".join(stops)
-        self.setStyleSheet(
-            f"""
+        self.setStyleSheet(f"""
             QPushButton {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, {gradient});
                 border: 2px solid #444;
@@ -100,8 +99,7 @@ class PaletteButton(QPushButton):
             QPushButton:hover {{
                 border: 2px solid #888;
             }}
-        """
-        )
+        """)
 
 
 class EffectPreviewDialog(QDialog):
@@ -171,8 +169,7 @@ class EffectPreviewDialog(QDialog):
 
     def _setup_ui(self) -> None:
         """Set up the dialog UI."""
-        self.setStyleSheet(
-            """
+        self.setStyleSheet("""
             QDialog { background: #2b2b2b; }
             QLabel { color: #ffffff; }
             QPushButton {
@@ -184,8 +181,7 @@ class EffectPreviewDialog(QDialog):
             }
             QPushButton:hover { background: #4a4a4a; }
             QPushButton:pressed { background: #0078d4; }
-        """
-        )
+        """)
 
         layout = QVBoxLayout(self)
 
@@ -555,8 +551,7 @@ class ExportDialog(QDialog):
 
     def _apply_dark_style(self) -> None:
         """Apply dark mode compatible styling."""
-        self.setStyleSheet(
-            """
+        self.setStyleSheet("""
             QTabWidget::pane {
                 border: 1px solid #555;
                 background: #2b2b2b;
@@ -624,8 +619,7 @@ class ExportDialog(QDialog):
                 background: #0078d4;
                 border-radius: 3px;
             }
-        """
-        )
+        """)
 
     def _get_metadata(self, key: str, default: str = "Unknown") -> str:
         """Get metadata value safely from sqlite3.Row or dict.

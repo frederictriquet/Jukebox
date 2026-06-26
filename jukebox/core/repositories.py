@@ -734,15 +734,13 @@ class PlaylistRepository(BaseRepository):
 
     def get_all_with_counts(self) -> list[dict[str, Any]]:
         """Retourne toutes les playlists avec le nombre de pistes (clé track_count)."""
-        return self._conn.execute(
-            """
+        return self._conn.execute("""
             SELECT p.*, COUNT(pt.track_id) AS track_count
             FROM playlists p
             LEFT JOIN playlist_tracks pt ON p.id = pt.playlist_id
             GROUP BY p.id
             ORDER BY p.name
-            """
-        ).fetchall()
+            """).fetchall()
 
     def delete(self, playlist_id: int) -> bool:
         """Supprime une playlist.

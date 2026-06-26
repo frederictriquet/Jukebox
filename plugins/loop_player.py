@@ -92,7 +92,9 @@ class LoopPlayerPlugin(SettingsSyncMixin):
             if stretch_index >= 0:
                 ui_builder.insert_widget_in_layout(layout, stretch_index, self.loop_button)
                 self.playlist_btn = QPushButton("→ playlist")
-                self.playlist_btn.setToolTip("Copier le morceau courant dans la dernière playlist utilisée")
+                self.playlist_btn.setToolTip(
+                    "Copier le morceau courant dans la dernière playlist utilisée"
+                )
                 self.playlist_btn.setMaximumWidth(100)
                 self.playlist_btn.setEnabled(False)
                 self.playlist_btn.setVisible(False)

@@ -371,15 +371,13 @@ class DirectoryNavigatorPlugin:
         filepaths = [row["filepath"] for row in rows]
 
         # Get playlists with track counts
-        playlist_rows = db.conn.execute(  # type: ignore[attr-defined]
-            """
+        playlist_rows = db.conn.execute("""
             SELECT p.id, p.name, COUNT(pt.track_id) as track_count
             FROM playlists p
             LEFT JOIN playlist_tracks pt ON p.id = pt.playlist_id
             GROUP BY p.id
             ORDER BY p.name
-            """
-        ).fetchall()
+            """).fetchall()  # type: ignore[attr-defined]
         playlists = [
             {"id": row["id"], "name": row["name"], "track_count": row["track_count"]}
             for row in playlist_rows

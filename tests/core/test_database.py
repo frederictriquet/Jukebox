@@ -230,8 +230,7 @@ class TestDatabase:
         assert db.conn is not None
 
         # Create old schema without mode column
-        db.conn.execute(
-            """
+        db.conn.execute("""
             CREATE TABLE tracks (
                 id INTEGER PRIMARY KEY,
                 filepath TEXT UNIQUE NOT NULL,
@@ -239,8 +238,7 @@ class TestDatabase:
                 title TEXT,
                 date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        """
-        )
+        """)
         db.conn.execute(
             "INSERT INTO tracks (filepath, filename, title) VALUES (?, ?, ?)",
             (str(tmp_path / "old.mp3"), "old.mp3", "Old Song"),

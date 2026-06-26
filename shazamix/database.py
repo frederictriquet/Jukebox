@@ -58,8 +58,7 @@ class FingerprintDB:
         with self._connection() as conn:
             # Main fingerprints table
             # Using hash as primary lookup, with index for fast querying
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS fingerprints (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     track_id INTEGER NOT NULL,
@@ -68,40 +67,32 @@ class FingerprintDB:
                     freq_bin INTEGER,
                     FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
                 )
-            """
-            )
+            """)
 
             # Index on hash for fast lookup during matching
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_fingerprints_hash
                 ON fingerprints(hash)
-            """
-            )
+            """)
 
             # Index on track_id for fast deletion/lookup by track
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_fingerprints_track_id
                 ON fingerprints(track_id)
-            """
-            )
+            """)
 
             # Track indexing status
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS fingerprint_status (
                     track_id INTEGER PRIMARY KEY,
                     fingerprint_count INTEGER NOT NULL,
                     indexed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
                 )
-            """
-            )
+            """)
 
             # Audio feature summaries (MFCC etc.) for similarity matching
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS audio_features (
                     track_id INTEGER NOT NULL,
                     feature_type TEXT NOT NULL,
@@ -110,8 +101,7 @@ class FingerprintDB:
                     PRIMARY KEY (track_id, feature_type),
                     FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
                 )
-            """
-            )
+            """)
 
             conn.commit()
 
@@ -201,13 +191,11 @@ class FingerprintDB:
             )
 
             # JOIN is faster than IN clause for large lists
-            rows = conn.execute(
-                """
+            rows = conn.execute("""
                 SELECT f.track_id, f.time_offset_ms, f.hash
                 FROM fingerprints f
                 INNER JOIN query_hashes q ON f.hash = q.hash
-                """
-            ).fetchall()
+                """).fetchall()
 
             conn.execute("DELETE FROM query_hashes")
 
@@ -275,15 +263,13 @@ class FingerprintDB:
             List of track dicts
         """
         with self._connection() as conn:
-            rows = conn.execute(
-                """
+            rows = conn.execute("""
                 SELECT t.id, t.filepath, t.filename, t.title, t.artist,
                        fs.fingerprint_count, fs.indexed_at
                 FROM tracks t
                 JOIN fingerprint_status fs ON t.id = fs.track_id
                 ORDER BY fs.indexed_at DESC
-                """
-            ).fetchall()
+                """).fetchall()
 
         return [dict(row) for row in rows]
 

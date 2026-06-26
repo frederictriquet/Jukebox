@@ -160,8 +160,7 @@ class Database:
             raise RuntimeError("Database not connected")
 
         # Tracks table
-        self.conn.execute(
-            """
+        self.conn.execute("""
             CREATE TABLE IF NOT EXISTS tracks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 filepath TEXT UNIQUE NOT NULL,
@@ -182,23 +181,19 @@ class Database:
                 play_count INTEGER DEFAULT 0,
                 last_played TIMESTAMP
             )
-        """
-        )
+        """)
 
         # FTS5 search index
-        self.conn.execute(
-            """
+        self.conn.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS tracks_fts USING fts5(
                 title, artist, album, album_artist, filename, genre,
                 content=tracks,
                 content_rowid=id
             )
-        """
-        )
+        """)
 
         # Triggers to keep FTS5 in sync
-        self.conn.executescript(
-            """
+        self.conn.executescript("""
             CREATE TRIGGER IF NOT EXISTS tracks_ai AFTER INSERT ON tracks BEGIN
                 INSERT INTO tracks_fts(rowid, title, artist, album, album_artist, filename, genre)
                 VALUES (new.id, new.title, new.artist, new.album, new.album_artist, new.filename, new.genre);
@@ -215,12 +210,10 @@ class Database:
                 INSERT INTO tracks_fts(rowid, title, artist, album, album_artist, filename, genre)
                 VALUES (new.id, new.title, new.artist, new.album, new.album_artist, new.filename, new.genre);
             END;
-        """
-        )
+        """)
 
         # Playlists
-        self.conn.executescript(
-            """
+        self.conn.executescript("""
             CREATE TABLE IF NOT EXISTS playlists (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
@@ -239,12 +232,10 @@ class Database:
                 FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE,
                 UNIQUE(playlist_id, track_id)
             );
-        """
-        )
+        """)
 
         # Play history
-        self.conn.execute(
-            """
+        self.conn.execute("""
             CREATE TABLE IF NOT EXISTS play_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 track_id INTEGER NOT NULL,
@@ -253,24 +244,20 @@ class Database:
                 completed BOOLEAN DEFAULT 0,
                 FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
             )
-        """
-        )
+        """)
 
         # Waveform cache
-        self.conn.execute(
-            """
+        self.conn.execute("""
             CREATE TABLE IF NOT EXISTS waveform_cache (
                 track_id INTEGER PRIMARY KEY,
                 waveform_data BLOB,
                 generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
             )
-        """
-        )
+        """)
 
         # Audio analysis
-        self.conn.execute(
-            """
+        self.conn.execute("""
             CREATE TABLE IF NOT EXISTS audio_analysis (
                 track_id INTEGER PRIMARY KEY,
                 tempo REAL,
@@ -285,8 +272,7 @@ class Database:
                 analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (track_id) REFERENCES tracks(id) ON DELETE CASCADE
             )
-        """
-        )
+        """)
 
         # Migrate schema to add ML features columns if they don't exist
         self._migrate_ml_features()
@@ -295,8 +281,7 @@ class Database:
         self._migrate_tracks_columns()
 
         # Plugin settings (runtime configuration overrides)
-        self.conn.execute(
-            """
+        self.conn.execute("""
             CREATE TABLE IF NOT EXISTS plugin_settings (
                 plugin_name TEXT NOT NULL,
                 setting_key TEXT NOT NULL,
@@ -304,8 +289,7 @@ class Database:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (plugin_name, setting_key)
             )
-        """
-        )
+        """)
 
         # Pas de commit explicite : la connexion est en mode autocommit
         # (isolation_level=None), chaque DDL/executescript est déjà persisté.

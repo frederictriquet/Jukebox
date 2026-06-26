@@ -702,8 +702,7 @@ class RpiVJPanel(QObject):
         # Bouton passage effet suivant
         self._next_effect_btn = QPushButton("NEXT EFFECT ▶")
         self._next_effect_btn.setFixedHeight(100)
-        self._next_effect_btn.setStyleSheet(
-            """
+        self._next_effect_btn.setStyleSheet("""
             QPushButton {
                 background: #1a1a3a;
                 color: #66aaff;
@@ -717,16 +716,14 @@ class RpiVJPanel(QObject):
                 color: white;
                 border-color: #4488ff;
             }
-        """
-        )
+        """)
         self._next_effect_btn.clicked.connect(self._on_next_effect)
         right_layout.addWidget(self._next_effect_btn)
 
         # Zone de tap beat (tactile)
         self._beat_btn = QPushButton("TAP BEAT")
         self._beat_btn.setFixedHeight(240)
-        self._beat_btn.setStyleSheet(
-            """
+        self._beat_btn.setStyleSheet("""
             QPushButton {
                 background: #2a2a2a;
                 color: #888;
@@ -740,8 +737,7 @@ class RpiVJPanel(QObject):
                 color: white;
                 border-color: #ff6622;
             }
-        """
-        )
+        """)
         self._beat_btn.pressed.connect(self._on_tap_beat)
         right_layout.addWidget(self._beat_btn)
 

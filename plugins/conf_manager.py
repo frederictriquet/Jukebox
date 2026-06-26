@@ -316,8 +316,7 @@ class ConfigDialog(QDialog):
 
         # Apply minimal styling (works for both light and dark themes)
         # Don't hardcode colors - let Qt use the system palette
-        self.setStyleSheet(
-            """
+        self.setStyleSheet("""
             QTabBar::tab {
                 padding: 8px 20px;
             }
@@ -333,8 +332,7 @@ class ConfigDialog(QDialog):
             QHeaderView::section {
                 padding: 6px;
             }
-            """
-        )
+            """)
 
         # Main layout
         layout = QVBoxLayout()

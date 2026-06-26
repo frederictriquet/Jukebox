@@ -21,8 +21,7 @@ def make_db(tmp_path: Path, jukebox_tracks: list[dict[str, Any]]) -> Path:
     """
     db_path = tmp_path / "test.db"
     conn = sqlite3.connect(str(db_path))
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE tracks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             filepath TEXT,
@@ -30,8 +29,7 @@ def make_db(tmp_path: Path, jukebox_tracks: list[dict[str, Any]]) -> Path:
             title TEXT,
             mode TEXT DEFAULT 'jukebox'
         )
-        """
-    )
+        """)
     for t in jukebox_tracks:
         conn.execute(
             "INSERT INTO tracks (filepath, artist, title, mode) VALUES (?, ?, ?, ?)",
