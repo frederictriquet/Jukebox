@@ -99,7 +99,10 @@ class LoopPlayerPlugin(SettingsSyncMixin):
                 self.playlist_btn.setEnabled(False)
                 self.playlist_btn.setVisible(False)
                 self.playlist_btn.clicked.connect(self._on_copy_to_last_playlist)
-                ui_builder.insert_widget_in_layout(layout, stretch_index + 1, self.playlist_btn)
+                # Ferré à droite : on insère le bouton juste après le stretch
+                # (stretch désormais à stretch_index + 1) pour qu'il se place du
+                # côté droit, juste avant le timer de replay.
+                ui_builder.insert_widget_in_layout(layout, stretch_index + 2, self.playlist_btn)
             else:
                 layout.addWidget(self.loop_button)
 
