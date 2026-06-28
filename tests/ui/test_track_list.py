@@ -336,3 +336,103 @@ class TestCommentColumn:
             updated = model.setData(index, "Nope", Qt.ItemDataRole.EditRole)
         assert updated is False
         mock_save.assert_not_called()
+
+    def test_existing_comment_displayed_via_add_track(self, qapp, tmp_path):  # type: ignore
+        """add_track loads a pre-existing comment from the DB (not a blank cell)."""
+        db = Database(tmp_path / "test.db")
+        db.connect()
+        db.initialize_schema()
+        audio = tmp_path / "song.mp3"
+        audio.write_bytes(b"fake mp3")
+        db.tracks.add(
+            {"filepath": str(audio), "filename": "song.mp3", "comment": "Pre-existing"},
+            mode="jukebox",
+        )
+        model = TrackListModel(database=db, mode="jukebox")
+        model.add_track(audio)
+        comment_col = model.cell_renderer.columns.index("comment")
+        index = model.index(0, comment_col)
+        assert model.data(index, Qt.ItemDataRole.DisplayRole) == "Pre-existing"
+        db.close()
+
+    def test_existing_comment_displayed_after_get_all(self, qapp, tmp_path):  # type: ignore
+        """A comment stored in DB shows up when reloading via get_all/load_tracks_batch."""
+        db = Database(tmp_path / "test.db")
+        db.connect()
+        db.initialize_schema()
+        audio = tmp_path / "song.mp3"
+        audio.write_bytes(b"fake mp3")
+        db.tracks.add(
+            {"filepath": str(audio), "filename": "song.mp3", "comment": "Loaded"},
+            mode="jukebox",
+        )
+        model = TrackListModel(database=db, mode="jukebox")
+        model.load_tracks_batch(db.tracks.get_all(mode="jukebox"))
+        comment_col = model.cell_renderer.columns.index("comment")
+        index = model.index(0, comment_col)
+        assert model.data(index, Qt.ItemDataRole.DisplayRole) == "Loaded"
+        db.close()
+
+    def test_set_comment_logs_when_db_row_missing(self, qapp, tmp_path, caplog):  # type: ignore
+        """A successful tag write but an unresolved DB id is logged, not swallowed."""
+        import logging
+
+        db, model, audio, track_id = self._make_model_with_db(tmp_path)
+        # Supprime la ligne en base : l'id n'est plus résolvable.
+        db.tracks.delete(track_id)
+        model.tracks[0]["_db_id"] = None
+        comment_col = model.cell_renderer.columns.index("comment")
+        index = model.index(0, comment_col)
+
+        with (
+            patch("jukebox.utils.tag_writer.save_audio_tags", return_value=True),
+            caplog.at_level(logging.ERROR),
+        ):
+            updated = model.setData(index, "Orphan", Qt.ItemDataRole.EditRole)
+
+        # Le tag fichier a été écrit : l'édition réussit côté modèle, mais
+        # l'impossibilité de persister en base est loguée (pas d'échec silencieux).
+        assert updated is True
+        assert any("introuvable" in rec.message for rec in caplog.records)
+        db.close()
+
+    def test_set_comment_logs_when_db_update_fails(self, qapp, tmp_path, caplog):  # type: ignore
+        """update_metadata returning False is logged instead of being ignored."""
+        import logging
+
+        db, model, audio, _ = self._make_model_with_db(tmp_path)
+        comment_col = model.cell_renderer.columns.index("comment")
+        index = model.index(0, comment_col)
+
+        with (
+            patch("jukebox.utils.tag_writer.save_audio_tags", return_value=True),
+            patch.object(db.tracks, "update_metadata", return_value=False),
+            caplog.at_level(logging.ERROR),
+        ):
+            updated = model.setData(index, "Whatever", Qt.ItemDataRole.EditRole)
+
+        assert updated is True
+        assert any("mise à jour du commentaire en base" in rec.message for rec in caplog.records)
+        db.close()
+
+    def test_set_comment_rejected_when_filepath_none(self, qapp, caplog):  # type: ignore
+        """A row without a filepath cannot persist a comment: edit is refused and logged."""
+        import logging
+
+        model = TrackListModel(mode="jukebox")
+        # Ligne sans filepath, insérée directement pour ne pas déclencher le
+        # background check (qui appellerait Path(None)).
+        model.tracks = [{"filepath": None, "comment": ""}]
+        comment_col = model.cell_renderer.columns.index("comment")
+        index = model.index(0, comment_col)
+
+        with (
+            patch("jukebox.utils.tag_writer.save_audio_tags", return_value=True) as mock_save,
+            caplog.at_level(logging.ERROR),
+        ):
+            updated = model.setData(index, "No path", Qt.ItemDataRole.EditRole)
+
+        assert updated is False
+        mock_save.assert_not_called()
+        assert (model.tracks[0].get("comment") or "") == ""
+        assert any("filepath manquant" in rec.message for rec in caplog.records)

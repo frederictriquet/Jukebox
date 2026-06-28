@@ -302,7 +302,7 @@ class TrackListModel(QAbstractTableModel):
 
         # Refresh track data from database
         track_db = self.database.conn.execute(
-            "SELECT artist, title, genre, duration_seconds FROM tracks WHERE filepath = ?",
+            "SELECT artist, title, genre, duration_seconds, comment FROM tracks WHERE filepath = ?",
             (str(filepath),),
         ).fetchone()
 
@@ -316,6 +316,7 @@ class TrackListModel(QAbstractTableModel):
                 track_db["genre"] or ""
             )  # intentional: rating parsed from genre
             self.tracks[row]["duration_seconds"] = track_db["duration_seconds"]
+            self.tracks[row]["comment"] = track_db["comment"] or ""
 
             # Emit dataChanged to update the view
             left_index = self.index(row, 0)
@@ -562,28 +563,49 @@ class TrackListModel(QAbstractTableModel):
             return False  # Pas de changement
 
         filepath = track.get("filepath")
+        # Sans filepath on ne peut ni écrire le tag ni résoudre la ligne DB :
+        # mettre à jour le modèle en mémoire seul créerait une divergence silencieuse.
+        if filepath is None:
+            logging.error(
+                "[TrackListModel] Édition du commentaire impossible : filepath manquant "
+                "(ligne %d)",
+                index.row(),
+            )
+            return False
 
         # [M32] Invariant fichier-d'abord : on écrit le TAG du fichier audio AVANT
         # la base de données. La DB (et le modèle en mémoire) ne sont mis à jour
         # QUE si l'écriture du tag a réussi, afin d'éviter toute divergence
         # DB/fichier en cas d'échec d'écriture du tag.
-        if filepath is not None:
-            from jukebox.utils.tag_writer import save_audio_tags
+        from jukebox.utils.tag_writer import save_audio_tags
 
-            if not save_audio_tags(str(filepath), {"comment": new_comment}):
-                # Pas d'échec silencieux : la DB reste inchangée, on logue l'erreur.
-                logging.error("[TrackListModel] Échec d'écriture du tag comment pour %s", filepath)
-                return False
+        if not save_audio_tags(str(filepath), {"comment": new_comment}):
+            # Pas d'échec silencieux : la DB reste inchangée, on logue l'erreur.
+            logging.error("[TrackListModel] Échec d'écriture du tag comment pour %s", filepath)
+            return False
 
         # Le tag est écrit : la DB peut être mise à jour sans risque de divergence.
-        if self.database is not None and filepath is not None:
+        if self.database is not None:
             track_id = track.get("_db_id")
             if track_id is None:
                 db_track = self.database.tracks.get_by_filepath(str(filepath))
                 if db_track:
                     track_id = db_track.get("id")
-            if track_id is not None:
-                self.database.tracks.update_metadata(int(track_id), {"comment": new_comment})
+            if track_id is None:
+                # Pas d'échec silencieux : le tag fichier a été écrit mais la ligne
+                # DB est introuvable, on logue la divergence.
+                logging.error(
+                    "[TrackListModel] Commentaire non persisté en base : id introuvable pour %s",
+                    filepath,
+                )
+            elif not self.database.tracks.update_metadata(int(track_id), {"comment": new_comment}):
+                # update_metadata renvoie False si aucune ligne n'a été modifiée.
+                logging.error(
+                    "[TrackListModel] Échec de mise à jour du commentaire en base pour %s "
+                    "(track_id=%s)",
+                    filepath,
+                    track_id,
+                )
 
         # Mise à jour du modèle en mémoire seulement après les écritures réussies.
         track["comment"] = new_comment
@@ -591,7 +613,7 @@ class TrackListModel(QAbstractTableModel):
         self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole])
 
         # Notifie les autres vues qu'une métadonnée a changé (api-contract).
-        if self.event_bus is not None and filepath is not None:
+        if self.event_bus is not None:
             self.event_bus.emit(Events.TRACK_METADATA_UPDATED, filepath=filepath)
 
         return True
@@ -650,14 +672,18 @@ class TrackListModel(QAbstractTableModel):
         # Load waveform and stats info from cache if available
         waveform = None
         has_stats = False
+        comment = ""
+        track_db_id: int | None = None
         if self.database and self.database.conn is not None:
-            # Get track_id from filepath
+            # Get track_id + commentaire existant depuis la DB
             track_db = self.database.conn.execute(
-                "SELECT id FROM tracks WHERE filepath = ?", (str(filepath),)
+                "SELECT id, comment FROM tracks WHERE filepath = ?", (str(filepath),)
             ).fetchone()
 
             if track_db:
                 track_id = track_db["id"]
+                track_db_id = track_id
+                comment = track_db["comment"] or ""
 
                 # Load waveform from cache
                 waveform_cache = self.database.conn.execute(
@@ -694,13 +720,14 @@ class TrackListModel(QAbstractTableModel):
             "genre": genre or "",
             "rating": genre or "",  # RatingStyler extracts from genre
             "duration_seconds": duration_seconds,
-            "comment": "",
+            "comment": comment,
             "date_added": date_added,
             "waveform_data": waveform,
             "has_stats": has_stats,  # For StatsStyler
             "duplicate_status": "pending",  # Updated by background worker
             "duplicate_match": None,
             "file_missing": False,  # Updated asynchronously after UI display
+            "_db_id": track_db_id,
         }
 
         row = len(self.tracks)

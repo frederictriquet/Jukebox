@@ -168,6 +168,46 @@ class TestTrackRepositoryAdd:
         assert row["artist"] is None
         assert row["album"] is None
 
+    def test_add_persists_comment(self, tmp_path: Path) -> None:
+        """A comment extracted from a file tag is stored in the DB."""
+        db = make_db(tmp_path)
+        track_id = db.tracks.add(sample_track(comment="Tagged comment"))
+        row = db.tracks.get_by_id(track_id)
+        assert row is not None
+        assert row["comment"] == "Tagged comment"
+
+    def test_add_without_comment_defaults_to_none(self, tmp_path: Path) -> None:
+        """A track added without a comment stores NULL (no spurious empty string)."""
+        db = make_db(tmp_path)
+        track_id = db.tracks.add(sample_track())
+        row = db.tracks.get_by_id(track_id)
+        assert row is not None
+        assert row["comment"] is None
+
+    def test_add_rescan_without_comment_preserves_existing(self, tmp_path: Path) -> None:
+        """Re-scanning a file with no comment tag must not wipe a stored comment.
+
+        COALESCE protège les commentaires déjà présents (ex. valeur migrée ou éditée)
+        lorsqu'un re-scan apporte un track_data sans clé `comment`.
+        """
+        db = make_db(tmp_path)
+        db.tracks.add(sample_track(comment="Keep me"))
+        # Re-scan : même filepath, aucun commentaire fourni.
+        db.tracks.add(sample_track(title="Rescanned"))
+        rows = db.tracks.get_all()
+        assert len(rows) == 1
+        assert rows[0]["title"] == "Rescanned"
+        assert rows[0]["comment"] == "Keep me"
+
+    def test_add_rescan_with_comment_overwrites(self, tmp_path: Path) -> None:
+        """Re-scanning with a new comment tag updates the stored comment."""
+        db = make_db(tmp_path)
+        db.tracks.add(sample_track(comment="Old"))
+        db.tracks.add(sample_track(comment="New"))
+        rows = db.tracks.get_all()
+        assert len(rows) == 1
+        assert rows[0]["comment"] == "New"
+
 
 class TestTrackRepositoryGetAll:
     """Tests for TrackRepository.get_all."""

@@ -66,6 +66,7 @@ class TrackRepository(BaseRepository):
             track_data.get("sample_rate"),
             track_data.get("file_size"),
             track_data.get("date_modified"),
+            track_data.get("comment"),
             mode,
         )
 
@@ -78,8 +79,8 @@ class TrackRepository(BaseRepository):
             INSERT OR IGNORE INTO tracks (
                 filepath, filename, title, artist, album, album_artist,
                 genre, year, track_number, duration_seconds, bitrate,
-                sample_rate, file_size, date_modified, mode
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                sample_rate, file_size, date_modified, comment, mode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (filepath, *values),
         )
@@ -89,12 +90,16 @@ class TrackRepository(BaseRepository):
             track_id = int(cursor.lastrowid) if cursor.lastrowid is not None else 0
         else:
             # Piste déjà présente (filepath UNIQUE) : mise à jour sur place.
+            # COALESCE pour `comment` : un re-scan d'un fichier sans tag commentaire
+            # ne doit pas écraser un commentaire déjà présent en base (ex. valeur
+            # migrée depuis l'ancienne colonne `description` ou éditée par l'utilisateur).
             self._conn.execute(
                 """
                 UPDATE tracks SET
                     filename = ?, title = ?, artist = ?, album = ?, album_artist = ?,
                     genre = ?, year = ?, track_number = ?, duration_seconds = ?,
-                    bitrate = ?, sample_rate = ?, file_size = ?, date_modified = ?, mode = ?
+                    bitrate = ?, sample_rate = ?, file_size = ?, date_modified = ?,
+                    comment = COALESCE(?, comment), mode = ?
                 WHERE filepath = ?
             """,
                 (*values, filepath),
