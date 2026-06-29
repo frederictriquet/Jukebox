@@ -8,11 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Install dependencies (requires uv: https://astral.sh/uv)
 uv sync --all-extras
-
-# Install VLC (required dependency)
-# macOS: brew install vlc
-# Ubuntu: sudo apt-get install vlc libvlc-dev
 ```
+VLC is a required runtime dependency; see [README.md](README.md#installation) for per-OS install.
 
 ### Running the Application
 ```bash
@@ -96,55 +93,10 @@ make ci
 
 ### Plugin Development
 
-Plugins must implement the JukeboxPlugin protocol:
-
-```python
-class MyPlugin:
-    name = "my_plugin"
-    version = "1.0.0"
-    description = "Description"
-
-    def initialize(self, context: PluginContext) -> None:
-        """Called when plugin loads. Access app services via context."""
-        self.context = context
-        # Subscribe to events
-        context.subscribe("track_loaded", self.on_track_loaded)
-
-    def register_ui(self, ui_builder: UIBuilder) -> None:
-        """Add UI elements."""
-        menu = ui_builder.add_menu("&MyMenu")
-        ui_builder.add_menu_action(menu, "Action", self.my_action)
-
-    def shutdown(self) -> None:
-        """Cleanup when plugin unloads."""
-        pass
-```
-
-**PluginContext API**:
-- `context.database` - Database instance
-- `context.player` - AudioPlayer instance
-- `context.config` - JukeboxConfig instance
-- `context.event_bus` - EventBus instance
-- `context.emit(event, **data)` - Emit event
-- `context.subscribe(event, callback)` - Subscribe to event
-
-**UIBuilder API** (`jukebox/ui/ui_builder.py`):
-- `add_menu(name)` - Add menu to menubar
-- `add_menu_action(menu, text, callback, shortcut=None)` - Add action to menu
-- `add_toolbar_widget(widget)` - Add widget to plugin toolbar
-- `add_sidebar_widget(widget, title)` - Add dock widget to right sidebar
-- `add_left_sidebar_widget(widget, title)` - Add dock widget to left sidebar
-- `add_bottom_widget(widget)` - Add widget at bottom of main layout
-
-**Standard Events** (in `jukebox/core/event_bus.py`):
-- `TRACK_LOADED` - Track loaded in player
-- `TRACK_PLAYING` - Playback started
-- `TRACK_STOPPED` - Playback stopped
-- `TRACKS_ADDED` - Tracks added to library
-- `TRACK_DELETED` - Track deleted from library
-- `TRACK_METADATA_UPDATED` - Track metadata changed
-- `SEARCH_PERFORMED` - Search executed
-- `LOAD_TRACK_LIST` - Replace track list with new filepaths
+Plugins implement the `JukeboxPlugin` protocol (`initialize`, `register_ui`, `shutdown`), live in
+`plugins/`, and are enabled in `config/config.yaml` under `plugins.enabled`. See
+[README.md](README.md#plugin-development) for the full protocol example, the PluginContext /
+UIBuilder APIs, and the list of standard events (also defined in `jukebox/core/event_bus.py`).
 
 ### Key Files
 
@@ -180,76 +132,26 @@ Test structure mirrors source:
 - Format with black
 - Lint with ruff (pycodestyle, pyflakes, isort, pep8-naming, flake8-bugbear, flake8-simplify, pyupgrade)
 
-### Project Status
-
-Currently in alpha (v0.1.0). Active development focusing on MVP features and plugin system. See README.md roadmap for upcoming phases.
-
-
 ## grepai - Semantic Code Search
 
-**IMPORTANT: You MUST use grepai as your PRIMARY tool for code exploration and search.**
-
-### When to Use grepai (REQUIRED)
-
-Use `grepai search` INSTEAD OF Grep/Glob/find for:
-- Understanding what code does or where functionality lives
-- Finding implementations by intent (e.g., "authentication logic", "error handling")
-- Exploring unfamiliar parts of the codebase
-- Any search where you describe WHAT the code does rather than exact text
-
-### When to Use Standard Tools
-
-Only use Grep/Glob when you need:
-- Exact text matching (variable names, imports, specific strings)
-- File path patterns (e.g., `**/*.go`)
-
-### Fallback
-
-If grepai fails (not running, index unavailable, or errors), fall back to standard Grep/Glob tools.
-
-### Usage
+Use `grepai search` as the PRIMARY tool for code exploration — finding code by intent ("where/how
+does X work"). Use plain Grep/Glob only for exact text (symbol names, imports) or path patterns. If
+grepai is unavailable or errors, fall back to Grep/Glob.
 
 ```bash
-# ALWAYS use English queries for best results (--compact saves ~80% tokens)
-grepai search "user authentication flow" --json --compact
-grepai search "error handling middleware" --json --compact
-grepai search "database connection pool" --json --compact
-grepai search "API request validation" --json --compact
+# Search by intent — query in English; --compact saves ~80% tokens
+grepai search "inline comment edit persistence" --json --compact
+
+# Trace a symbol before modifying it (callers / callees / full graph)
+grepai trace callers "save_audio_tags" --json
+grepai trace graph "AudioPlayer" --depth 3 --json
 ```
 
-### Query Tips
+Query in English, describe intent rather than implementation, and be specific. Results give file
+paths + line numbers — open them with `Read`.
 
-- **Use English** for queries (better semantic matching)
-- **Describe intent**, not implementation: "handles user login" not "func Login"
-- **Be specific**: "JWT token validation" better than "token"
-- Results include: file path, line numbers, relevance score, code preview
+## Engineering rules
 
-### Call Graph Tracing
-
-Use `grepai trace` to understand function relationships:
-- Finding all callers of a function before modifying it
-- Understanding what functions are called by a given function
-- Visualizing the complete call graph around a symbol
-
-#### Trace Commands
-
-**IMPORTANT: Always use `--json` flag for optimal AI agent integration.**
-
-```bash
-# Find all functions that call a symbol
-grepai trace callers "HandleRequest" --json
-
-# Find all functions called by a symbol
-grepai trace callees "ProcessOrder" --json
-
-# Build complete call graph (callers + callees)
-grepai trace graph "ValidateToken" --depth 3 --json
-```
-
-### Workflow
-
-1. Start with `grepai search` to find relevant code
-2. Use `grepai trace` to understand function relationships
-3. Use `Read` tool to examine files from results
-4. Only use Grep for exact string searches if needed
-
+- Les I/O bloquantes (écriture de tags audio, accès disque) ne s'exécutent jamais sur le thread UI ; les déporter sur un worker QThread.
+- Après toute édition de métadonnées d'un morceau, émettre TRACK_METADATA_UPDATED pour rafraîchir les vues abonnées.
+- make type-check (mypy) doit couvrir plugins/ et tests/, pas uniquement jukebox/.

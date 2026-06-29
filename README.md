@@ -170,7 +170,58 @@ Switch to Cue Maker mode: **Mode** → **Cue Maker Mode**
 
 ### Plugin Development
 
-See [CLAUDE.md](CLAUDE.md#plugin-development) for plugin development guide and architecture details.
+Plugins live in `plugins/` and are enabled in `config/config.yaml` under `plugins.enabled`.
+A plugin implements the `JukeboxPlugin` protocol:
+
+```python
+class MyPlugin:
+    name = "my_plugin"
+    version = "1.0.0"
+    description = "Description"
+
+    def initialize(self, context: PluginContext) -> None:
+        """Called when plugin loads. Access app services via context."""
+        self.context = context
+        # Subscribe to events
+        context.subscribe("track_loaded", self.on_track_loaded)
+
+    def register_ui(self, ui_builder: UIBuilder) -> None:
+        """Add UI elements."""
+        menu = ui_builder.add_menu("&MyMenu")
+        ui_builder.add_menu_action(menu, "Action", self.my_action)
+
+    def shutdown(self) -> None:
+        """Cleanup when plugin unloads."""
+        pass
+```
+
+**PluginContext API**:
+- `context.database` - Database instance
+- `context.player` - AudioPlayer instance
+- `context.config` - JukeboxConfig instance
+- `context.event_bus` - EventBus instance
+- `context.emit(event, **data)` - Emit event
+- `context.subscribe(event, callback)` - Subscribe to event
+
+**UIBuilder API** (`jukebox/ui/ui_builder.py`):
+- `add_menu(name)` - Add menu to menubar
+- `add_menu_action(menu, text, callback, shortcut=None)` - Add action to menu
+- `add_toolbar_widget(widget)` - Add widget to plugin toolbar
+- `add_sidebar_widget(widget, title)` - Add dock widget to right sidebar
+- `add_left_sidebar_widget(widget, title)` - Add dock widget to left sidebar
+- `add_bottom_widget(widget)` - Add widget at bottom of main layout
+
+**Standard Events** (in `jukebox/core/event_bus.py`):
+- `TRACK_LOADED` - Track loaded in player
+- `TRACK_PLAYING` - Playback started
+- `TRACK_STOPPED` - Playback stopped
+- `TRACKS_ADDED` - Tracks added to library
+- `TRACK_DELETED` - Track deleted from library
+- `TRACK_METADATA_UPDATED` - Track metadata changed
+- `SEARCH_PERFORMED` - Search executed
+- `LOAD_TRACK_LIST` - Replace track list with new filepaths
+
+For architecture and core-services details, see [CLAUDE.md](CLAUDE.md#architecture-overview).
 
 ## Development
 
