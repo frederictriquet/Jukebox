@@ -436,3 +436,79 @@ class TestCommentColumn:
         mock_save.assert_not_called()
         assert (model.tracks[0].get("comment") or "") == ""
         assert any("filepath manquant" in rec.message for rec in caplog.records)
+
+
+class TestCommentColumnSorting:
+    """Tests for sorting the comment column (jukebox mode)."""
+
+    def _make_model_with_comments(self, comments):
+        """Build a jukebox-mode model loaded with tracks carrying the given comments.
+
+        Each comment is keyed to a unique filepath so the resulting order can be
+        read back from the comment values themselves.
+        """
+        model = TrackListModel(mode="jukebox")
+        tracks = [
+            {"filepath": f"/tmp/track_{i}.mp3", "comment": comment}
+            for i, comment in enumerate(comments)
+        ]
+        model.load_tracks_batch(tracks)
+        return model
+
+    @staticmethod
+    def _comments_in_order(model):
+        """Return the comment of each row in current model order."""
+        return [track.get("comment") or "" for track in model.tracks]
+
+    def test_comment_sort_ascending(self, qapp):  # type: ignore
+        """Clicking the comment header sorts by comment, not by date_added."""
+        model = self._make_model_with_comments(["charlie", "alpha", "bravo"])
+        comment_col = model.cell_renderer.columns.index("comment")
+
+        model.sort(comment_col, Qt.SortOrder.AscendingOrder)
+
+        assert self._comments_in_order(model) == ["alpha", "bravo", "charlie"]
+
+    def test_comment_sort_descending(self, qapp):  # type: ignore
+        """Descending order reverses the alphabetical comment order."""
+        model = self._make_model_with_comments(["charlie", "alpha", "bravo"])
+        comment_col = model.cell_renderer.columns.index("comment")
+
+        model.sort(comment_col, Qt.SortOrder.DescendingOrder)
+
+        assert self._comments_in_order(model) == ["charlie", "bravo", "alpha"]
+
+    def test_comment_sort_is_case_insensitive(self, qapp):  # type: ignore
+        """Sorting ignores case (e.g. 'apple' before 'Banana')."""
+        model = self._make_model_with_comments(["Banana", "apple", "Cherry"])
+        comment_col = model.cell_renderer.columns.index("comment")
+
+        model.sort(comment_col, Qt.SortOrder.AscendingOrder)
+
+        assert self._comments_in_order(model) == ["apple", "Banana", "Cherry"]
+
+    def test_comment_sort_empty_values_last(self, qapp):  # type: ignore
+        """Empty comments are grouped at the end in ascending order."""
+        model = self._make_model_with_comments(["zulu", "", "alpha", "   "])
+        comment_col = model.cell_renderer.columns.index("comment")
+
+        model.sort(comment_col, Qt.SortOrder.AscendingOrder)
+
+        ordered = self._comments_in_order(model)
+        # Les deux premiers sont les commentaires non vides, triés alphabétiquement.
+        assert ordered[:2] == ["alpha", "zulu"]
+        # Les deux derniers sont les commentaires vides (chaîne vide ou blancs).
+        assert all(c.strip() == "" for c in ordered[2:])
+
+    def test_comment_sort_toggles_with_order(self, qapp):  # type: ignore
+        """Alternating the order produces opposite (non-empty) orderings."""
+        model = self._make_model_with_comments(["bravo", "alpha", "charlie"])
+        comment_col = model.cell_renderer.columns.index("comment")
+
+        model.sort(comment_col, Qt.SortOrder.AscendingOrder)
+        ascending = self._comments_in_order(model)
+
+        model.sort(comment_col, Qt.SortOrder.DescendingOrder)
+        descending = self._comments_in_order(model)
+
+        assert ascending == list(reversed(descending))

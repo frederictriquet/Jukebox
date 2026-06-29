@@ -631,6 +631,12 @@ class TrackListModel(QAbstractTableModel):
             "title": lambda t: (t.get("title") or "").lower(),
             "filename": lambda t: (t.get("filename") or "").lower(),
             "genre": lambda t: (t.get("genre") or "").lower(),
+            # Tri alphabétique insensible à la casse ; les commentaires vides sont
+            # regroupés en dernier (clé booléenne True triée après False).
+            "comment": lambda t: (
+                not (t.get("comment") or "").strip(),
+                (t.get("comment") or "").strip().lower(),
+            ),
             "duration": lambda t: t.get("duration_seconds") or 0.0,
             "rating": lambda t: next(
                 (
