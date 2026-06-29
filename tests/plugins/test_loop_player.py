@@ -1,5 +1,6 @@
 """Tests for the loop player plugin UI placement."""
 
+import logging
 from unittest.mock import Mock
 
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
@@ -326,6 +327,33 @@ def test_playlists_changed_noop_when_db_disconnected(qapp) -> None:  # type: ign
     # État inchangé : pas d'appel à get_all, raccourci conservé.
     plugin.context.database.playlists.get_all.assert_not_called()
     assert plugin._recent_playlists == [(1, "Alpha")]
+
+
+def test_playlists_changed_handles_get_all_error(qapp, caplog) -> None:  # type: ignore[no-untyped-def]
+    """Si get_all() lève, le handler logue l'erreur sans planter ni altérer l'état."""
+    plugin, _ = _make_plugin(qapp)
+    plugin.activate("jukebox")
+    plugin._on_track_added_to_playlist(1, "Alpha")
+    plugin._on_track_added_to_playlist(2, "Beta")
+
+    # get_all échoue (ex. erreur SQLite) alors que la connexion est établie.
+    plugin.context.database.conn = object()
+    plugin.context.database.playlists.get_all.side_effect = RuntimeError("DB boom")
+
+    with caplog.at_level(logging.ERROR, logger="plugins.loop_player"):
+        plugin._on_playlists_changed()  # ne doit pas propager
+
+    # L'erreur est loguée (pas avalée silencieusement) avec sa trace d'exception.
+    error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert error_records, "aucune erreur loguée"
+    assert any("rafraîchissement" in r.getMessage() for r in error_records)
+    assert any(r.exc_info is not None for r in error_records)
+    # L'état des raccourcis reste cohérent (inchangé).
+    assert plugin._recent_playlists == [(2, "Beta"), (1, "Alpha")]
+    assert plugin._playlist_buttons[0].text() == "→ Beta"
+    assert plugin._playlist_buttons[1].text() == "→ Alpha"
+    assert plugin._playlist_buttons[0].isEnabled() is True
+    assert plugin._playlist_buttons[1].isEnabled() is True
 
 
 def test_long_playlist_name_is_elided(qapp) -> None:  # type: ignore[no-untyped-def]
