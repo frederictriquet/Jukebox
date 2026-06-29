@@ -155,3 +155,4 @@ paths + line numbers — open them with `Read`.
 - Les I/O bloquantes (écriture de tags audio, accès disque) ne s'exécutent jamais sur le thread UI ; les déporter sur un worker QThread.
 - Après toute édition de métadonnées d'un morceau, émettre TRACK_METADATA_UPDATED pour rafraîchir les vues abonnées.
 - make type-check (mypy) doit couvrir plugins/ et tests/, pas uniquement jukebox/.
+- Toute nouvelle branche conditionnelle ou comportement limite (fallback, valeur vide/blanche, ordre de tri, chemin d'erreur) DOIT être couvert par un test ; pas de branche non testée.
