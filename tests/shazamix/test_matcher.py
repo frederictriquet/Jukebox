@@ -101,7 +101,7 @@ class TestBestSustainedRun:
         r = q.copy()
 
         # With identical constant features, the best run equals frame_count.
-        run, avg = Matcher._best_sustained_run(q, r, slide_step=1, min_overlap=5, threshold=0.9)
+        run, _ = Matcher._best_sustained_run(q, r, slide_step=1, min_overlap=5, threshold=0.9)
         assert run == frame_count
 
     def test_returns_avg_sim_in_best_run(self) -> None:
@@ -109,7 +109,7 @@ class TestBestSustainedRun:
         from shazamix.matcher import Matcher
 
         feat = _unit_columns(np.random.rand(32, 50))
-        run, avg = Matcher._best_sustained_run(
+        _, avg = Matcher._best_sustained_run(
             feat, feat, slide_step=5, min_overlap=5, threshold=0.9
         )
         assert 0.9 <= avg <= 1.0 + 1e-6  # within threshold, at most 1.0

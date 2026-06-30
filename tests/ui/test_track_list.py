@@ -252,7 +252,7 @@ class TestCommentColumn:
 
     def test_set_comment_no_change_returns_false(self, qapp, tmp_path):  # type: ignore
         """Setting the same comment value is a no-op and skips the tag write."""
-        db, model, audio, _ = self._make_model_with_db(tmp_path)
+        db, model, _, _ = self._make_model_with_db(tmp_path)
         comment_col = model.cell_renderer.columns.index("comment")
         index = model.index(0, comment_col)
 
@@ -273,7 +273,7 @@ class TestCommentColumn:
         """
         import logging
 
-        db, model, audio, track_id = self._make_model_with_db(tmp_path)
+        db, model, _, track_id = self._make_model_with_db(tmp_path)
         comment_col = model.cell_renderer.columns.index("comment")
         index = model.index(0, comment_col)
 
@@ -377,7 +377,7 @@ class TestCommentColumn:
         """A successful tag write but an unresolved DB id is logged, not swallowed."""
         import logging
 
-        db, model, audio, track_id = self._make_model_with_db(tmp_path)
+        db, model, _, track_id = self._make_model_with_db(tmp_path)
         # Delete the row from the database: the id is no longer resolvable.
         db.tracks.delete(track_id)
         model.tracks[0]["_db_id"] = None
@@ -400,7 +400,7 @@ class TestCommentColumn:
         """update_metadata returning False is logged instead of being ignored."""
         import logging
 
-        db, model, audio, _ = self._make_model_with_db(tmp_path)
+        db, model, _, _ = self._make_model_with_db(tmp_path)
         comment_col = model.cell_renderer.columns.index("comment")
         index = model.index(0, comment_col)
 

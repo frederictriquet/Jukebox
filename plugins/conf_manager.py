@@ -400,14 +400,13 @@ class ConfigDialog(QDialog):
                 continue
 
             # Build tab for this plugin
-            self._add_dynamic_tab(plugin_name, plugin, schema)
+            self._add_dynamic_tab(plugin_name, schema)
 
-    def _add_dynamic_tab(self, plugin_name: str, plugin: Any, schema: dict[str, Any]) -> None:
+    def _add_dynamic_tab(self, plugin_name: str, schema: dict[str, Any]) -> None:
         """Build a tab dynamically from plugin settings schema.
 
         Args:
             plugin_name: Name of the plugin
-            plugin: Plugin instance
             schema: Settings schema dict with format:
                 {
                     "setting_key": {

@@ -328,7 +328,7 @@ class WaveformVisualizerPlugin(SettingsSyncMixin):
 
     def _on_batch_waveform_error(self, item: tuple[int, str], error: str) -> None:
         """Handle batch waveform error."""
-        track_id, filepath = item
+        _, filepath = item
         import os
 
         filename = os.path.basename(filepath)

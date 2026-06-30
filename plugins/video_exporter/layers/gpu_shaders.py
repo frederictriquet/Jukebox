@@ -638,7 +638,6 @@ class GPUShaderRenderer:
         energy: float = 0.5,
         bass: float = 0.5,
         mid: float = 0.5,
-        treble: float = 0.5,
         intensity: float = 0.7,
         palette: list[tuple[int, int, int]] | None = None,
     ) -> Image.Image | None:
@@ -650,7 +649,6 @@ class GPUShaderRenderer:
             energy: Audio energy (0-1).
             bass: Bass energy (0-1).
             mid: Mid energy (0-1).
-            treble: Treble energy (0-1).
             intensity: Effect intensity (0-1).
             palette: List of 5 RGB tuples (0-255) for colors. Defaults to neon palette.
 

@@ -331,7 +331,7 @@ class AudioAnalyzerPlugin:
 
     def _on_batch_analysis_error(self, item: tuple[int, str], error: str) -> None:
         """Handle batch analysis error."""
-        track_id, filepath = item
+        _, filepath = item
         filename = os.path.basename(filepath)
         # DEBUG level: show which file failed (BatchProcessor already logged the error)
         logging.debug(f"[Batch Analysis] Failed file: {filename}")

@@ -896,7 +896,6 @@ class VJingLayer(BaseVisualLayer):
                     energy=ctx["energy"],
                     bass=ctx["bass"],
                     mid=ctx["mid"],
-                    treble=ctx["treble"],
                     intensity=effect_intensity,
                     palette=self.color_palette,
                 )
@@ -955,7 +954,6 @@ class VJingLayer(BaseVisualLayer):
             energy=ctx.get("energy", 0.5),
             bass=ctx.get("bass", 0.5),
             mid=ctx.get("mid", 0.5),
-            treble=ctx.get("treble", 0.5),
             intensity=self._current_intensity,
             palette=self.color_palette,
         )
@@ -5026,11 +5024,6 @@ class VJingLayer(BaseVisualLayer):
     # Dwitter transcriptions
     # ------------------------------------------------------------------
 
-    def _init_emission(self) -> None:
-        self._emission_buf: np.ndarray | None = None
-        self._emission_lut: np.ndarray | None = None
-        self._emission_lut_key: str = ""
-
     @vj_effect("Emission", "Particules")
     def _render_emission(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
@@ -5054,11 +5047,11 @@ class VJingLayer(BaseVisualLayer):
         buf *= 0.88 - energy * 0.04  # faster fade when energetic
 
         # Palette gradient LUT (512 entries, cached until palette changes).
-        # Defensive getattr: _init_emission is never called, the attributes
-        # only exist after the first construction below (lut is None
-        # short-circuits the access to _emission_lut_key on the first render).
+        # Defensive getattr: the LUT attributes are lazily created on the first
+        # render (lut is None short-circuits the access to _emission_lut_key on
+        # the first render).
         lut: np.ndarray | None = getattr(self, "_emission_lut", None)
-        if lut is None or self._emission_lut_key != self.color_palette_name:
+        if lut is None or getattr(self, "_emission_lut_key", "") != self.color_palette_name:
             palette = self.color_palette
             n_c = len(palette)
             lut = np.zeros((512, 3), dtype=np.float32)

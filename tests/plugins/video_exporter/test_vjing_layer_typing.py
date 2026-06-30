@@ -128,7 +128,7 @@ def test_nebula_lazy_grid_creation_and_reuse(layer: VJingLayer) -> None:
 def test_emission_lut_built_then_cached(layer: VJingLayer) -> None:
     """The emission LUT is built on the 1st render (attribute absent) then cached."""
     img = layer.create_transparent_image()
-    # _init_emission is never called: the attribute does not exist before the 1st render.
+    # The emission LUT is created lazily: the attribute does not exist before the 1st render.
     assert not hasattr(layer, "_emission_lut")
     layer._render_emission(img, frame_idx=0, time_pos=0.0, ctx=_ctx())
     lut_first = layer._emission_lut

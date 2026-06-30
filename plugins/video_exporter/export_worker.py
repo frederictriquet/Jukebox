@@ -59,6 +59,26 @@ class VideoExportWorker(QThread):
         except Exception as e:
             logging.exception("[Video Export Worker] Export failed")
             self.error.emit(str(e))
+        finally:
+            self._release_gpu_context()
+
+    def _release_gpu_context(self) -> None:
+        """Release the thread-local GPU/OpenGL context created during export.
+
+        GPU pre-rendering (``FrameRenderer.prerender_gpu``) runs on this worker
+        thread and allocates a native OpenGL context stored in a
+        ``threading.local``. Releasing it here, on the same thread, destroys the
+        native resource deterministically instead of leaving it alive until
+        interpreter finalization, where it can segfault among the native
+        finalizers (moderngl / numpy / scipy) that run in a non-deterministic
+        order. The call is a safe no-op when no context was allocated.
+        """
+        try:
+            from plugins.video_exporter.layers.gpu_shaders import release_shared_gl_context
+
+            release_shared_gl_context()
+        except Exception:
+            logging.exception("[Video Export Worker] Failed to release GPU context")
 
     def cancel(self) -> None:
         """Cancel the export process."""

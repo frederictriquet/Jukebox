@@ -445,12 +445,11 @@ class TrackListModel(QAbstractTableModel):
             stats_index = self.index(row, stats_col)
             self.dataChanged.emit(stats_index, stats_index, [])
 
-    def _on_track_deleted(self, filepath: Path, deleted_row: int | None = None) -> None:
+    def _on_track_deleted(self, filepath: Path) -> None:
         """Handle track deletion event.
 
         Args:
             filepath: Path of the track that was deleted
-            deleted_row: Row that was deleted (optional, for logging)
         """
         logging.info(f"[TrackListModel] Received TRACK_DELETED for: {filepath}")
 
