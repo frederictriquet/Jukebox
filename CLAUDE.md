@@ -156,3 +156,4 @@ paths + line numbers — open them with `Read`.
 - Après toute édition de métadonnées d'un morceau, émettre TRACK_METADATA_UPDATED pour rafraîchir les vues abonnées.
 - make type-check (mypy) doit couvrir plugins/ et tests/, pas uniquement jukebox/.
 - Toute nouvelle branche conditionnelle ou comportement limite (fallback, valeur vide/blanche, ordre de tri, chemin d'erreur) DOIT être couvert par un test ; pas de branche non testée.
+- Interdire les # type: ignore et suppressions mypy/pyright génériques (module-wide, follow_imports=silent) qui masquent de vraies erreurs ; cibler chaque ignore sur un code d'erreur précis et justifié en commentaire.
