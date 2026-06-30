@@ -120,8 +120,8 @@ class TextLayer(BaseVisualLayer):
 
         # Calculate text positions
         margin = 40
-        # Marge supérieure dynamique : au moins 110 px ou 15 % de la hauteur,
-        # pour respecter la safe zone Instagram Reels (l'UI masque ~100 px en haut)
+        # Dynamic top margin: at least 110 px or 15% of the height,
+        # to respect the Instagram Reels safe zone (the UI hides ~100 px at the top)
         margin_top = max(110, int(self.height * 0.15))
         text_y = margin_top + y_offset
 

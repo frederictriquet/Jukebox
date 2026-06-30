@@ -95,7 +95,7 @@ class TestDeserializeWaveform:
     """Tests for deserialize_waveform."""
 
     def test_pickle_data_raises_value_error(self) -> None:
-        """Pickle data est rejeté (pickle interdit pour raisons de sécurité)."""
+        """Pickle data is rejected (pickle forbidden for security reasons)."""
         import pickle
 
         waveform = {

@@ -49,9 +49,9 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
-# scipy.fft (pocketfft C++) est multi-threadé via workers=-1 et n'utilise pas
-# BLAS/vecLib (pas de SIGBUS macOS ARM hors main thread). Repli sur np.fft
-# (mêmes résultats, mono-thread) si scipy est absent.
+# scipy.fft (pocketfft C++) is multi-threaded via workers=-1 and does not use
+# BLAS/vecLib (no SIGBUS on macOS ARM outside the main thread). Falls back to
+# np.fft (same results, single-threaded) if scipy is absent.
 try:
     from scipy import fft as _fft_module
 
@@ -81,10 +81,10 @@ def vj_effect(
 
 
 def log_timing(func: Callable) -> Callable:
-    """Trace la durée d'exécution des étapes coûteuses (diagnostic des lenteurs).
+    """Trace the execution time of expensive steps (slowdown diagnostics).
 
-    Logue à INFO sous la forme « [Timing] <qualname>: <durée>s », y compris en
-    cas d'exception (la durée reste utile pour le diagnostic).
+    Logs at INFO level as "[Timing] <qualname>: <duration>s", including on
+    exceptions (the duration remains useful for diagnostics).
     """
 
     @functools.wraps(func)
@@ -99,7 +99,7 @@ def log_timing(func: Callable) -> Callable:
 
 
 # =============================================================================
-# Analyse audio (indépendante de la résolution)
+# Audio analysis (resolution-independent)
 # =============================================================================
 
 
@@ -107,30 +107,31 @@ def log_timing(func: Callable) -> Callable:
 def compute_audio_analysis(
     audio: NDArray[np.floating], sr: int, fps: int, total_frames: int
 ) -> dict[str, Any]:
-    """Calcule l'analyse audio par frame : énergies par bande, beats, données FFT.
+    """Compute per-frame audio analysis: per-band energies, beats, FFT data.
 
-    Ce calcul ne dépend que de (audio, sr, fps, total_frames) — jamais de la
-    résolution. Le résultat est donc partageable entre plusieurs VJingLayer
-    (ex. preview 512×512 + LED panel 64×64) via le paramètre
-    ``precomputed_analysis``, et calculable hors du thread UI (numpy pur,
-    thread-safe — pas de scipy/vecLib, cf. SIGBUS macOS ARM hors main thread).
+    This computation depends only on (audio, sr, fps, total_frames) — never on
+    the resolution. The result can therefore be shared between several
+    VJingLayer instances (e.g. preview 512×512 + LED panel 64×64) via the
+    ``precomputed_analysis`` parameter, and computed off the UI thread (pure
+    numpy, thread-safe — no scipy/vecLib, cf. SIGBUS on macOS ARM outside the
+    main thread).
 
     Args:
-        audio: Échantillons audio (mono, float).
-        sr: Fréquence d'échantillonnage.
-        fps: Images par seconde de la vidéo.
-        total_frames: Nombre total de frames (int(duration * fps)).
+        audio: Audio samples (mono, float).
+        sr: Sample rate.
+        fps: Video frames per second.
+        total_frames: Total number of frames (int(duration * fps)).
 
     Returns:
-        Dict avec les clés : meta, energy, bass_energy, mid_energy,
+        Dict with the keys: meta, energy, bass_energy, mid_energy,
         treble_energy, beats, fft_data.
     """
     samples_per_frame = len(audio) / total_frames if total_frames > 0 else len(audio)
 
-    # Séparation en bandes via FFT (scipy multi-thread si dispo) — thread-safe ;
-    # scipy.signal.filtfilt utilise BLAS qui SIGBUS sur macOS ARM (vecLib) hors
-    # du thread principal, d'où le filtrage par masque spectral.
-    # np.asarray : sans copie pour un ndarray, borne le type de retour scipy
+    # Band separation via FFT (scipy multi-threaded if available) — thread-safe;
+    # scipy.signal.filtfilt uses BLAS which SIGBUSes on macOS ARM (vecLib)
+    # outside the main thread, hence the spectral-mask filtering.
+    # np.asarray: zero-copy for an ndarray, bounds the scipy return type
     fft = np.asarray(_fft_module.rfft(audio, **_FFT_KWARGS))
     freqs = np.fft.rfftfreq(len(audio), 1.0 / sr)
 
@@ -145,14 +146,14 @@ def compute_audio_analysis(
     mid_audio = _fft_band(250.0, 4000.0)
     treble_audio = _fft_band(4000.0, None)
 
-    # Bornes des frames (identiques à int(idx * samples_per_frame) de l'ancienne boucle)
+    # Frame bounds (identical to int(idx * samples_per_frame) from the old loop)
     starts = (np.arange(total_frames) * samples_per_frame).astype(np.int64)
     ends = (np.arange(1, total_frames + 1) * samples_per_frame).astype(np.int64)
     counts = ends - starts
 
     def _rms_per_frame(x: NDArray) -> NDArray:
-        """RMS par frame via sommes cumulées (vectorisé, ~100× plus rapide que la
-        boucle Python par frame ; mêmes valeurs au bruit float64 près)."""
+        """RMS per frame via cumulative sums (vectorized, ~100× faster than the
+        per-frame Python loop; same values up to float64 noise)."""
         csum = np.concatenate(([0.0], np.cumsum(x.astype(np.float64) ** 2)))
         sums = csum[ends] - csum[starts]
         rms: NDArray[np.float64] = np.sqrt(sums / np.maximum(counts, 1))
@@ -167,15 +168,15 @@ def compute_audio_analysis(
     mid_arr = normalize(_rms_per_frame(mid_audio))
     treble_arr = normalize(_rms_per_frame(treble_audio))
 
-    # Détection de beats : pics d'énergie basse au-dessus d'un seuil
+    # Beat detection: bass energy peaks above a threshold
     beats: list[int] = []
     threshold = 0.5
-    min_interval = fps // 4  # Frames minimum entre deux beats
+    min_interval = fps // 4  # Minimum frames between two beats
 
     last_beat = -min_interval
     for i, e in enumerate(bass_arr):
         if e > threshold and i - last_beat >= min_interval:
-            # Beat seulement si maximum local
+            # Beat only if it is a local maximum
             window = 3
             w_start = max(0, i - window)
             w_end = min(len(bass_arr), i + window + 1)
@@ -183,10 +184,10 @@ def compute_audio_analysis(
                 beats.append(i)
                 last_beat = i
 
-    # Données FFT par frame pour les effets de spectre — FFT batchée sur une
-    # matrice (frames × frame_len) au lieu d'une FFT par frame en boucle Python.
-    # Chaque frame est tronquée à frame_len échantillons (longueur uniforme,
-    # ≤ 1 échantillon perdu par frame : différence visuelle négligeable).
+    # Per-frame FFT data for spectrum effects — FFT batched over a
+    # (frames × frame_len) matrix instead of one FFT per frame in a Python loop.
+    # Each frame is truncated to frame_len samples (uniform length,
+    # ≤ 1 sample lost per frame: negligible visual difference).
     n_bands = 32
     frame_len = int(samples_per_frame)
     if total_frames > 0 and frame_len > 0:
@@ -207,8 +208,8 @@ def compute_audio_analysis(
         fft_data = [np.zeros(n_bands) for _ in range(total_frames)]
 
     return {
-        # Métadonnées de validation : un layer ne réutilise l'analyse que si
-        # elle correspond exactement à son audio et son cadencement.
+        # Validation metadata: a layer reuses the analysis only if it
+        # matches its audio and timing exactly.
         "meta": {"n_samples": len(audio), "sr": sr, "fps": fps, "total_frames": total_frames},
         "energy": energy_arr,
         "bass_energy": bass_arr,
@@ -321,7 +322,7 @@ def perlin2d(x: float, y: float, octaves: int = 1, persistence: float = 0.5) -> 
         Noise value in range [-1, 1].
     """
     if NOISE_AVAILABLE:
-        # noise n'est pas typé (Any) : float() borne le type de retour.
+        # noise is untyped (Any): float() bounds the return type.
         return float(pnoise2(x, y, octaves=octaves, persistence=persistence))
     else:
         # Fallback pseudo-noise
@@ -341,7 +342,7 @@ def simplex2d(x: float, y: float, octaves: int = 1, persistence: float = 0.5) ->
         Noise value in range [-1, 1].
     """
     if NOISE_AVAILABLE:
-        # noise n'est pas typé (Any) : float() borne le type de retour.
+        # noise is untyped (Any): float() bounds the return type.
         return float(snoise2(x, y, octaves=octaves, persistence=persistence))
     else:
         return _pseudo_perlin2d(x, y, octaves, persistence)
@@ -655,9 +656,9 @@ class VJingLayer(BaseVisualLayer):
             use_all_effects: If True, use all available effects regardless of genre/preset.
             use_gpu: Enable GPU-accelerated shaders when available.
             rng_seed: Seed for deterministic random number generation.
-            precomputed_analysis: Résultat de compute_audio_analysis() à réutiliser
-                (évite de recalculer l'analyse pour chaque layer du même audio).
-                Ignoré avec un warning si ses métadonnées ne correspondent pas.
+            precomputed_analysis: Result of compute_audio_analysis() to reuse
+                (avoids recomputing the analysis for each layer of the same audio).
+                Ignored with a warning if its metadata does not match.
             **kwargs: Additional parameters.
         """
         self._rng = Random(rng_seed)  # noqa: S311
@@ -689,9 +690,9 @@ class VJingLayer(BaseVisualLayer):
         self._gpu_renderer: GPUShaderRenderer | None = None
         # Cache for pre-rendered GPU frames: {frame_idx: {effect_name: Image}}
         self._gpu_frame_cache: dict[int, dict[str, Image.Image]] = {}
-        # Grille de coordonnées nebula : (re)créée paresseusement dans _render_nebula
-        # selon la résolution courante. Déclarée ici (sans valeur) pour typer l'accès
-        # .shape dans la garde hasattr — l'attribut reste absent tant qu'inutilisé.
+        # Nebula coordinate grid: (re)created lazily in _render_nebula
+        # according to the current resolution. Declared here (without a value) to type
+        # the .shape access in the hasattr guard — the attribute stays absent until used.
         self._nebula_xs: NDArray[np.float32]
 
         # Merge custom mappings with defaults (custom takes precedence)
@@ -722,10 +723,10 @@ class VJingLayer(BaseVisualLayer):
         self._cached_post_processors: list[str] = []
         self._cached_final_pass: list[str] = []
 
-        # Verrou sérialisant render() : feedback_buffer, particles, ripples,
-        # explosion_* et _current_intensity sont des états mutables partagés.
-        # L'export appelle render() depuis un ThreadPoolExecutor (jusqu'à 8 threads),
-        # ce qui provoquerait des data races sans ce verrou.
+        # Lock serializing render(): feedback_buffer, particles, ripples,
+        # explosion_* and _current_intensity are shared mutable state.
+        # Export calls render() from a ThreadPoolExecutor (up to 8 threads),
+        # which would cause data races without this lock.
         self._render_lock = threading.Lock()
 
         # beats as set for O(1) lookup (beats list kept for reversed iteration in effects)
@@ -734,7 +735,7 @@ class VJingLayer(BaseVisualLayer):
         # Initialize LFOs for parameter modulation
         self._init_lfos()
 
-        # Analyse audio pré-calculée à réutiliser (validée dans _precompute)
+        # Precomputed audio analysis to reuse (validated in _precompute)
         self._precomputed_analysis = precomputed_analysis
 
         # Store dimensions for GPU initialization (done in _precompute)
@@ -977,8 +978,8 @@ class VJingLayer(BaseVisualLayer):
         # If a preset is selected, use its effects
         if self.preset and self.preset in self.presets:
             raw_effects = self.presets[self.preset]
-            # Filtre par AVAILABLE_EFFECTS : une typo dans un preset YAML ne doit pas
-            # passer un effet inexistant au dispatch de render().
+            # Filter by AVAILABLE_EFFECTS: a typo in a YAML preset must not
+            # pass a nonexistent effect to render()'s dispatch.
             effects = [e for e in raw_effects if e in self.AVAILABLE_EFFECTS]
             unknown = [e for e in raw_effects if e not in self.AVAILABLE_EFFECTS]
             if unknown:
@@ -1011,8 +1012,8 @@ class VJingLayer(BaseVisualLayer):
         """Pre-compute effect-specific data."""
         logging.info("[VJingLayer] _precompute start (effects=%s)", self.active_effects)
 
-        # Analyse audio : réutilise le résultat fourni s'il correspond à cet audio,
-        # sinon la calcule (cas nominal hors playground).
+        # Audio analysis: reuse the provided result if it matches this audio,
+        # otherwise compute it (the nominal case outside the playground).
         analysis = self._precomputed_analysis
         expected_meta = {
             "n_samples": len(self.audio),
@@ -1128,7 +1129,7 @@ class VJingLayer(BaseVisualLayer):
 
     def _init_explosion(self) -> None:
         """Initialize explosion particles."""
-        # Valeurs hétérogènes : coordonnées/vitesses (float) + couleur (tuple RGB).
+        # Heterogeneous values: coordinates/velocities (float) + color (RGB tuple).
         self.explosion_particles: list[dict[str, Any]] = []
         self.explosion_active = False
         self.explosion_frame = 0
@@ -1144,9 +1145,9 @@ class VJingLayer(BaseVisualLayer):
     def render(self, frame_idx: int, time_pos: float) -> Image.Image:
         """Render VJing effects for the current frame.
 
-        Sérialisé par ``self._render_lock`` : l'export appelle render() depuis
-        plusieurs threads, or les états mutables (feedback_buffer, particles,
-        ripples, _current_intensity, etc.) sont partagés. Voir [C22].
+        Serialized by ``self._render_lock``: export calls render() from
+        multiple threads, yet the mutable state (feedback_buffer, particles,
+        ripples, _current_intensity, etc.) is shared. See [C22].
 
         Args:
             frame_idx: Frame index.
@@ -1159,7 +1160,7 @@ class VJingLayer(BaseVisualLayer):
             return self._render_locked(frame_idx, time_pos)
 
     def _render_locked(self, frame_idx: int, time_pos: float) -> Image.Image:
-        """Corps de render(), exécuté sous ``self._render_lock``."""
+        """Body of render(), executed under ``self._render_lock``."""
         img = self.create_transparent_image()
 
         # Get current energy values
@@ -1375,9 +1376,9 @@ class VJingLayer(BaseVisualLayer):
             # Use local array — shared scratch would cause SIGBUS with parallel render workers.
             if alpha < 0.99:
                 arr = np.array(effect_img)  # local copy; no shared state
-                # np.multiply in-place évite l'allocation temporaire intermédiaire
-                # (arr[:,:,3] * alpha crée un float64 temporaire qui peut corrompre
-                # le refcount de None sur ARM dans certains contextes C extension)
+                # In-place np.multiply avoids the intermediate temporary allocation
+                # (arr[:,:,3] * alpha creates a temporary float64 that can corrupt
+                # None's refcount on ARM in certain C extension contexts)
                 np.multiply(arr[:, :, 3], alpha, out=arr[:, :, 3], casting="unsafe")
                 img.alpha_composite(Image.fromarray(arr, "RGBA"))
             else:
@@ -2533,15 +2534,15 @@ class VJingLayer(BaseVisualLayer):
         z = x_rot + 1j * y_rot
         c = complex(c_real, c_imag)
 
-        # Tableaux locaux par frame : évite les conflits entre workers parallèles
-        # (self._fractal_mask partagé causait une race condition)
+        # Per-frame local arrays: avoids conflicts between parallel workers
+        # (the shared self._fractal_mask caused a race condition)
         max_iter = 50
         iterations = np.zeros((self.fractal_height, self.fractal_width), dtype=np.int32)
         mask = np.ones((self.fractal_height, self.fractal_width), dtype=bool)
 
         for i in range(max_iter):
-            # np.where évite l'assignation par indexation booléenne
-            # (z[mask] = z[mask]**2+c est instable quand mask est modifié entre lecture et écriture)
+            # np.where avoids boolean-index assignment
+            # (z[mask] = z[mask]**2+c is unstable when mask is modified between read and write)
             z = np.where(mask, z**2 + c, z)
             escaped = np.abs(z) > 4
             new_escaped = escaped & mask
@@ -3210,9 +3211,9 @@ class VJingLayer(BaseVisualLayer):
     # ========================================================================
 
     def _init_octagrams(self) -> None:
-        """Initialise l'effet Octagrams (GPU uniquement, rien à pré-calculer).
+        """Initialize the Octagrams effect (GPU only, nothing to precompute).
 
-        Présent pour homogénéité avec le bloc de dispatch d'initialisation.
+        Present for consistency with the initialization dispatch block.
         """
         pass
 
@@ -3220,22 +3221,22 @@ class VJingLayer(BaseVisualLayer):
     def _render_octagrams(
         self, img: Image.Image, frame_idx: int, time_pos: float, ctx: dict
     ) -> None:
-        """Rend l'effet Octagrams : raymarching de boîtes animées formant des octagrammes.
+        """Render the Octagrams effect: raymarching of animated boxes forming octagrams.
 
-        Tunnel infini d'octagrammes pulsants colorés via la palette du projet.
-        GPU uniquement : aucun fallback CPU (raymarcher trop lourd).
+        Infinite tunnel of pulsating octagrams colored via the project palette.
+        GPU only: no CPU fallback (the raymarcher is too heavy).
 
         Args:
-            img: Image sur laquelle dessiner.
-            frame_idx: Index de la frame.
-            time_pos: Position temporelle en secondes.
-            ctx: Dictionnaire de contexte audio.
+            img: Image to draw on.
+            frame_idx: Frame index.
+            time_pos: Time position in seconds.
+            ctx: Audio context dict.
         """
         gpu_img = self._render_gpu_effect("octagrams", frame_idx, time_pos, ctx)
         if gpu_img:
             img.paste(gpu_img, (0, 0), gpu_img)
             return
-        # GPU indisponible : effet sans fallback CPU (raymarcher trop lourd), no-op logué
+        # GPU unavailable: effect has no CPU fallback (raymarcher too heavy), logged no-op
         logging.debug("[VJingLayer] octagrams : GPU indisponible, effet ignoré")
 
     # ========================================================================
@@ -3383,7 +3384,7 @@ class VJingLayer(BaseVisualLayer):
         """Render smoke/mist effect with Perlin turbulence.
 
         Particles rise and dissipate with turbulent motion.
-        Taux et mouvement constants, sans réactivité audio.
+        Constant rate and motion, with no audio reactivity.
 
         Args:
             img: Image to draw on.
@@ -3394,7 +3395,7 @@ class VJingLayer(BaseVisualLayer):
         draw = ImageDraw.Draw(img)
         s = min(self.width, self.height) / 512
 
-        # Taux de spawn constant — sans réactivité audio
+        # Constant spawn rate — no audio reactivity
         spawn_rate = 5
         for _ in range(spawn_rate):
             x = self.width / 2 + (self._rng.random() - 0.5) * self.width * 0.6
@@ -3628,7 +3629,7 @@ class VJingLayer(BaseVisualLayer):
         # Build hex centers with scroll offset
         col = 0
         bin_idx = 0
-        # Position flottante : incrémentée de hex_w * 0.75 à chaque colonne.
+        # Floating position: incremented by hex_w * 0.75 for each column.
         cx = float(hex_r)
         while cx < w + hex_r:
             row = 0
@@ -5053,9 +5054,9 @@ class VJingLayer(BaseVisualLayer):
         buf *= 0.88 - energy * 0.04  # faster fade when energetic
 
         # Palette gradient LUT (512 entries, cached until palette changes).
-        # getattr défensif : _init_emission n'est jamais appelé, les attributs
-        # n'existent qu'après la première construction ci-dessous (lut is None
-        # court-circuite l'accès à _emission_lut_key au premier rendu).
+        # Defensive getattr: _init_emission is never called, the attributes
+        # only exist after the first construction below (lut is None
+        # short-circuits the access to _emission_lut_key on the first render).
         lut: np.ndarray | None = getattr(self, "_emission_lut", None)
         if lut is None or self._emission_lut_key != self.color_palette_name:
             palette = self.color_palette

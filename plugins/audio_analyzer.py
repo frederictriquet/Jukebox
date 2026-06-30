@@ -210,8 +210,8 @@ class AudioAnalyzerPlugin:
             lambda error: self._on_batch_analysis_error((track_id, filepath), error)
         )
 
-        # Attendre la fin du worker précédent avant de remplacer la référence :
-        # sinon le GC peut collecter le QThread encore en cours d'exécution.
+        # Wait for the previous worker to finish before replacing the reference:
+        # otherwise the GC may collect the QThread while it is still running.
         if self._single_worker is not None and self._single_worker.isRunning():
             self._single_worker.wait()
 

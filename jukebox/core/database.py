@@ -56,13 +56,13 @@ class Database:
     def connect(self) -> None:
         """Connect to database and enable foreign keys."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        # isolation_level=None : mode autocommit — chaque DML s'exécute seul,
-        # sauf si encadré d'un BEGIN explicite (géré par transaction()).
-        # Évite le conflit "cannot start a transaction within a transaction"
-        # causé par les BEGIN implicites du module sqlite3 avec isolation_level par défaut.
-        # check_same_thread=False : autorise l'accès depuis les QThread workers
-        # (BackgroundCheckWorker, BatchProcessor, etc.). La sérialisation des accès
-        # concurrents est gérée au niveau applicatif, pas par sqlite3.
+        # isolation_level=None: autocommit mode — each DML runs on its own,
+        # unless wrapped in an explicit BEGIN (handled by transaction()).
+        # Avoids the "cannot start a transaction within a transaction" conflict
+        # caused by the sqlite3 module's implicit BEGINs with the default isolation_level.
+        # check_same_thread=False: allows access from the QThread workers
+        # (BackgroundCheckWorker, BatchProcessor, etc.). Serialization of concurrent
+        # accesses is handled at the application level, not by sqlite3.
         self.conn = sqlite3.connect(
             str(self.db_path), isolation_level=None, check_same_thread=False
         )
@@ -141,8 +141,8 @@ class Database:
 
         self._in_transaction = True
         try:
-            # La connexion est en mode autocommit (isolation_level=None) :
-            # un BEGIN explicite ouvre la transaction, COMMIT/ROLLBACK la clôturent.
+            # The connection is in autocommit mode (isolation_level=None):
+            # an explicit BEGIN opens the transaction, COMMIT/ROLLBACK close it.
             self.conn.execute("BEGIN")
             yield
             self.conn.commit()
@@ -291,8 +291,8 @@ class Database:
             )
         """)
 
-        # Pas de commit explicite : la connexion est en mode autocommit
-        # (isolation_level=None), chaque DDL/executescript est déjà persisté.
+        # No explicit commit: the connection is in autocommit mode
+        # (isolation_level=None), each DDL/executescript is already persisted.
 
     def _migrate_ml_features(self) -> None:
         """Add ML feature columns to audio_analysis table if they don't exist."""
@@ -369,18 +369,18 @@ class Database:
             "energy_slope": "REAL",
         }
 
-        # Types SQLite autorisés pour les colonnes de migration.
-        # SQLite ne supporte pas les paramètres liés dans les clauses DDL (ALTER TABLE),
-        # l'interpolation est donc inévitable ; on valide strictement chaque identifiant
-        # et chaque type contre une whitelist avant toute exécution pour éviter
-        # toute injection SQL via un dict ml_columns altéré.
+        # SQLite types allowed for migration columns.
+        # SQLite does not support bound parameters in DDL clauses (ALTER TABLE),
+        # so interpolation is unavoidable; strictly validate each identifier
+        # and each type against a whitelist before any execution to prevent
+        # any SQL injection via a tampered ml_columns dict.
         allowed_types = {"REAL", "INTEGER", "TEXT", "BLOB"}
 
         # Add missing columns
         for column_name, column_type in ml_columns.items():
             if column_name in existing_columns:
                 continue
-            # Validation : identifiant SQL simple + type whitelisté.
+            # Validation: simple SQL identifier + whitelisted type.
             if not column_name.isidentifier():
                 raise ValueError(f"Nom de colonne de migration invalide : {column_name!r}")
             if column_type not in allowed_types:
@@ -396,7 +396,7 @@ class Database:
                     e,
                 )
 
-        # Mode autocommit (isolation_level=None) : pas de commit explicite requis.
+        # Autocommit mode (isolation_level=None): no explicit commit required.
 
     def _migrate_tracks_columns(self) -> None:
         """Add mode and comment columns to tracks table if they don't exist."""
@@ -413,18 +413,18 @@ class Database:
         if "comment" not in existing_columns:
             self.conn.execute("ALTER TABLE tracks ADD COLUMN comment TEXT")
             if "description" in existing_columns:
-                # Recopie les anciennes valeurs non vides de `description` vers `comment`.
-                # La condition couvre aussi les NULL (description != '' renvoie NULL pour un
-                # NULL, donc on filtre explicitement les valeurs réellement renseignées).
-                # La colonne `description` n'est volontairement PAS supprimée :
-                # SQLite < 3.35 ne supporte pas DROP COLUMN, et la conserver garantit
-                # un rollback applicatif possible. Elle est simplement ignorée par le code.
+                # Copy the old non-empty values from `description` into `comment`.
+                # The condition also handles NULLs (description != '' returns NULL for a
+                # NULL, so explicitly filter for values that are actually set).
+                # The `description` column is deliberately NOT dropped:
+                # SQLite < 3.35 does not support DROP COLUMN, and keeping it guarantees
+                # a possible application-level rollback. It is simply ignored by the code.
                 self.conn.execute(
                     "UPDATE tracks SET comment = description "
                     "WHERE description IS NOT NULL AND description != ''"
                 )
 
-        # Mode autocommit (isolation_level=None) : pas de commit explicite requis.
+        # Autocommit mode (isolation_level=None): no explicit commit required.
 
     # ========== Legacy Methods (delegate to repositories) ==========
 

@@ -14,9 +14,9 @@ from jukebox.core.mode_manager import AppMode
 K = TypeVar("K")
 V = TypeVar("V")
 
-# Pattern de validation du format de genre (issu du projet PyQT)
-# Note : *0 n'est pas autorisé, uniquement *1 à *5
-# [A-Z]+ accepte les codes de genre multi-caractères (et pas seulement mono-caractère)
+# Genre format validation pattern (from the PyQT project)
+# Note: *0 is not allowed, only *1 to *5
+# [A-Z]+ accepts multi-character genre codes (and not just single-character ones)
 GENRE_PATTERN = re.compile(r"^([A-Z]+)(-[A-Z]+)*(-\*[1-5])?$")
 
 
@@ -143,7 +143,7 @@ class Styler:
         return str(data) if data is not None else ""
 
     def edit(self, data: Any, track: dict[str, Any]) -> str:
-        """Valeur fournie à l'éditeur inline (par défaut identique à l'affichage)."""
+        """Value provided to the inline editor (defaults to the displayed value)."""
         return self.display(data, track)
 
     def tooltip(self, data: Any, track: dict[str, Any]) -> str | None:
@@ -301,7 +301,7 @@ class RatingStyler(Styler):
                 rating = int(rating_str)
                 return "* " * rating
             except ValueError as e:
-                # La chaîne de notation extraite n'est pas un entier valide
+                # The extracted rating string is not a valid integer
                 logging.debug(
                     f"[RatingStyler] Valeur de notation invalide '{rating_str}' dans le genre '{genre}': {e}"
                 )
@@ -372,18 +372,18 @@ class DurationStyler(Styler):
 
 
 class CommentStyler(Styler):
-    """Styler pour la colonne comment (éditable inline en mode jukebox)."""
+    """Styler for the comment column (inline-editable in jukebox mode)."""
 
     def display(self, data: Any, track: dict[str, Any]) -> str:
-        """Affiche le commentaire du morceau."""
+        """Display the track's comment."""
         return track.get("comment") or ""
 
     def edit(self, data: Any, track: dict[str, Any]) -> str:
-        """Valeur pré-remplie dans l'éditeur inline."""
+        """Value pre-filled in the inline editor."""
         return track.get("comment") or ""
 
     def tooltip(self, data: Any, track: dict[str, Any]) -> str | None:
-        """Affiche le commentaire complet en tooltip."""
+        """Show the full comment in a tooltip."""
         return track.get("comment") or None
 
 
@@ -406,10 +406,10 @@ class WaveformStyler(Styler):
 
     @classmethod
     def invalidate(cls, filepath: Any) -> None:
-        """Invalide l'entrée de cache associée à un fichier pour forcer un re-rendu.
+        """Invalidate the cache entry associated with a file to force a re-render.
 
         Args:
-            filepath: Chemin du fichier dont le rendu doit être régénéré
+            filepath: Path of the file whose rendering must be regenerated
         """
         cls._cache.pop(hash(str(filepath)), None)
 
@@ -555,17 +555,17 @@ class DuplicateStatusStyler(Styler):
 
 
 class PathStyler(Styler):
-    """Styler pour la colonne path : affiche le répertoire parent du fichier."""
+    """Styler for the path column: displays the file's parent directory."""
 
     def display(self, data: Any, track: dict[str, Any]) -> str:
-        """Affiche le répertoire parent."""
+        """Display the parent directory."""
         filepath = track.get("filepath")
         if filepath is None:
             return ""
         return str(filepath.parent)
 
     def tooltip(self, data: Any, track: dict[str, Any]) -> str | None:
-        """Affiche le chemin complet en tooltip."""
+        """Show the full path in a tooltip."""
         filepath = track.get("filepath")
         if filepath is None:
             return None

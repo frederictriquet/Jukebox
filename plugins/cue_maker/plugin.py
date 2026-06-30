@@ -609,8 +609,8 @@ class CueMakerPlugin:
         if not db or not hasattr(db, "tracks"):
             return
 
-        # Passe par le repository plutôt que d'accéder à db.conn directement :
-        # respecte l'encapsulation et reste robuste au mode de connexion.
+        # Go through the repository rather than accessing db.conn directly:
+        # respects encapsulation and stays robust to the connection mode.
         track = db.tracks.get_by_id(track_id)
         if not track:
             return

@@ -12,9 +12,9 @@ class EventBus:
     def __init__(self) -> None:
         """Initialize event bus."""
         self.subscribers: dict[str, list[Callable[..., None]]] = {}
-        # Verrou protégeant `subscribers` contre les accès concurrents :
-        # BatchProcessor et autres workers QThread émettent/s'abonnent
-        # depuis des threads différents du thread UI.
+        # Lock protecting `subscribers` against concurrent access:
+        # BatchProcessor and other QThread workers emit/subscribe
+        # from threads other than the UI thread.
         self._lock = threading.Lock()
 
     def subscribe(self, event: str, callback: Callable[..., None]) -> None:
@@ -54,14 +54,14 @@ class EventBus:
     def emit(self, event: str, **data: Any) -> None:
         """Emit event.
 
-        Note: Copies subscriber list under lock before iteration, puis exécute
-        les callbacks hors verrou pour éviter tout interblocage si un callback
-        (ré)émet ou (dés)abonne. Sûr pour les appels cross-thread.
+        Note: Copies subscriber list under lock before iteration, then runs
+        the callbacks outside the lock to avoid any deadlock if a callback
+        (re)emits or (un)subscribes. Safe for cross-thread calls.
         """
         with self._lock:
             if event not in self.subscribers:
                 return
-            # Copie sous verrou pour autoriser une modification concurrente sûre.
+            # Copy under lock to allow safe concurrent modification.
             callbacks = list(self.subscribers[event])
 
         logging.debug(f"Emitting event: {event}")
@@ -69,7 +69,7 @@ class EventBus:
             try:
                 callback(**data)
             except Exception as e:
-                # exc_info=True : conserver le traceback complet (règle projet).
+                # exc_info=True: preserve the full traceback (project rule).
                 logging.error(f"Error in event handler for {event}: {e}", exc_info=True)
 
 

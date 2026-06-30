@@ -31,7 +31,7 @@ class AudioPlayer(QObject):
         """Initialize audio player."""
         super().__init__()
         self._instance: Any = vlc.Instance()
-        # vlc.Instance() retourne None si libvlc est absent ou mal configuré.
+        # vlc.Instance() returns None if libvlc is missing or misconfigured.
         if self._instance is None:
             raise RuntimeError(
                 "Impossible d'initialiser libVLC : vlc.Instance() a retourné None. "
@@ -40,7 +40,7 @@ class AudioPlayer(QObject):
         self._player: Any = self._instance.media_player_new()
         self._current_file: Path | None = None
 
-        # File thread-safe pour recevoir les événements VLC (thread ctypes sans GIL Qt)
+        # Thread-safe queue to receive VLC events (ctypes thread without the Qt GIL)
         self._end_reached_queue: queue.SimpleQueue[bool] = queue.SimpleQueue()
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self._check_end_reached)
@@ -76,7 +76,7 @@ class AudioPlayer(QObject):
 
     def play(self) -> None:
         """Start playback."""
-        # play() renvoie -1 en cas d'échec : ne pas émettre PLAYING si VLC a échoué.
+        # play() returns -1 on failure: do not emit PLAYING if VLC failed.
         if self._player.play() == -1:
             logging.error("[AudioPlayer] Échec du démarrage de la lecture (VLC a retourné -1).")
             return
@@ -84,8 +84,8 @@ class AudioPlayer(QObject):
 
     def pause(self) -> None:
         """Pause playback."""
-        # pause() ne renvoie pas de code d'erreur exploitable ; on vérifie l'état réel
-        # rapporté par VLC avant d'émettre PAUSED pour éviter une désynchronisation UI.
+        # pause() does not return a usable error code; check the actual state
+        # reported by VLC before emitting PAUSED to avoid a UI desynchronization.
         self._player.pause()
         if self._player.is_playing() == 1:
             logging.error("[AudioPlayer] La mise en pause a échoué (VLC est toujours en lecture).")
@@ -158,24 +158,24 @@ class AudioPlayer(QObject):
         self._player.stop()
         self._player.set_media(None)
         self._current_file = None
-        # Les abonnés doivent savoir que la lecture est arrêtée après un unload.
+        # Subscribers must know that playback is stopped after an unload.
         self.state_changed.emit(PlayerState.STOPPED.value)
 
     def _on_end_reached(self, _event: Any) -> None:
-        """Handle VLC end reached event (appelé depuis le thread ctypes de VLC).
+        """Handle VLC end reached event (called from VLC's ctypes thread).
 
-        Pas d'appel Qt direct ici — le thread VLC ne détient pas le GIL Qt.
-        On dépose dans une file Python (thread-safe) que le timer principal videra.
+        No direct Qt call here — the VLC thread does not hold the Qt GIL.
+        Push into a (thread-safe) Python queue that the main timer will drain.
         """
         self._end_reached_queue.put(True)
 
     def _check_end_reached(self) -> None:
-        """Draîne la file VLC depuis le thread Qt principal (appelé par le timer)."""
+        """Drain the VLC queue from the main Qt thread (called by the timer)."""
         if not self._end_reached_queue.empty():
             self._end_reached_queue.get()
-            # En fin de morceau VLC a stoppé la lecture : on notifie l'état STOPPED
-            # pour que l'UI (icône play/pause) se remette à l'arrêt, y compris quand
-            # l'auto-play est désactivé. Émis avant track_finished afin qu'un éventuel
-            # auto-play enchaîne ensuite avec un état PLAYING qui prévaut.
+            # At end of track VLC has stopped playback: notify the STOPPED state
+            # so the UI (play/pause icon) returns to the stopped state, including when
+            # auto-play is disabled. Emitted before track_finished so that a possible
+            # auto-play can then follow with a PLAYING state that takes precedence.
             self.state_changed.emit(PlayerState.STOPPED.value)
             self.track_finished.emit()

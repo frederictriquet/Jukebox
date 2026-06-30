@@ -1,7 +1,7 @@
-"""Waveform serialization using numpy (format sûr, sans pickle).
+"""Waveform serialization using numpy (safe format, no pickle).
 
-pickle peut exécuter du code arbitraire à la désérialisation — interdit
-pour des données provenant de la base SQLite. On utilise uniquement
+pickle can execute arbitrary code during deserialization — forbidden
+for data coming from the SQLite database. We use only
 numpy.savez_compressed / numpy.load(allow_pickle=False).
 """
 
@@ -12,13 +12,13 @@ import numpy as np
 
 
 def serialize_waveform(waveform: dict[str, Any]) -> bytes:
-    """Sérialise les données waveform en bytes (format numpy compressé).
+    """Serialize waveform data to bytes (compressed numpy format).
 
     Args:
-        waveform: Dict avec les arrays 'bass', 'mid', 'treble'
+        waveform: Dict with the 'bass', 'mid', 'treble' arrays
 
     Returns:
-        Bytes au format npz compressé
+        Bytes in compressed npz format
     """
     buffer = io.BytesIO()
     np.savez_compressed(
@@ -31,16 +31,16 @@ def serialize_waveform(waveform: dict[str, Any]) -> bytes:
 
 
 def deserialize_waveform(data: bytes) -> dict[str, np.ndarray]:
-    """Désérialise les données waveform depuis bytes.
+    """Deserialize waveform data from bytes.
 
     Args:
-        data: Bytes produits par serialize_waveform()
+        data: Bytes produced by serialize_waveform()
 
     Returns:
-        Dict avec les arrays numpy 'bass', 'mid', 'treble'
+        Dict with the 'bass', 'mid', 'treble' numpy arrays
 
     Raises:
-        ValueError: Si les données sont corrompues ou dans un format non supporté
+        ValueError: If the data is corrupted or in an unsupported format
     """
     buffer = io.BytesIO(data)
     try:

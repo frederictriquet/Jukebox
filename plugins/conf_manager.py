@@ -308,8 +308,8 @@ class ConfigDialog(QDialog):
         """Initialize dialog."""
         super().__init__()
         self.context = context
-        # Initialisé ici pour garantir l'existence avant tout appel à
-        # load_settings (qui peut précéder _add_dynamic_tab).
+        # Initialized here to guarantee it exists before any call to
+        # load_settings (which may precede _add_dynamic_tab).
         self._plugin_inputs: dict[str, dict[str, Any]] = {}
         self.setWindowTitle("Plugin Configuration")
         self.setMinimumSize(1000, 700)
@@ -561,9 +561,9 @@ class ConfigDialog(QDialog):
 
     @staticmethod
     def _coerce_setting_value(raw: str, setting_config: dict[str, Any], target_type: type) -> Any:
-        """Valide et convertit une valeur brute via Pydantic TypeAdapter.
+        """Validate and convert a raw value via Pydantic TypeAdapter.
 
-        Retourne le défaut du schema si la valeur est invalide pour le type attendu.
+        Returns the schema default if the value is invalid for the expected type.
         """
         from pydantic import TypeAdapter, ValidationError
 
@@ -617,8 +617,8 @@ class ConfigDialog(QDialog):
                     # Save to database
                     self._set_setting(plugin_name, setting_key, value)
         except Exception:
-            # Une erreur DB en cours de boucle laisserait une sauvegarde partielle :
-            # on logue avec la stack trace et on n'acquitte pas le dialogue.
+            # A DB error mid-loop would leave a partial save: log with the stack
+            # trace and do not accept the dialog.
             logging.error("[ConfManager] Échec de la sauvegarde des settings", exc_info=True)
             return
 

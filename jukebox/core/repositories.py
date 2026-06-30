@@ -70,10 +70,10 @@ class TrackRepository(BaseRepository):
             mode,
         )
 
-        # INSERT OR IGNORE + UPDATE conditionnel plutôt que INSERT OR REPLACE :
-        # REPLACE supprime puis recrée la ligne avec un nouvel id, ce qui déclenche
-        # ON DELETE CASCADE et efface waveform_cache + audio_analysis à chaque re-scan.
-        # Ici l'id de la piste existante est préservé, donc les données liées aussi.
+        # INSERT OR IGNORE + conditional UPDATE rather than INSERT OR REPLACE:
+        # REPLACE deletes then recreates the row with a new id, which triggers
+        # ON DELETE CASCADE and wipes waveform_cache + audio_analysis on each re-scan.
+        # Here the existing track's id is preserved, so the related data is too.
         cursor = self._conn.execute(
             """
             INSERT OR IGNORE INTO tracks (
@@ -86,13 +86,13 @@ class TrackRepository(BaseRepository):
         )
 
         if cursor.rowcount > 0:
-            # Nouvelle piste insérée.
+            # New track inserted.
             track_id = int(cursor.lastrowid) if cursor.lastrowid is not None else 0
         else:
-            # Piste déjà présente (filepath UNIQUE) : mise à jour sur place.
-            # COALESCE pour `comment` : un re-scan d'un fichier sans tag commentaire
-            # ne doit pas écraser un commentaire déjà présent en base (ex. valeur
-            # migrée depuis l'ancienne colonne `description` ou éditée par l'utilisateur).
+            # Track already present (filepath UNIQUE): update in place.
+            # COALESCE for `comment`: a re-scan of a file without a comment tag
+            # must not overwrite a comment already present in the database (e.g. a value
+            # migrated from the old `description` column or edited by the user).
             self._conn.execute(
                 """
                 UPDATE tracks SET
@@ -170,8 +170,8 @@ class TrackRepository(BaseRepository):
             params.append(mode)
         query += " ORDER BY date_added DESC"
         if limit:
-            # LIMIT paramétré plutôt qu'interpolé : cohérent avec le reste du code,
-            # évite tout risque d'injection si `limit` devenait une source externe.
+            # Parameterized LIMIT rather than interpolated: consistent with the rest of
+            # the code, and avoids any injection risk if `limit` became an external source.
             query += " LIMIT ?"
             params.append(limit)
         return self._conn.execute(query, params).fetchall()
@@ -267,7 +267,7 @@ class TrackRepository(BaseRepository):
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         values = list(updates.values()) + [track_id]
 
-        # `set_clause` ne contient que des colonnes filtrées via `allowed_fields`.
+        # `set_clause` only contains columns filtered through `allowed_fields`.
         cursor = self._conn.execute(
             f"UPDATE tracks SET {set_clause} WHERE id = ?",  # noqa: S608
             values,
@@ -317,13 +317,13 @@ class TrackRepository(BaseRepository):
         return cursor.rowcount > 0
 
     def get_recently_played_artists_genres(self, limit: int = 20) -> list[dict[str, Any]]:
-        """Retourne les couples (artist, genre) distincts des pistes récemment terminées.
+        """Return the distinct (artist, genre) pairs of recently completed tracks.
 
         Args:
-            limit: Nombre maximum de lignes d'historique à considérer.
+            limit: Maximum number of history rows to consider.
 
         Returns:
-            Liste de dicts avec les clés `artist` et `genre`.
+            List of dicts with the `artist` and `genre` keys.
         """
         return self._conn.execute(
             """
@@ -338,13 +338,13 @@ class TrackRepository(BaseRepository):
         ).fetchall()
 
     def get_random(self, limit: int) -> list[dict[str, Any]]:
-        """Retourne des pistes aléatoires.
+        """Return random tracks.
 
         Args:
-            limit: Nombre de pistes à retourner.
+            limit: Number of tracks to return.
 
         Returns:
-            Liste de pistes.
+            List of tracks.
         """
         return self._conn.execute(
             "SELECT * FROM tracks ORDER BY RANDOM() LIMIT ?", (limit,)
@@ -353,15 +353,15 @@ class TrackRepository(BaseRepository):
     def get_random_by_artist_unplayed(
         self, artist: str, limit: int, exclude_days: int = 7
     ) -> list[dict[str, Any]]:
-        """Retourne des pistes aléatoires d'un artiste non jouées récemment.
+        """Return random tracks by an artist that have not been played recently.
 
         Args:
-            artist: Nom de l'artiste.
-            limit: Nombre de pistes à retourner.
-            exclude_days: Fenêtre (en jours) d'exclusion des pistes déjà jouées.
+            artist: Artist name.
+            limit: Number of tracks to return.
+            exclude_days: Window (in days) for excluding already-played tracks.
 
         Returns:
-            Liste de pistes.
+            List of tracks.
         """
         return self._conn.execute(
             """
@@ -378,14 +378,14 @@ class TrackRepository(BaseRepository):
         ).fetchall()
 
     def get_random_by_genre(self, genre: str, limit: int) -> list[dict[str, Any]]:
-        """Retourne des pistes aléatoires d'un genre donné.
+        """Return random tracks of a given genre.
 
         Args:
-            genre: Nom du genre.
-            limit: Nombre de pistes à retourner.
+            genre: Genre name.
+            limit: Number of tracks to return.
 
         Returns:
-            Liste de pistes.
+            List of tracks.
         """
         return self._conn.execute(
             "SELECT * FROM tracks WHERE genre = ? ORDER BY RANDOM() LIMIT ?",
@@ -393,13 +393,13 @@ class TrackRepository(BaseRepository):
         ).fetchall()
 
     def get_stats(self, mode: str | None = None) -> dict[str, Any]:
-        """Retourne les statistiques agrégées de la bibliothèque.
+        """Return the aggregated library statistics.
 
         Args:
-            mode: Filtre optionnel par mode ("jukebox" ou "curating").
+            mode: Optional mode filter ("jukebox" or "curating").
 
         Returns:
-            Dict avec `total_tracks` (int) et `total_duration_seconds` (float).
+            Dict with `total_tracks` (int) and `total_duration_seconds` (float).
         """
         query = (
             "SELECT COUNT(*) AS total_tracks, "
@@ -516,7 +516,7 @@ class WaveformRepository(BaseRepository):
         query += " ORDER BY t.date_added DESC"
 
         if limit:
-            # LIMIT paramétré plutôt qu'interpolé : évite tout risque d'injection.
+            # Parameterized LIMIT rather than interpolated: avoids any injection risk.
             query += " LIMIT ?"
             params.append(limit)
 
@@ -526,9 +526,9 @@ class WaveformRepository(BaseRepository):
 class AnalysisRepository(BaseRepository):
     """Repository for audio analysis operations."""
 
-    # Colonnes autorisées de la table audio_analysis (hors track_id, clé primaire).
-    # Toute clé du dict `analysis` absente de cette whitelist est rejetée avant
-    # construction de la requête SQL pour éviter toute injection via les noms de colonnes.
+    # Allowed columns of the audio_analysis table (excluding track_id, the primary key).
+    # Any key of the `analysis` dict missing from this whitelist is rejected before
+    # building the SQL query to prevent any injection via column names.
     _ALLOWED_COLUMNS = frozenset(
         {
             "tempo",
@@ -617,11 +617,11 @@ class AnalysisRepository(BaseRepository):
             analysis: Dict of analysis field names to values
 
         Raises:
-            ValueError: Si une clé du dict n'appartient pas à la whitelist de colonnes.
+            ValueError: If a key of the dict does not belong to the column whitelist.
         """
-        # Validation des clés contre la whitelist avant toute construction de requête :
-        # les noms de colonnes sont interpolés dans le SQL (impossible de les lier),
-        # une clé non whitelistée pourrait donc injecter du SQL arbitraire.
+        # Validate keys against the whitelist before building any query:
+        # column names are interpolated into the SQL (they cannot be bound),
+        # so a non-whitelisted key could inject arbitrary SQL.
         unknown = set(analysis) - self._ALLOWED_COLUMNS
         if unknown:
             raise ValueError(f"Colonnes d'analyse inconnues : {sorted(unknown)}")
@@ -636,7 +636,7 @@ class AnalysisRepository(BaseRepository):
             if analysis:
                 set_clause = ", ".join(f"{k} = ?" for k in analysis)
                 values = list(analysis.values()) + [track_id]
-                # `set_clause` ne contient que des colonnes whitelistées (cf. _ALLOWED_COLUMNS).
+                # `set_clause` only contains whitelisted columns (see _ALLOWED_COLUMNS).
                 self._conn.execute(
                     f"UPDATE audio_analysis SET {set_clause} WHERE track_id = ?",  # noqa: S608
                     values,
@@ -646,7 +646,7 @@ class AnalysisRepository(BaseRepository):
             columns = ["track_id"] + list(analysis.keys())
             placeholders = ", ".join(["?"] * len(columns))
             values = [track_id] + list(analysis.values())
-            # `columns` ne contient que des colonnes whitelistées (cf. _ALLOWED_COLUMNS).
+            # `columns` only contains whitelisted columns (see _ALLOWED_COLUMNS).
             self._conn.execute(
                 f"INSERT INTO audio_analysis ({', '.join(columns)}) VALUES ({placeholders})",  # noqa: S608
                 values,
@@ -704,7 +704,7 @@ class AnalysisRepository(BaseRepository):
         query += " ORDER BY t.date_added DESC"
 
         if limit:
-            # LIMIT paramétré plutôt qu'interpolé : évite tout risque d'injection.
+            # Parameterized LIMIT rather than interpolated: avoids any injection risk.
             query += " LIMIT ?"
             params.append(limit)
 
@@ -715,31 +715,31 @@ class PlaylistRepository(BaseRepository):
     """Repository for playlist operations."""
 
     def create(self, name: str) -> int:
-        """Crée une playlist et retourne son id.
+        """Create a playlist and return its id.
 
         Args:
-            name: Nom de la playlist (doit être unique).
+            name: Playlist name (must be unique).
 
         Returns:
-            Id de la playlist créée.
+            Id of the created playlist.
         """
         cursor = self._conn.execute("INSERT INTO playlists (name) VALUES (?)", (name,))
         self._commit()
         return int(cursor.lastrowid) if cursor.lastrowid is not None else 0
 
     def get(self, playlist_id: int) -> dict[str, Any] | None:
-        """Retourne une playlist par son ID."""
+        """Return a playlist by its ID."""
         result = self._conn.execute(
             "SELECT * FROM playlists WHERE id = ?", (playlist_id,)
         ).fetchone()
         return dict(result) if result is not None else None
 
     def get_all(self) -> list[dict[str, Any]]:
-        """Retourne toutes les playlists triées par nom."""
+        """Return all playlists sorted by name."""
         return self._conn.execute("SELECT * FROM playlists ORDER BY name").fetchall()
 
     def get_all_with_counts(self) -> list[dict[str, Any]]:
-        """Retourne toutes les playlists avec le nombre de pistes (clé track_count)."""
+        """Return all playlists with their track count (track_count key)."""
         return self._conn.execute("""
             SELECT p.*, COUNT(pt.track_id) AS track_count
             FROM playlists p
@@ -749,20 +749,20 @@ class PlaylistRepository(BaseRepository):
             """).fetchall()
 
     def delete(self, playlist_id: int) -> bool:
-        """Supprime une playlist.
+        """Delete a playlist.
 
         Args:
-            playlist_id: Id de la playlist.
+            playlist_id: Playlist id.
 
         Returns:
-            True si une ligne a été supprimée.
+            True if a row was deleted.
         """
         cursor = self._conn.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
         self._commit()
         return cursor.rowcount > 0
 
     def get_tracks(self, playlist_id: int) -> list[dict[str, Any]]:
-        """Retourne les pistes d'une playlist dans l'ordre de position."""
+        """Return the tracks of a playlist in position order."""
         return self._conn.execute(
             """
             SELECT t.*
@@ -775,7 +775,7 @@ class PlaylistRepository(BaseRepository):
         ).fetchall()
 
     def contains_track(self, playlist_id: int, track_id: int) -> bool:
-        """Indique si une piste est déjà présente dans la playlist."""
+        """Indicate whether a track is already present in the playlist."""
         row = self._conn.execute(
             "SELECT 1 FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?",
             (playlist_id, track_id),
@@ -783,14 +783,14 @@ class PlaylistRepository(BaseRepository):
         return row is not None
 
     def add_track(self, playlist_id: int, track_id: int) -> bool:
-        """Ajoute une piste en fin de playlist.
+        """Add a track at the end of the playlist.
 
         Args:
-            playlist_id: Id de la playlist.
-            track_id: Id de la piste.
+            playlist_id: Playlist id.
+            track_id: Track id.
 
         Returns:
-            True si la piste a été ajoutée, False si elle y était déjà.
+            True if the track was added, False if it was already there.
         """
         if self.contains_track(playlist_id, track_id):
             return False

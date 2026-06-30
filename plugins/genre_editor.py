@@ -77,7 +77,7 @@ class GenreEditorPlugin(SettingsSyncMixin, ShortcutMixin):
         # Validate genre format - if invalid, reset to empty
         if track and track["genre"]:
             genre = track["genre"]
-            # Validation via le pattern partagé avec GenreStyler
+            # Validation via the pattern shared with GenreStyler
             if GENRE_PATTERN.match(genre):
                 self.current_genre = genre
             else:
@@ -100,11 +100,11 @@ class GenreEditorPlugin(SettingsSyncMixin, ShortcutMixin):
         """Reload genre_editor config from database."""
         if self.context is None:
             return
-        # Conserver les hashtags du YAML avant que le sync DB ne les écrase
-        # (la DB ne stocke pas les hashtags car ils ne sont pas exposés dans l'UI de settings)
+        # Preserve the YAML hashtags before the DB sync overwrites them
+        # (the DB does not store hashtags because they are not exposed in the settings UI)
         yaml_hashtags = {gc.code: gc.hashtags for gc in self.context.config.genre_editor.codes}
         self._sync_settings_from_db()
-        # Restaurer les hashtags si la DB a des codes sans hashtags
+        # Restore the hashtags if the DB has codes without hashtags
         for gc in self.context.config.genre_editor.codes:
             if not gc.hashtags and gc.code in yaml_hashtags:
                 gc.hashtags = yaml_hashtags[gc.code]
@@ -180,21 +180,21 @@ class GenreEditorPlugin(SettingsSyncMixin, ShortcutMixin):
 
         filepath = track["filepath"]
 
-        # M29 : écrire d'abord le tag fichier, puis la DB. Si l'écriture fichier
-        # échoue, on n'altère pas la DB afin d'éviter une divergence DB/fichier.
+        # M29: write the file tag first, then the DB. If the file write
+        # fails, the DB is left untouched to avoid a DB/file divergence.
         from jukebox.utils.tag_writer import save_audio_tags
 
         success = save_audio_tags(filepath, {"genre": new_genre})
         if not success:
             logging.error("Failed to save genre to file: %s", filepath)
-            # Retour visuel dans la status bar en cas d'échec de sauvegarde
+            # Visual feedback in the status bar when the save fails
             self.context.emit(
                 Events.STATUS_MESSAGE,
                 message=f"Erreur : impossible de sauvegarder le genre dans {Path(filepath).name}",
             )
             return
 
-        # Le fichier est à jour : on synchronise la DB et l'affichage
+        # The file is up to date: synchronize the DB and the display
         self.context.database.tracks.update_metadata(self.current_track_id, {"genre": new_genre})
         self.context.emit(Events.TRACK_METADATA_UPDATED, filepath=Path(filepath))
         logging.info("Saved genre '%s' for track %s", new_genre, self.current_track_id)

@@ -10,7 +10,7 @@ from plugins.loop_player import PLAYLIST_BUTTON_COUNT, LoopPlayerPlugin
 
 
 class _FakeUIBuilder:
-    """UIBuilder minimal : insère réellement dans le layout, mock le reste."""
+    """Minimal UIBuilder: actually inserts into the layout, mocks the rest."""
 
     def __init__(self, main_window) -> None:  # type: ignore[no-untyped-def]
         self.main_window = main_window
@@ -28,7 +28,7 @@ class _FakeUIBuilder:
 
 
 def _stretch_index(layout) -> int:  # type: ignore[no-untyped-def]
-    """Retourne l'index du spacer (stretch) dans le layout."""
+    """Return the index of the spacer (stretch) in the layout."""
     for i in range(layout.count()):
         item = layout.itemAt(i)
         if item and item.spacerItem():
@@ -37,7 +37,7 @@ def _stretch_index(layout) -> int:  # type: ignore[no-untyped-def]
 
 
 def _widget_index(layout, widget) -> int:  # type: ignore[no-untyped-def]
-    """Retourne l'index d'un widget donné dans le layout."""
+    """Return the index of a given widget in the layout."""
     for i in range(layout.count()):
         item = layout.itemAt(i)
         if item and item.widget() is widget:
@@ -46,7 +46,7 @@ def _widget_index(layout, widget) -> int:  # type: ignore[no-untyped-def]
 
 
 def _make_plugin(qapp):  # type: ignore[no-untyped-def]
-    """Construit le plugin enregistré sur des PlayerControls réels."""
+    """Build the plugin registered on real PlayerControls."""
     controls = PlayerControls()
     main_window = Mock()
     main_window.controls = controls
@@ -62,7 +62,7 @@ def _make_plugin(qapp):  # type: ignore[no-untyped-def]
 
 
 def _make_plugin_without_stretch(qapp):  # type: ignore[no-untyped-def]
-    """Construit le plugin sur une barre de contrôles dépourvue de ressort."""
+    """Build the plugin on a controls bar that has no stretch."""
     controls = QWidget()
     layout = QHBoxLayout()
     layout.addWidget(QPushButton("a"))
@@ -83,7 +83,7 @@ def _make_plugin_without_stretch(qapp):  # type: ignore[no-untyped-def]
 
 
 def test_playlist_button_is_right_aligned(qapp) -> None:  # type: ignore[no-untyped-def]
-    """Le bouton playlist doit être ferré à droite (après le stretch)."""
+    """The playlist button must be right-aligned (after the stretch)."""
     plugin, layout = _make_plugin(qapp)
 
     stretch_idx = _stretch_index(layout)
@@ -91,21 +91,21 @@ def test_playlist_button_is_right_aligned(qapp) -> None:  # type: ignore[no-unty
     loop_idx = _widget_index(layout, plugin.loop_button)
 
     assert stretch_idx >= 0
-    # Le bouton loop reste à gauche, le bouton playlist passe à droite du stretch.
+    # The loop button stays on the left, the playlist button goes to the right of the stretch.
     assert loop_idx < stretch_idx
     assert playlist_idx > stretch_idx
 
 
 def test_playlist_button_before_timer(qapp) -> None:  # type: ignore[no-untyped-def]
-    """Le bouton playlist se place juste avant le timer de replay.
+    """The playlist button is placed just before the replay timer.
 
-    On simule l'insertion ultérieure du widget timer (comme track_info, juste
-    avant le label Volume) et on vérifie que le bouton playlist le précède.
+    We simulate the later insertion of the timer widget (like track_info, just
+    before the Volume label) and verify that the playlist button precedes it.
     """
     plugin, layout = _make_plugin(qapp)
 
-    # Localise le label "Volume:" pour insérer le timer juste avant, comme le
-    # ferait le plugin track_info chargé après loop_player.
+    # Locate the "Volume:" label to insert the timer just before it, as the
+    # track_info plugin loaded after loop_player would do.
     volume_label_idx = -1
     for i in range(layout.count()):
         item = layout.itemAt(i)
@@ -125,7 +125,7 @@ def test_playlist_button_before_timer(qapp) -> None:  # type: ignore[no-untyped-
 
 
 def test_three_playlist_buttons_right_aligned_in_order(qapp) -> None:  # type: ignore[no-untyped-def]
-    """Les 3 boutons playlist sont ferrés à droite et dans l'ordre cohérent."""
+    """The 3 playlist buttons are right-aligned and in consistent order."""
     plugin, layout = _make_plugin(qapp)
 
     stretch_idx = _stretch_index(layout)
@@ -133,15 +133,15 @@ def test_three_playlist_buttons_right_aligned_in_order(qapp) -> None:  # type: i
     idx2 = _widget_index(layout, plugin._playlist_buttons[1])
     idx3 = _widget_index(layout, plugin._playlist_buttons[2])
 
-    # Tous après le stretch (ferrés à droite).
+    # All after the stretch (right-aligned).
     assert stretch_idx >= 0
     assert idx1 > stretch_idx
-    # Ordre cohérent : 1re (plus récente) → 2e → 3e, de gauche à droite.
+    # Consistent order: 1st (most recent) → 2nd → 3rd, left to right.
     assert idx1 < idx2 < idx3
 
 
 def test_playlist_buttons_disabled_and_hidden_initially(qapp) -> None:  # type: ignore[no-untyped-def]
-    """Sans playlist récente, les 3 boutons sont désactivés et masqués."""
+    """With no recent playlist, the 3 buttons are disabled and hidden."""
     plugin, _ = _make_plugin(qapp)
 
     assert len(plugin._playlist_buttons) == 3
@@ -151,12 +151,12 @@ def test_playlist_buttons_disabled_and_hidden_initially(qapp) -> None:  # type: 
 
 
 def test_recent_playlists_populate_buttons_in_order(qapp) -> None:  # type: ignore[no-untyped-def]
-    """Les playlists récentes alimentent les boutons, plus récente en premier."""
+    """Recent playlists populate the buttons, most recent first."""
     plugin, _ = _make_plugin(qapp)
     plugin.activate("jukebox")
 
     plugin._on_track_added_to_playlist(1, "Alpha")
-    # Un seul slot rempli : seul le 1er bouton est actif.
+    # Only one slot filled: only the 1st button is enabled.
     assert plugin._playlist_buttons[0].isEnabled() is True
     assert plugin._playlist_buttons[0].text() == "→ Alpha"
     assert plugin._playlist_buttons[1].isEnabled() is False
@@ -164,7 +164,7 @@ def test_recent_playlists_populate_buttons_in_order(qapp) -> None:  # type: igno
 
     plugin._on_track_added_to_playlist(2, "Beta")
     plugin._on_track_added_to_playlist(3, "Gamma")
-    # Plus récente en tête : Gamma, Beta, Alpha.
+    # Most recent at the top: Gamma, Beta, Alpha.
     assert plugin._playlist_buttons[0].text() == "→ Gamma"
     assert plugin._playlist_buttons[1].text() == "→ Beta"
     assert plugin._playlist_buttons[2].text() == "→ Alpha"
@@ -172,23 +172,23 @@ def test_recent_playlists_populate_buttons_in_order(qapp) -> None:  # type: igno
 
 
 def test_recent_playlists_dedup_and_cap(qapp) -> None:  # type: ignore[no-untyped-def]
-    """Une playlist réutilisée remonte en tête sans doublon, liste plafonnée à 3."""
+    """A reused playlist moves back to the top without duplicate, list capped at 3."""
     plugin, _ = _make_plugin(qapp)
     plugin.activate("jukebox")
 
     for pid, name in [(1, "Alpha"), (2, "Beta"), (3, "Gamma")]:
         plugin._on_track_added_to_playlist(pid, name)
-    # Réutilisation d'Alpha : elle remonte en tête, pas de doublon.
+    # Reusing Alpha: it moves back to the top, no duplicate.
     plugin._on_track_added_to_playlist(1, "Alpha")
     assert plugin._recent_playlists == [(1, "Alpha"), (3, "Gamma"), (2, "Beta")]
 
-    # Nouvelle playlist : la plus ancienne (Beta) est évincée, cap à 3.
+    # New playlist: the oldest (Beta) is evicted, cap at 3.
     plugin._on_track_added_to_playlist(4, "Delta")
     assert plugin._recent_playlists == [(4, "Delta"), (1, "Alpha"), (3, "Gamma")]
 
 
 def test_copy_to_recent_playlist_targets_correct_id(qapp) -> None:  # type: ignore[no-untyped-def]
-    """Chaque bouton copie le morceau courant vers la bonne playlist."""
+    """Each button copies the current track to the right playlist."""
     plugin, _ = _make_plugin(qapp)
     plugin.context.player.current_file = "/music/song.mp3"
 
@@ -207,7 +207,7 @@ def test_copy_to_recent_playlist_targets_correct_id(qapp) -> None:  # type: igno
 
 
 def test_copy_to_empty_slot_is_noop(qapp) -> None:  # type: ignore[no-untyped-def]
-    """Cliquer un slot sans playlist associée ne déclenche aucune copie."""
+    """Clicking a slot with no associated playlist triggers no copy."""
     plugin, _ = _make_plugin(qapp)
     plugin.context.player.current_file = "/music/song.mp3"
 
@@ -220,7 +220,7 @@ def test_copy_to_empty_slot_is_noop(qapp) -> None:  # type: ignore[no-untyped-de
 
 
 def test_buttons_visibility_follows_mode(qapp) -> None:  # type: ignore[no-untyped-def]
-    """La visibilité des boutons suit l'activation/désactivation du mode jukebox."""
+    """Button visibility follows the activation/deactivation of jukebox mode."""
     plugin, _ = _make_plugin(qapp)
     plugin.activate("jukebox")
     plugin._on_track_added_to_playlist(1, "Alpha")
@@ -232,15 +232,15 @@ def test_buttons_visibility_follows_mode(qapp) -> None:  # type: ignore[no-untyp
 
 
 def test_buttons_created_without_stretch(qapp) -> None:  # type: ignore[no-untyped-def]
-    """Sans ressort dans la barre, les boutons sont quand même créés et ajoutés.
+    """With no stretch in the bar, the buttons are still created and added.
 
-    Garantit que les handlers ne lèvent pas d'AttributeError faute de boutons.
+    Guarantees that the handlers do not raise AttributeError due to missing buttons.
     """
     plugin, layout = _make_plugin_without_stretch(qapp)
 
     assert _stretch_index(layout) == -1
     assert len(plugin._playlist_buttons) == PLAYLIST_BUTTON_COUNT
-    # Loop + 3 boutons playlist ajoutés à la fin (ordre cohérent).
+    # Loop + 3 playlist buttons added at the end (consistent order).
     assert _widget_index(layout, plugin.loop_button) >= 0
     idx = [_widget_index(layout, btn) for btn in plugin._playlist_buttons]
     assert all(i >= 0 for i in idx)
@@ -248,7 +248,7 @@ def test_buttons_created_without_stretch(qapp) -> None:  # type: ignore[no-untyp
 
 
 def test_handlers_safe_without_stretch(qapp) -> None:  # type: ignore[no-untyped-def]
-    """Les handlers fonctionnent sans ressort (pas d'AttributeError)."""
+    """The handlers work without a stretch (no AttributeError)."""
     plugin, _ = _make_plugin_without_stretch(qapp)
     plugin.activate("jukebox")
     plugin.context.player.current_file = "/music/song.mp3"
@@ -261,7 +261,7 @@ def test_handlers_safe_without_stretch(qapp) -> None:  # type: ignore[no-untyped
 
 
 def test_recent_playlists_capped_to_button_count(qapp) -> None:  # type: ignore[no-untyped-def]
-    """La liste des playlists récentes est plafonnée à PLAYLIST_BUTTON_COUNT."""
+    """The recent playlists list is capped at PLAYLIST_BUTTON_COUNT."""
     plugin, _ = _make_plugin(qapp)
     plugin.activate("jukebox")
 
@@ -272,7 +272,7 @@ def test_recent_playlists_capped_to_button_count(qapp) -> None:  # type: ignore[
 
 
 def test_deleted_playlist_dropped_on_change(qapp) -> None:  # type: ignore[no-untyped-def]
-    """Une playlist supprimée est retirée des raccourcis sur PLAYLIST_CHANGED."""
+    """A deleted playlist is removed from the shortcuts on PLAYLIST_CHANGED."""
     plugin, _ = _make_plugin(qapp)
     plugin.activate("jukebox")
 
@@ -280,7 +280,7 @@ def test_deleted_playlist_dropped_on_change(qapp) -> None:  # type: ignore[no-un
     plugin._on_track_added_to_playlist(2, "Beta")
     plugin._on_track_added_to_playlist(3, "Gamma")
 
-    # Beta (id 2) a été supprimée en base.
+    # Beta (id 2) was deleted from the database.
     plugin.context.database.conn = object()
     plugin.context.database.playlists.get_all.return_value = [
         {"id": 3, "name": "Gamma"},
@@ -291,19 +291,19 @@ def test_deleted_playlist_dropped_on_change(qapp) -> None:  # type: ignore[no-un
     assert plugin._recent_playlists == [(3, "Gamma"), (1, "Alpha")]
     assert plugin._playlist_buttons[0].text() == "→ Gamma"
     assert plugin._playlist_buttons[1].text() == "→ Alpha"
-    # Le 3e slot, désormais vide, est désactivé.
+    # The 3rd slot, now empty, is disabled.
     assert plugin._playlist_buttons[2].isEnabled() is False
 
 
 def test_renamed_playlist_relabeled_on_change(qapp) -> None:  # type: ignore[no-untyped-def]
-    """Une playlist renommée voit son libellé mis à jour sur PLAYLIST_CHANGED."""
+    """A renamed playlist has its label updated on PLAYLIST_CHANGED."""
     plugin, _ = _make_plugin(qapp)
     plugin.activate("jukebox")
 
     plugin._on_track_added_to_playlist(1, "Alpha")
     plugin._on_track_added_to_playlist(2, "Beta")
 
-    # Beta (id 2) a été renommée en « Bravo », l'ordre de récence est conservé.
+    # Beta (id 2) was renamed to "Bravo", the recency order is preserved.
     plugin.context.database.conn = object()
     plugin.context.database.playlists.get_all.return_value = [
         {"id": 1, "name": "Alpha"},
@@ -316,7 +316,7 @@ def test_renamed_playlist_relabeled_on_change(qapp) -> None:  # type: ignore[no-
 
 
 def test_playlists_changed_noop_when_db_disconnected(qapp) -> None:  # type: ignore[no-untyped-def]
-    """Sans connexion DB, le rafraîchissement n'altère pas l'état courant."""
+    """With no DB connection, the refresh does not alter the current state."""
     plugin, _ = _make_plugin(qapp)
     plugin.activate("jukebox")
     plugin._on_track_added_to_playlist(1, "Alpha")
@@ -324,31 +324,31 @@ def test_playlists_changed_noop_when_db_disconnected(qapp) -> None:  # type: ign
     plugin.context.database.conn = None
     plugin._on_playlists_changed()
 
-    # État inchangé : pas d'appel à get_all, raccourci conservé.
+    # State unchanged: no call to get_all, shortcut preserved.
     plugin.context.database.playlists.get_all.assert_not_called()
     assert plugin._recent_playlists == [(1, "Alpha")]
 
 
 def test_playlists_changed_handles_get_all_error(qapp, caplog) -> None:  # type: ignore[no-untyped-def]
-    """Si get_all() lève, le handler logue l'erreur sans planter ni altérer l'état."""
+    """If get_all() raises, the handler logs the error without crashing or altering state."""
     plugin, _ = _make_plugin(qapp)
     plugin.activate("jukebox")
     plugin._on_track_added_to_playlist(1, "Alpha")
     plugin._on_track_added_to_playlist(2, "Beta")
 
-    # get_all échoue (ex. erreur SQLite) alors que la connexion est établie.
+    # get_all fails (e.g. SQLite error) while the connection is established.
     plugin.context.database.conn = object()
     plugin.context.database.playlists.get_all.side_effect = RuntimeError("DB boom")
 
     with caplog.at_level(logging.ERROR, logger="plugins.loop_player"):
-        plugin._on_playlists_changed()  # ne doit pas propager
+        plugin._on_playlists_changed()  # must not propagate
 
-    # L'erreur est loguée (pas avalée silencieusement) avec sa trace d'exception.
+    # The error is logged (not silently swallowed) with its exception traceback.
     error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
     assert error_records, "aucune erreur loguée"
     assert any("rafraîchissement" in r.getMessage() for r in error_records)
     assert any(r.exc_info is not None for r in error_records)
-    # L'état des raccourcis reste cohérent (inchangé).
+    # The shortcut state remains consistent (unchanged).
     assert plugin._recent_playlists == [(2, "Beta"), (1, "Alpha")]
     assert plugin._playlist_buttons[0].text() == "→ Beta"
     assert plugin._playlist_buttons[1].text() == "→ Alpha"
@@ -357,16 +357,15 @@ def test_playlists_changed_handles_get_all_error(qapp, caplog) -> None:  # type:
 
 
 def test_add_to_playlist_refreshes_buttons_once(qapp) -> None:  # type: ignore[no-untyped-def]
-    """Une mutation (PLAYLIST_CHANGED + TRACK_ADDED_TO_PLAYLIST) ne rafraîchit qu'une fois.
+    """A mutation (PLAYLIST_CHANGED + TRACK_ADDED_TO_PLAYLIST) refreshes only once.
 
-    Reproduit l'ordre d'émission de MainWindow._on_add_to_playlist : un seul ajout
-    déclenche les deux événements, mais boutons et get_all() ne doivent être
-    sollicités qu'une seule fois (pas de double rafraîchissement ni requête DB
-    redondante).
+    Reproduces the emission order of MainWindow._on_add_to_playlist: a single add
+    triggers both events, but the buttons and get_all() must only be invoked
+    once (no double refresh and no redundant DB query).
     """
     plugin, _ = _make_plugin(qapp)
     plugin.activate("jukebox")
-    # Amorce une playlist récente (le bump n'appelle pas get_all()).
+    # Seed a recent playlist (the bump does not call get_all()).
     plugin._on_track_added_to_playlist(1, "Alpha")
 
     plugin.context.database.conn = object()
@@ -376,19 +375,19 @@ def test_add_to_playlist_refreshes_buttons_once(qapp) -> None:  # type: ignore[n
     with patch.object(
         plugin, "_refresh_playlist_buttons", wraps=plugin._refresh_playlist_buttons
     ) as refresh_spy:
-        # Ordre réel : PLAYLIST_CHANGED puis TRACK_ADDED_TO_PLAYLIST.
+        # Real order: PLAYLIST_CHANGED then TRACK_ADDED_TO_PLAYLIST.
         plugin._on_playlists_changed()
         plugin._on_track_added_to_playlist(1, "Alpha")
 
     assert refresh_spy.call_count == 1
     assert plugin.context.database.playlists.get_all.call_count == 1
-    # Comportement visible inchangé : le bouton reflète la playlist récente.
+    # Visible behavior unchanged: the button reflects the recent playlist.
     assert plugin._playlist_buttons[0].text() == "→ Alpha"
     assert plugin._recent_playlists == [(1, "Alpha")]
 
 
 def test_long_playlist_name_is_elided(qapp) -> None:  # type: ignore[no-untyped-def]
-    """Un nom de playlist trop long est tronqué avec une ellipse dans le libellé."""
+    """A playlist name that is too long is truncated with an ellipsis in the label."""
     plugin, _ = _make_plugin(qapp)
     plugin.activate("jukebox")
 
@@ -396,7 +395,7 @@ def test_long_playlist_name_is_elided(qapp) -> None:  # type: ignore[no-untyped-
     plugin._on_track_added_to_playlist(1, long_name)
 
     btn = plugin._playlist_buttons[0]
-    # Le libellé est tronqué (ellipse) mais le nom complet reste dans l'info-bulle.
+    # The label is truncated (ellipsis) but the full name remains in the tooltip.
     assert "…" in btn.text()
     assert btn.text() != f"→ {long_name}"
     assert long_name in btn.toolTip()

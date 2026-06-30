@@ -56,8 +56,8 @@ class ThemeSwitcherPlugin:
             self.current_theme = theme_name
             logger.info("Switched to %s theme", theme_name)
         else:
-            # Feedback explicite : sans cela, un échec d'application de thème
-            # (nom inconnu, fichier QSS manquant) passait totalement inaperçu.
+            # Explicit feedback: without this, a theme application failure
+            # (unknown name, missing QSS file) went completely unnoticed.
             logger.warning("Failed to apply theme '%s'", theme_name)
             self.context.emit(Events.STATUS_MESSAGE, message=f"Could not apply theme: {theme_name}")
 

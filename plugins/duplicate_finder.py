@@ -51,9 +51,9 @@ class DuplicateFinderPlugin:
 
         # Show dialog
         dialog = DuplicateDialog(duplicates)
-        # On affiche le dialog de façon modale via une référence à la méthode :
-        # cela contourne un faux positif du hook de sécurité tout en restant
-        # conforme à ruff (B009).
+        # Show the dialog modally via a reference to the method: this works
+        # around a false positive from the security hook while staying
+        # compliant with ruff (B009).
         show_modal = dialog.exec
         show_modal()
 
@@ -78,9 +78,9 @@ class DuplicateDialog(QDialog):
 
         layout = QVBoxLayout()
 
-        # TODO : ce dialog est en lecture seule. Aucune action corrective
-        # (fusion/suppression des doublons) n'est encore implémentée ; il sert
-        # uniquement à signaler les doublons à l'utilisateur.
+        # TODO: this dialog is read-only. No corrective action (merging/deleting
+        # duplicates) is implemented yet; it only serves to report duplicates
+        # to the user.
         self.list_widget = QListWidget()
         for (title, artist), tracks in self.duplicates.items():
             item_text = f"{artist} - {title} ({len(tracks)} copies)"

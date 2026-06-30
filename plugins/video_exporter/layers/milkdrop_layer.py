@@ -1,4 +1,4 @@
-"""Couche de visualisation MilkDrop via libprojectM v4."""
+"""MilkDrop visualization layer via libprojectM v4."""
 
 from __future__ import annotations
 
@@ -23,14 +23,14 @@ from plugins.video_exporter.layers.gpu_shaders import (
     get_shared_gl_context,
 )
 
-# Chemins de recherche de la bibliothèque libprojectM (macOS et Linux)
+# Search paths for the libprojectM library (macOS and Linux)
 _LIBPROJECTM_SEARCH_PATHS = [
-    # macOS — convention avec tiret (cmake install depuis les sources)
+    # macOS — dash convention (cmake install from sources)
     "/usr/local/lib/libprojectM-4.dylib",
     "/usr/local/lib/libprojectM-4.4.dylib",
     "/opt/homebrew/lib/libprojectM-4.dylib",
     "/opt/homebrew/lib/libprojectM-4.4.dylib",
-    # macOS — convention avec point (anciens packages)
+    # macOS — dot convention (older packages)
     "/usr/local/lib/libprojectM.4.dylib",
     "/usr/local/lib/libprojectM.dylib",
     "/opt/homebrew/lib/libprojectM.4.dylib",
@@ -45,9 +45,9 @@ logger = logging.getLogger(__name__)
 
 
 class MilkDropLayer(BaseVisualLayer):
-    """Couche de visualisation MilkDrop via projectM v4."""
+    """MilkDrop visualization layer via projectM v4."""
 
-    # Z-index sous VJingLayer (z=4)
+    # Z-index below VJingLayer (z=4)
     z_index: int = 3
 
     def __init__(
@@ -67,16 +67,16 @@ class MilkDropLayer(BaseVisualLayer):
         self._hard_cut_on_beat: bool = bool(kwargs.get("hard_cut_on_beat", True))
         self._rng_seed: int = int(kwargs.get("rng_seed", 0))
 
-        # Cache des frames pré-rendues (frame_idx → Image RGBA)
+        # Cache of pre-rendered frames (frame_idx → RGBA Image)
         self._frame_cache: dict[int, Image.Image] = {}
 
-        # Ressources OpenGL / projectM (initialisées à la demande via _init_gl)
+        # OpenGL / projectM resources (initialized on demand via _init_gl)
         self._handle: ctypes.c_void_p | None = None
         self._lib: ctypes.CDLL | None = None
         self._fbo: object | None = None
         self._ctx: object | None = None
         self._presets: list[str] = []
-        # État de rotation de preset pour le rendu à la demande
+        # Preset rotation state for on-demand rendering
         self._live_preset_idx: int = 0
         self._live_frames_since_cut: int = 0
 
@@ -85,10 +85,10 @@ class MilkDropLayer(BaseVisualLayer):
 
     @staticmethod
     def _load_library() -> ctypes.CDLL:
-        """Charge libprojectM depuis les chemins connus.
+        """Load libprojectM from the known paths.
 
         Raises:
-            RuntimeError: bibliothèque introuvable ou API v4 absente.
+            RuntimeError: library not found or v4 API missing.
         """
         for path in _LIBPROJECTM_SEARCH_PATHS:
             try:
@@ -116,7 +116,7 @@ class MilkDropLayer(BaseVisualLayer):
         )
 
     def _setup_ctypes(self) -> None:
-        """Définit les signatures ctypes des fonctions projectM utilisées."""
+        """Define the ctypes signatures of the projectM functions used."""
         if self._lib is None:
             raise RuntimeError("libprojectM non chargée")
 
@@ -133,7 +133,7 @@ class MilkDropLayer(BaseVisualLayer):
             ctypes.c_bool,
         ]
 
-        # channels : 1 = PROJECTM_MONO, 2 = PROJECTM_STEREO
+        # channels: 1 = PROJECTM_MONO, 2 = PROJECTM_STEREO
         self._lib.projectm_pcm_add_float.restype = None
         self._lib.projectm_pcm_add_float.argtypes = [
             ctypes.c_void_p,
@@ -156,7 +156,7 @@ class MilkDropLayer(BaseVisualLayer):
         self._lib.projectm_get_preset_duration.argtypes = [ctypes.c_void_p]
 
     def _collect_presets(self) -> list[str]:
-        """Collecte la liste des fichiers .milk disponibles."""
+        """Collect the list of available .milk files."""
         if not self._preset_path:
             logger.warning("[MilkDropLayer] Aucun chemin de preset configuré (preset_path vide)")
             return []
@@ -172,16 +172,16 @@ class MilkDropLayer(BaseVisualLayer):
 
         if preset_path.is_dir():
             all_presets = sorted(str(p) for p in preset_path.rglob("*.milk"))
-            # Exclure les presets de transition (noirs, non visuels)
+            # Exclude transition presets (black, non-visual)
             presets = [p for p in all_presets if "transition" not in p.lower()]
             if not presets:
-                presets = all_presets  # fallback si tout était des transitions
+                presets = all_presets  # fallback if everything was transitions
             if not presets:
                 logger.warning(
                     "[MilkDropLayer] Aucun fichier .milk trouvé dans : %s", self._preset_path
                 )
                 return presets
-            # Mélange déterministe par seed : chaque track voit un ordre différent
+            # Deterministic shuffle by seed: each track sees a different order
             rng = random.Random(self._rng_seed)  # noqa: S311
             rng.shuffle(presets)
             logger.info(
@@ -196,26 +196,26 @@ class MilkDropLayer(BaseVisualLayer):
         return []
 
     def _precompute_beats(self) -> list[int]:
-        """Calcule les indices de frames correspondant aux beats."""
+        """Compute the frame indices corresponding to the beats."""
         try:
             import librosa
         except ImportError:
             logger.warning("[MilkDropLayer] librosa absent — détection de beats désactivée")
             return []
 
-        hop_length = 512  # valeur par défaut de librosa.beat.beat_track
+        hop_length = 512  # default value of librosa.beat.beat_track
         samples_per_frame = max(1, self.sr // self.fps)
-        # beat_track retourne des indices en unités de hop_length, pas en samples
+        # beat_track returns indices in units of hop_length, not in samples
         _, beat_hop_frames = librosa.beat.beat_track(
             y=self.audio, sr=self.sr, hop_length=hop_length
         )
         return [int((int(h) * hop_length) // samples_per_frame) for h in beat_hop_frames]
 
     def _init_gl(self) -> None:
-        """Crée (ou recrée) le contexte OpenGL, FBO et handle projectM.
+        """Create (or recreate) the OpenGL context, FBO and projectM handle.
 
-        Doit être appelée depuis l'intérieur de _gpu_lock.
-        Détruit les ressources précédentes si elles existent.
+        Must be called from inside _gpu_lock.
+        Destroys the previous resources if they exist.
         """
         logger.debug("[MilkDropLayer] _init_gl: destruction ressources précédentes")
         if self._handle is not None and self._lib is not None:
@@ -233,10 +233,10 @@ class MilkDropLayer(BaseVisualLayer):
         self._ctx = get_shared_gl_context()
         logger.info("[MilkDropLayer] _init_gl: ctx type=%s", type(self._ctx).__name__)
 
-        # Création texture couleur
+        # Create color texture
         logger.debug("[MilkDropLayer] _init_gl: création texture %dx%d", self.width, self.height)
         texture = self._ctx.texture((self.width, self.height), 4)  # type: ignore[union-attr]
-        # Ajout d'un depth buffer : certains presets MilkDrop complexes en ont besoin
+        # Add a depth buffer: some complex MilkDrop presets need it
         depth_attachment = self._ctx.depth_renderbuffer((self.width, self.height))  # type: ignore[union-attr]
 
         self._fbo = self._ctx.framebuffer(  # type: ignore[union-attr]
@@ -260,15 +260,15 @@ class MilkDropLayer(BaseVisualLayer):
         logger.debug("[MilkDropLayer] _init_gl: terminé")
 
     def _render_one_frame(self, frame_idx: int) -> Image.Image:
-        """Rend un seul frame MilkDrop et retourne l'image RGBA.
+        """Render a single MilkDrop frame and return the RGBA image.
 
-        Doit être appelée depuis un contexte qui détient déjà _gpu_lock.
+        Must be called from a context that already holds _gpu_lock.
 
         Args:
-            frame_idx: Index du frame pour synchroniser l'audio.
+            frame_idx: Frame index used to synchronize the audio.
 
         Returns:
-            Image PIL RGBA correspondant au frame rendu.
+            RGBA PIL Image corresponding to the rendered frame.
         """
         samples_per_frame = max(1, self.sr // self.fps)
         start = frame_idx * samples_per_frame
@@ -284,29 +284,29 @@ class MilkDropLayer(BaseVisualLayer):
         )
         raw = self._fbo.read(components=4, dtype="f1")  # type: ignore[union-attr]
         data = np.frombuffer(raw, dtype=np.uint8).reshape((self.height, self.width, 4))
-        # OpenGL origine bas-gauche → retournement vertical
+        # OpenGL origin is bottom-left → vertical flip
         return Image.fromarray(np.flipud(data), "RGBA")
 
     def _do_warmup(self) -> None:
-        """Exécute la boucle de chauffe projectM (sans prendre _gpu_lock).
+        """Run the projectM warmup loop (without acquiring _gpu_lock).
 
-        Doit être appelée depuis un contexte qui détient déjà _gpu_lock.
-        Initialise l'état interne de projectM avec le début de l'audio pour que
-        la visualisation soit déjà vivante dès le premier frame rendu.
+        Must be called from a context that already holds _gpu_lock.
+        Initializes projectM's internal state with the start of the audio so
+        that the visualization is already alive on the very first rendered frame.
         """
         if self._lib is None or self._handle is None or self._fbo is None:
             return
 
         samples_per_frame = max(1, self.sr // self.fps)
-        # Warmup réduit : les presets Transition sont exclus de la liste,
-        # le shuffle garantit un preset visuel dès le départ.
+        # Reduced warmup: Transition presets are excluded from the list,
+        # the shuffle guarantees a visual preset right from the start.
         warmup_count = 500
         warmup_audio_len = min(len(self.audio), int(3.0 * self.sr))
         if warmup_audio_len == 0:
             logger.warning("[MilkDropLayer] Audio de warmup vide !")
             return
 
-        # Boost audio pour exciter les shaders durant la chauffe
+        # Boost audio to excite the shaders during warmup
         warmup_audio = self.audio[:warmup_audio_len].copy()
         max_amp = np.max(np.abs(warmup_audio))
         if max_amp > 0:
@@ -321,7 +321,7 @@ class MilkDropLayer(BaseVisualLayer):
         frames_per_preset = max(1, int(self._preset_duration * self.fps))
 
         for wi in range(warmup_count):
-            # Cycle de preset : avance comme le ferait render() en live
+            # Preset cycle: advance the way render() would do live
             if self._presets and wi > 0 and wi % frames_per_preset == 0:
                 self._live_preset_idx = (self._live_preset_idx + 1) % len(self._presets)
                 self._lib.projectm_load_preset_file(
@@ -329,7 +329,7 @@ class MilkDropLayer(BaseVisualLayer):
                 )
                 self._live_frames_since_cut = 0
 
-            # Bouclage sur les 3 premières secondes
+            # Loop over the first 3 seconds
             w_start = (wi * samples_per_frame) % warmup_audio_len
             w_end = min(w_start + samples_per_frame, warmup_audio_len)
 
@@ -347,7 +347,7 @@ class MilkDropLayer(BaseVisualLayer):
 
             self._live_frames_since_cut += 1
 
-            # Flush périodique
+            # Periodic flush
             if wi % 100 == 0:
                 self._fbo.read(components=1)  # type: ignore[attr-defined]
 
@@ -357,10 +357,10 @@ class MilkDropLayer(BaseVisualLayer):
         logger.info("[MilkDropLayer] Chauffe terminée")
 
     def warmup_gpu_frames(self) -> None:
-        """Chauffe projectM sans pré-calculer le cache complet.
+        """Warm up projectM without pre-computing the full cache.
 
-        À appeler depuis le thread principal avant la preview pour que les
-        effets MilkDrop soient visibles dès le premier frame affiché.
+        Call from the main thread before the preview so that the MilkDrop
+        effects are visible from the very first displayed frame.
         """
         if moderngl is None:
             raise RuntimeError("moderngl absent — installer avec : uv sync --extra video")
@@ -372,13 +372,13 @@ class MilkDropLayer(BaseVisualLayer):
         logger.info("[MilkDropLayer] Warmup preview terminé")
 
     def prerender_gpu_frames(self) -> int:
-        """Pré-rend toutes les frames MilkDrop et les stocke dans le cache.
+        """Pre-render all MilkDrop frames and store them in the cache.
 
-        Réservé à l'export : appeler depuis le thread principal avant le ThreadPoolExecutor.
-        Pour le preview, ne pas appeler — render() utilise le rendu à la demande.
+        Export-only: call from the main thread before the ThreadPoolExecutor.
+        For the preview, do not call — render() uses on-demand rendering.
 
         Returns:
-            Nombre de frames pré-rendues et mises en cache.
+            Number of frames pre-rendered and cached.
         """
         if moderngl is None:
             raise RuntimeError("moderngl absent — installer avec : uv sync --extra video")
@@ -387,19 +387,19 @@ class MilkDropLayer(BaseVisualLayer):
         beats_set = set(self._precompute_beats())
 
         with _gpu_lock:
-            # Réinitialisation propre pour garantir un rendu déterministe
+            # Clean reinitialization to guarantee deterministic rendering
             self._init_gl()
 
-            # Pré-chauffe via la méthode partagée (sans re-prendre le lock)
-            # _do_warmup() met à jour _live_preset_idx et _live_frames_since_cut
+            # Pre-warmup via the shared method (without re-acquiring the lock)
+            # _do_warmup() updates _live_preset_idx and _live_frames_since_cut
             self._do_warmup()
 
-            # Continuer depuis l'état laissé par le warmup plutôt que de
-            # repartir du preset 0 (qui est dans ! Transition/)
+            # Continue from the state left by the warmup rather than
+            # restarting from preset 0 (which is in ! Transition/)
             preset_idx = self._live_preset_idx
             frames_since_cut = self._live_frames_since_cut
 
-            # Hard cut autorisé seulement après 50% de la durée de preset minimum
+            # Hard cut allowed only after 50% of the minimum preset duration
             min_frames_hard_cut = int(self._preset_duration * self.fps * 0.5)
 
             for frame_idx in range(total_frames):
@@ -435,29 +435,29 @@ class MilkDropLayer(BaseVisualLayer):
         return len(self._frame_cache)
 
     def render(self, frame_idx: int, time_pos: float) -> Image.Image:  # noqa: ARG002
-        """Retourne la frame du cache, ou rend à la demande pour le preview.
+        """Return the cached frame, or render on demand for the preview.
 
         Args:
-            frame_idx: Index de la frame (0 à total_frames-1).
-            time_pos: Position temporelle en secondes.
+            frame_idx: Frame index (0 to total_frames-1).
+            time_pos: Time position in seconds.
 
         Returns:
-            Image PIL en mode RGBA.
+            PIL Image in RGBA mode.
         """
         cached = self._frame_cache.get(frame_idx)
         if cached is not None:
             return cached
 
-        # Rendu à la demande — mode preview (pas de pré-rendu)
+        # On-demand rendering — preview mode (no pre-rendering)
         with _gpu_lock:
-            # Vérifier la validité du contexte GL à l'intérieur du lock.
-            # Sur macOS/CGL, le contexte créé sur le thread de warmup devient
-            # InvalidObject quand ce thread se termine. On le recrée ici sur le
-            # thread courant (main thread) pour garantir un rendu fonctionnel.
+            # Check the GL context validity inside the lock.
+            # On macOS/CGL, the context created on the warmup thread becomes
+            # InvalidObject when that thread terminates. We recreate it here on the
+            # current thread (main thread) to guarantee functional rendering.
             if self._handle is None or not _is_gl_context_valid(self._ctx) or self._fbo is None:
                 self._init_gl()
 
-            # Rotation de preset par durée (fondu)
+            # Preset rotation by duration (crossfade)
             if self._presets and self._live_frames_since_cut >= int(
                 self._preset_duration * self.fps
             ):
@@ -473,7 +473,7 @@ class MilkDropLayer(BaseVisualLayer):
         return img
 
     def shutdown(self) -> None:
-        """Libère les ressources projectM."""
+        """Release the projectM resources."""
         with _gpu_lock:
             if self._handle is not None and self._lib is not None:
                 self._lib.projectm_destroy(self._handle)

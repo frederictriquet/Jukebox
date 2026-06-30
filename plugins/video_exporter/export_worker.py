@@ -43,9 +43,9 @@ class VideoExportWorker(QThread):
         self.config = config
         self.context = context
         self._cancelled = False
-        # MilkDrop exige un rendu séquentiel : le pré-rendu full-résolution
-        # cacherait des Go de frames PIL et crasherait projectM (SIGSEGV).
-        # L'ordre des presets dépend aussi du séquencement des frames.
+        # MilkDrop requires sequential rendering: full-resolution pre-rendering
+        # would cache gigabytes of PIL frames and crash projectM (SIGSEGV).
+        # Preset ordering also depends on the frame sequencing.
         milkdrop_active = config.get("layers", {}).get("milkdrop_enabled", False)
         if milkdrop_active:
             self._num_workers = 1
@@ -125,7 +125,7 @@ class VideoExportWorker(QThread):
                 height=height,
                 fps=fps,
                 audio=audio,
-                sr=int(sr),  # librosa.load() renvoie int | float, FrameRenderer attend int
+                sr=int(sr),  # librosa.load() returns int | float, FrameRenderer expects int
                 duration=duration,
                 layers_config=layers_config,
                 track_metadata=track_metadata,
@@ -175,7 +175,7 @@ class VideoExportWorker(QThread):
                 pixel_format=self.config.get("ffmpeg_pixel_format", "yuv420p"),
                 audio_codec=self.config.get("ffmpeg_audio_codec", "aac"),
                 audio_bitrate=self.config.get("ffmpeg_audio_bitrate", "192k"),
-                # Constrained CRF : débit minimum Instagram Reels (3500 kbps)
+                # Constrained CRF: minimum bitrate for Instagram Reels (3500 kbps)
                 min_video_bitrate=self.config.get("ffmpeg_min_video_bitrate", "3500k"),
                 max_video_bitrate=self.config.get("ffmpeg_max_video_bitrate", "5000k"),
                 bufsize=self.config.get("ffmpeg_bufsize", "7000k"),

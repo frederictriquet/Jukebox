@@ -54,9 +54,9 @@ class FFmpegEncoder:
             pixel_format: FFmpeg pixel format (default: yuv420p).
             audio_codec: FFmpeg audio codec (default: aac).
             audio_bitrate: FFmpeg audio bitrate (default: 192k).
-            min_video_bitrate: Débit vidéo minimum pour le constrained CRF (default: 3500k).
-            max_video_bitrate: Débit vidéo maximum pour le constrained CRF (default: 5000k).
-            bufsize: Taille du buffer VBV pour le constrained CRF (default: 7000k).
+            min_video_bitrate: Minimum video bitrate for the constrained CRF (default: 3500k).
+            max_video_bitrate: Maximum video bitrate for the constrained CRF (default: 5000k).
+            bufsize: VBV buffer size for the constrained CRF (default: 7000k).
 
         Raises:
             RuntimeError: If FFmpeg is not found.
@@ -75,14 +75,14 @@ class FFmpegEncoder:
         self.pixel_format = pixel_format
         self.audio_codec = audio_codec
         self.audio_bitrate = audio_bitrate
-        # Paramètres de constrained CRF pour garantir le débit minimum Instagram Reels
+        # Constrained CRF parameters to guarantee the minimum Instagram Reels bitrate
         self.min_video_bitrate = min_video_bitrate
         self.max_video_bitrate = max_video_bitrate
         self.bufsize = bufsize
         self.process: subprocess.Popen | None = None
         self._frame_count = 0
 
-        # Vérification de la disponibilité de FFmpeg
+        # Check FFmpeg availability
         ffmpeg_path = shutil.which("ffmpeg")
         if not ffmpeg_path:
             raise RuntimeError("FFmpeg not found. Please install FFmpeg.")
@@ -93,7 +93,7 @@ class FFmpegEncoder:
         # Ensure output directory exists
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Construction de la commande FFmpeg
+        # Build the FFmpeg command
         cmd: list[str] = [
             self.ffmpeg_path,
             "-y",  # Overwrite output file
@@ -135,7 +135,7 @@ class FFmpegEncoder:
             cmd.extend(["-vf", video_filter])
             cmd.extend(["-af", audio_filter])
 
-        # Paramètres de sortie : constrained CRF pour garantir le débit minimum Instagram Reels
+        # Output parameters: constrained CRF to guarantee the minimum Instagram Reels bitrate
         cmd.extend(
             [
                 "-c:v",
@@ -144,7 +144,7 @@ class FFmpegEncoder:
                 self.preset,
                 "-crf",
                 str(self.crf),
-                # Constrained CRF : impose un débit plancher sans abandonner le CRF
+                # Constrained CRF: enforce a floor bitrate without giving up the CRF
                 "-b:v",
                 self.min_video_bitrate,
                 "-maxrate",
@@ -157,9 +157,9 @@ class FFmpegEncoder:
                 self.audio_codec,
                 "-b:a",
                 self.audio_bitrate,
-                "-shortest",  # Fin quand le flux le plus court se termine
+                "-shortest",  # Stop when the shortest stream ends
                 "-movflags",
-                "+faststart",  # MOOV atom en tête : requis pour streaming web / Instagram boost
+                "+faststart",  # MOOV atom up front: required for web streaming / Instagram boost
                 str(self.output_path),
             ]
         )
@@ -274,8 +274,8 @@ class FFmpegEncoder:
     def cancel(self) -> None:
         """Cancel encoding and terminate FFmpeg process."""
         if self.process:
-            # Fermer stdin avant terminate() : un FFmpeg bloqué en lecture sur stdin
-            # ne réagit pas toujours à SIGTERM sur certains OS tant que le pipe est ouvert.
+            # Close stdin before terminate(): an FFmpeg blocked reading on stdin
+            # does not always react to SIGTERM on some OSes while the pipe is open.
             if self.process.stdin:
                 try:
                     self.process.stdin.close()

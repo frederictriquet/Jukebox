@@ -192,15 +192,15 @@ class GenreFilterProxyModel(QSortFilterProxyModel):
         self._expr_fn: GenreEval | None = None
         self._sort_column: int = -1
         self._sort_order: Qt.SortOrder = Qt.SortOrder.AscendingOrder
-        # Réappliquer le tri après un rechargement complet (changement de répertoire).
+        # Reapply the sort after a full reload (directory change).
         self.modelReset.connect(self._schedule_reapply_sort)
 
     def _schedule_reapply_sort(self) -> None:
-        """Diffère _reapply_sort : modelReset se déclenche avant le rechargement des tracks."""
+        """Defer _reapply_sort: modelReset fires before tracks are reloaded."""
         QTimer.singleShot(0, self._reapply_sort)
 
     def _reapply_sort(self) -> None:
-        """Réapplique le tri courant sur la source après un changement de filtre."""
+        """Reapply the current sort on the source after a filter change."""
         if self._sort_column < 0:
             return
         source = self.sourceModel()
@@ -274,8 +274,8 @@ class GenreFilterProxyModel(QSortFilterProxyModel):
         self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder
     ) -> None:  # noqa: N802
         """Delegate sorting to the source model to use numeric keys (not DisplayRole strings)."""
-        # Mémoriser le tri pour pouvoir le réappliquer après un changement de filtre.
-        # column=-1 signifie "retour au tri par défaut" : on réinitialise la mémoire.
+        # Remember the sort so it can be reapplied after a filter change.
+        # column=-1 means "back to default sort": reset the stored state.
         self._sort_column = column
         self._sort_order = order
         source = self.sourceModel()
@@ -926,8 +926,9 @@ class SearchAndFilterPlugin:
         """Handle genre button state change: persist state, update proxy, emit event."""
         active_buttons = self._drawer_buttons if self._drawer_buttons else self.genre_buttons
         on_genres, off_genres = self._build_genre_sets(active_buttons)
-        # Fusionne sans écraser : conserve les états des codes absents du jeu actif
-        # (ex. boutons toolbar quand le drawer est ouvert) au lieu de les perdre.
+        # Merge without overwriting: keep the states of codes absent from the
+        # active set (e.g. toolbar buttons when the drawer is open) instead of
+        # losing them.
         self._genre_states.update({btn.code: btn.state for btn in active_buttons})
 
         # When advanced mode is active the expression handles proxy filtering

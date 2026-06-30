@@ -87,9 +87,9 @@ class SettingsRepositoryProtocol(Protocol):
 class DatabaseProtocol(Protocol):
     """Protocol for database operations used by plugins."""
 
-    # Connexion SQLite brute (utilisée par certains plugins legacy)
+    # Raw SQLite connection (used by some legacy plugins)
     conn: Any
-    # Chemin vers le fichier de base de données
+    # Path to the database file
     db_path: Path
 
     @property
@@ -133,7 +133,7 @@ class EventBusProtocol(Protocol):
 class AudioPlayerProtocol(Protocol):
     """Protocol for audio player operations used by plugins."""
 
-    # Signaux Qt émis par AudioPlayer
+    # Qt signals emitted by AudioPlayer
     track_finished: Any
     state_changed: Any
     position_changed: Any
@@ -265,7 +265,7 @@ class VideoExporterConfigProtocol(Protocol):
 
 
 class PlaybackNavigationConfigProtocol(Protocol):
-    """Protocol pour la configuration de navigation de lecture."""
+    """Protocol for playback navigation configuration."""
 
     seek_amount: float
     rapid_press_threshold: float
@@ -273,7 +273,7 @@ class PlaybackNavigationConfigProtocol(Protocol):
 
 
 class DirectoryNavigatorConfigProtocol(Protocol):
-    """Protocol pour la configuration du navigateur de répertoires."""
+    """Protocol for the directory navigator configuration."""
 
     default_directory: str
 

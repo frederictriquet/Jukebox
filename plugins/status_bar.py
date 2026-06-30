@@ -23,7 +23,7 @@ class StatusBarPlugin:
     def __init__(self) -> None:
         """Initialize plugin."""
         self.context: PluginContextProtocol = None  # type: ignore[assignment]
-        # Variables d'instance : pas de partage d'état entre instances de plugin
+        # Instance variables: no state sharing between plugin instances
         self._status_bar: QStatusBar | None = None
         self._status_label: QLabel | None = None
 
@@ -36,7 +36,7 @@ class StatusBarPlugin:
 
     def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register status bar."""
-        # Idempotent : ne pas recréer un QStatusBar si déjà enregistré
+        # Idempotent: do not recreate a QStatusBar if one is already registered
         if self._status_bar is not None:
             return
 
@@ -52,14 +52,14 @@ class StatusBarPlugin:
         """Handle status message event.
 
         Args:
-            message: Texte à afficher.
-            color: Couleur CSS optionnelle du texte. Si None, on rétablit la
-                couleur par défaut du thème.
+            message: Text to display.
+            color: Optional CSS text color. If None, the theme's default color
+                is restored.
         """
         if self._status_label:
             self._status_label.setText(message)
-            # On honore la couleur fournie par l'émetteur (ex. batch_helper),
-            # au lieu de l'ignorer silencieusement.
+            # Honor the color supplied by the emitter (e.g. batch_helper)
+            # instead of silently ignoring it.
             if color:
                 self._status_label.setStyleSheet(f"color: {color};")
             else:
@@ -68,15 +68,15 @@ class StatusBarPlugin:
     def activate(self, mode: str) -> None:
         """Activate plugin for this mode.
 
-        No-op intentionnel : la barre de statut reste visible dans tous les
-        modes, il n'y a donc rien à (ré)activer lors d'un changement de mode.
+        Intentional no-op: the status bar stays visible in all modes, so there
+        is nothing to (re)activate on a mode change.
         """
 
     def deactivate(self, mode: str) -> None:
         """Deactivate plugin for this mode.
 
-        No-op intentionnel : la barre de statut reste visible dans tous les
-        modes, on ne la masque jamais lors d'un changement de mode.
+        Intentional no-op: the status bar stays visible in all modes, so it is
+        never hidden on a mode change.
         """
 
     def shutdown(self) -> None:

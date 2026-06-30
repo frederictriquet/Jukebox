@@ -1,15 +1,15 @@
 """Tests for BottomDrawer widget.
 
-Le drawer s'ouvre/ferme via une ``QPropertyAnimation`` (200 ms). Les tests
-attendent l'état final via ``qtbot.waitUntil`` (polling de la propriété cible)
-plutôt qu'un ``qtbot.wait(250)`` à durée fixe : ce dernier ne laissait que ~50 ms
-de marge sur l'animation et échouait de façon intermittente en suite complète,
-quand la boucle d'évènements partagée (QApplication session) est sous charge —
-d'où la dépendance à l'ordre d'exécution.
+The drawer opens/closes via a ``QPropertyAnimation`` (200 ms). The tests wait
+for the final state via ``qtbot.waitUntil`` (polling the target property)
+rather than a fixed-duration ``qtbot.wait(250)``: the latter left only ~50 ms
+of margin on the animation and failed intermittently in the full suite, when
+the shared event loop (QApplication session) is under load — hence the
+dependency on execution order.
 
-La fixture ``drawer`` stoppe en teardown toute animation encore active et purge
-les suppressions différées, pour qu'aucun timer/objet ne fuite vers les tests
-suivants (QUnifiedTimer est global au thread).
+The ``drawer`` fixture stops any still-active animation at teardown and flushes
+deferred deletions, so that no timer/object leaks into subsequent tests
+(QUnifiedTimer is thread-global).
 """
 
 from __future__ import annotations

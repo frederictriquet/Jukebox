@@ -98,13 +98,13 @@ SETTINGS = [
 ]
 
 
-# Champs de type Path : config.py applique Path(...).expanduser() (fix M05),
-# donc une valeur yaml "~/x" devient "/Users/.../x" une fois chargée.
+# Path-type fields: config.py applies Path(...).expanduser() (fix M05),
+# so a yaml value "~/x" becomes "/Users/.../x" once loaded.
 _PATH_FIELDS = {"trash_directory", "output_directory", "video_clips_folder"}
 
 
 def _expected_yaml(field: str, yaml_val: object) -> object:
-    """Valeur yaml attendue après chargement : les champs Path sont expandus."""
+    """Expected yaml value after loading: Path fields are expanded."""
     if field in _PATH_FIELDS and isinstance(yaml_val, str) and yaml_val.startswith("~"):
         return str(Path(yaml_val).expanduser())
     return yaml_val

@@ -50,14 +50,14 @@ class BatchProcessor(QObject):
     def _start_cleanup_timer(cls) -> None:
         """Start the periodic cleanup timer if not already running.
 
-        Le timer est rattaché à l'instance QApplication pour garantir qu'il vit dans
-        le thread GUI et qu'il est détruit proprement à la fermeture. Sans parent, un
-        QTimer créé hors du thread principal n'émet jamais timeout.
+        The timer is attached to the QApplication instance to guarantee it lives in
+        the GUI thread and is destroyed cleanly on shutdown. Without a parent, a
+        QTimer created outside the main thread never emits timeout.
         """
         if cls._cleanup_timer is None:
-            # parent = QApplication : ancre le timer dans le thread GUI
+            # parent = QApplication: anchors the timer in the GUI thread
             cls._cleanup_timer = QTimer(QCoreApplication.instance())
-            # Connexion unique à la création — évite N slots connectés après N appels
+            # Connect once at creation — avoids N connected slots after N calls
             cls._cleanup_timer.timeout.connect(cls._cleanup_orphan_workers)
         timer = cls._cleanup_timer
         if not timer.isActive():
@@ -87,9 +87,9 @@ class BatchProcessor(QObject):
 
     @classmethod
     def shutdown_all_workers(cls, timeout_ms: int = 5000) -> None:
-        """Interrompt et attend tous les workers orphelins — à appeler à la fermeture de l'app.
+        """Interrupt and wait for all orphan workers — call this on app shutdown.
 
-        Sans cet appel, Qt détruit les QThread encore actifs ce qui provoque un SIGABRT.
+        Without this call, Qt destroys still-active QThreads, which causes a SIGABRT.
         """
         if cls._cleanup_timer is not None:
             cls._cleanup_timer.stop()
@@ -149,7 +149,7 @@ class BatchProcessor(QObject):
         self.total_items = 0
         self.completed_count = 0
 
-        # Worker management — Any pour accéder aux signaux custom (complete, error, progress_update)
+        # Worker management — Any to access custom signals (complete, error, progress_update)
         self.current_worker: Any | None = None
 
         # State
@@ -277,7 +277,7 @@ class BatchProcessor(QObject):
             worker = self.worker_factory(item)
             self.current_worker = worker
 
-            # Connect signals (worker must emit 'complete' ou 'error')
+            # Connect signals (worker must emit 'complete' or 'error')
             if hasattr(worker, "complete"):
                 worker.complete.connect(lambda result: self._on_item_complete(item, result))
             if hasattr(worker, "error"):

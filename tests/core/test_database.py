@@ -16,7 +16,7 @@ from jukebox.core.repositories import (
 
 @pytest.fixture
 def db(tmp_path: Path) -> Iterator[Database]:
-    """Base de données connectée et initialisée, fermée en fin de test."""
+    """Connected and initialised database, closed at the end of the test."""
     database = Database(tmp_path / "test.db")
     database.connect()
     database.initialize_schema()

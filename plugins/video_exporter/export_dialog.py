@@ -52,7 +52,7 @@ RESOLUTION_PRESETS: dict[str, tuple[int, int]] = {
     "square_720": (720, 720),
     "reels_9x16 (1080×1920)": (1080, 1920),  # Reels / Stories — boostable
     "feed_4x5 (1080×1350)": (1080, 1350),  # Feed portrait standard
-    "feed_3x4 (1080×1440)": (1080, 1440),  # Feed portrait élargi
+    "feed_3x4 (1080×1440)": (1080, 1440),  # Wide feed portrait
 }
 
 # Palette display names for tooltips
@@ -321,7 +321,7 @@ class EffectPreviewDialog(QDialog):
         # Load audio file in local VLC player
         media = self._vlc_instance.media_new(str(self.filepath))
         self._vlc_player.set_media(media)
-        # Position at loop start (en millisecondes)
+        # Position at loop start (in milliseconds)
         self._vlc_player.play()
         # Wait a bit for player to initialize, then seek
         QTimer.singleShot(
@@ -447,8 +447,8 @@ class ExportDialog(QDialog):
         self.worker = None
 
         # Deterministic seed for reproducible VJing effects across preview and export
-        # SHA-256 plutôt que hash() : hash() est randomisé par PYTHONHASHSEED, ce qui
-        # casserait la reproductibilité d'une session à l'autre.
+        # SHA-256 instead of hash(): hash() is randomized by PYTHONHASHSEED, which
+        # would break reproducibility from one session to the next.
         seed_str = f"{track_metadata.get('title', '')}:{track_metadata.get('genre', '')}"
         self._rng_seed = int.from_bytes(hashlib.sha256(seed_str.encode()).digest()[:4], "big")
 
@@ -1421,7 +1421,7 @@ class ExportDialog(QDialog):
             audio_sensitivity=audio_sensitivity,
             track_metadata=self.track_metadata,
         )
-        getattr(dialog, "exec")()  # noqa: B009  # évite le mot-clé exec flaggé par le hook
+        getattr(dialog, "exec")()  # noqa: B009  # avoids the exec keyword flagged by the hook
 
     def _get_selected_palette(self) -> str:
         """Get the currently selected color palette ID.
@@ -1483,8 +1483,8 @@ class ExportDialog(QDialog):
             "width": resolution[0],
             "height": resolution[1],
             "fps": self.fps_spin.value(),
-            # Path(...).name supprime tout segment de chemin (../, /etc/…) saisi par
-            # l'utilisateur : le fichier reste confiné dans output_dir.
+            # Path(...).name strips any path segment (../, /etc/…) entered by the
+            # user: the file stays confined within output_dir.
             "output_path": Path(self.output_dir_edit.text()) / Path(self.filename_edit.text()).name,
             "track_metadata": self.track_metadata,
             "layers": {
@@ -1543,7 +1543,7 @@ class ExportDialog(QDialog):
         }
 
     def reject(self) -> None:
-        """Handle Escape key / close button — annule l'export si actif."""
+        """Handle Escape key / close button — cancel the export if active."""
         if self.worker and self.worker.isRunning():
             self._on_cancel()
             return
@@ -1558,7 +1558,7 @@ class ExportDialog(QDialog):
     def closeEvent(self, event: Any) -> None:
         """Clean up resources when dialog is closed."""
         if self.worker and self.worker.isRunning():
-            # Bloquer la fermeture et déléguer à _on_cancel qui attend la fin du worker
+            # Block the close and delegate to _on_cancel, which waits for the worker to finish
             event.ignore()
             self._on_cancel()
             return
@@ -1636,7 +1636,7 @@ class ExportDialog(QDialog):
         Args:
             output_path: Path to the exported video file.
         """
-        # Écrire le fichier description uniquement si l'export a réussi
+        # Write the description file only if the export succeeded
         self._write_video_description(output_path)
 
         self.context.emit(
@@ -1655,11 +1655,11 @@ class ExportDialog(QDialog):
         """
         lines: list[str] = []
 
-        # Relire les métadonnées depuis la DB pour avoir le genre le plus récent
-        # (self.track_metadata peut être un snapshot stale si le genre a été modifié après l'ouverture du dialog)
+        # Re-read metadata from the DB to get the most recent genre
+        # (self.track_metadata may be a stale snapshot if the genre was modified after the dialog was opened)
         fresh = self.context.database.tracks.get_by_filepath(self.filepath) or self.track_metadata
 
-        # Ligne 1 : Artist - Title
+        # Line 1: Artist - Title
         artist = (fresh.get("artist") or "").strip()
         title = (fresh.get("title") or "").strip()
         if artist and title:
@@ -1667,7 +1667,7 @@ class ExportDialog(QDialog):
         elif artist or title:
             lines.append(artist or title)
 
-        # Hashtags de genre
+        # Genre hashtags
         genre_str = (fresh.get("genre") or "").strip()
         logging.info(
             "[Video Exporter] description: genre=%r artist=%r title=%r", genre_str, artist, title

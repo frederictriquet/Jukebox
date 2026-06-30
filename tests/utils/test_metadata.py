@@ -25,7 +25,7 @@ class TestMetadataExtractor:
 
     def test_extract_nonexistent_file(self) -> None:
         """Test extracting from non-existent file raises ValueError."""
-        # mutagen lève MutagenError pour un fichier absent, ré-emballée en ValueError
+        # mutagen raises MutagenError for a missing file, re-wrapped as ValueError
         with pytest.raises(ValueError, match="Failed to extract metadata"):
             MetadataExtractor.extract(Path("/nonexistent/file.mp3"))
 
@@ -102,11 +102,11 @@ class TestMetadataExtractor:
             MetadataExtractor.extract(test_file)
 
     def test_extract_nominal_path_with_tags(self, tmp_path: Path) -> None:
-        """Test du chemin nominal complet : durée, infos audio et tags extraits."""
+        """Test the complete nominal path: duration, audio info and tags extracted."""
         test_file = tmp_path / "track.mp3"
         test_file.write_bytes(b"dummy")
 
-        # Audio mutagen factice avec durée, bitrate, sample rate et tags ID3
+        # Fake mutagen audio with duration, bitrate, sample rate and ID3 tags
         mock_audio = MagicMock()
         mock_audio.info.length = 180.5
         mock_audio.info.bitrate = 320000

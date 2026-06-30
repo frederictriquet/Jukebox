@@ -28,8 +28,8 @@ class PlaybackNavigationPlugin(SettingsSyncMixin):
         self.context: PluginContextProtocol = None  # type: ignore[assignment]
         self.last_seek_time: float = 0.0
         self.seek_multiplier: int = 1
-        # Sens du dernier seek ("forward"/"backward") pour réinitialiser
-        # l'accélération au changement de direction.
+        # Direction of the last seek ("forward"/"backward") to reset the
+        # acceleration when the direction changes.
         self.last_seek_direction: str | None = None
         self.auto_play_next: bool = True
         self.random_mode: bool = False
@@ -51,14 +51,14 @@ class PlaybackNavigationPlugin(SettingsSyncMixin):
         # Load settings from DB on startup
         self._on_settings_changed()
 
-        # Restaure les préférences de lecture persistées (cohérent avec seek_amount).
+        # Restore the persisted playback preferences (consistent with seek_amount).
         self.auto_play_next = context.get_setting(
             self.name, "auto_play_next", bool, self.auto_play_next
         )
         self.random_mode = context.get_setting(self.name, "random_mode", bool, self.random_mode)
 
     def _persist_setting(self, key: str, value: bool) -> None:
-        """Persiste un réglage booléen dans la table plugin_settings."""
+        """Persist a boolean setting in the plugin_settings table."""
         self.context.database.settings.save(self.name, key, "true" if value else "false")
 
     def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
@@ -137,10 +137,10 @@ class PlaybackNavigationPlugin(SettingsSyncMixin):
         self._seek("backward")
 
     def _seek(self, direction: str) -> None:
-        """Seek dans une direction avec accélération sur pressions rapides.
+        """Seek in a direction with acceleration on rapid presses.
 
         Args:
-            direction: "forward" ou "backward".
+            direction: "forward" or "backward".
         """
         import time
 
@@ -149,8 +149,8 @@ class PlaybackNavigationPlugin(SettingsSyncMixin):
         current_time = time.time()
         time_since_last = current_time - self.last_seek_time
 
-        # Accélère uniquement si pressé rapidement dans la même direction ;
-        # réinitialise si le délai est dépassé OU si la direction a changé.
+        # Accelerate only if pressed rapidly in the same direction; reset if
+        # the delay is exceeded OR if the direction changed.
         same_direction = self.last_seek_direction == direction
         if same_direction and time_since_last < config.rapid_press_threshold:
             self.seek_multiplier = min(self.seek_multiplier + 1, config.max_seek_multiplier)
@@ -266,14 +266,14 @@ class PlaybackNavigationPlugin(SettingsSyncMixin):
     def shutdown(self) -> None:
         """Cleanup on application exit.
 
-        Déconnecte le signal track_finished pour éviter un double
-        déclenchement si le plugin est rechargé dynamiquement.
+        Disconnects the track_finished signal to avoid a double trigger if the
+        plugin is reloaded dynamically.
         """
         if self.context is not None:
             try:
                 self.context.player.track_finished.disconnect(self._on_track_finished)
             except (RuntimeError, TypeError) as e:
-                # Connexion déjà rompue ou objet détruit : non bloquant.
+                # Connection already broken or object destroyed: non-blocking.
                 logging.debug("[Playback Navigation] track_finished déjà déconnecté : %s", e)
 
     _synced_settings = [

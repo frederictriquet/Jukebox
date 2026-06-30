@@ -34,7 +34,7 @@ class ModeSwitcherPlugin:
         self.jukebox_action: Any = None
         self.curating_action: Any = None
         self.cue_maker_action: Any = None
-        # Garde de réentrance : processEvents() peut redéclencher _on_mode_changed.
+        # Reentrancy guard: processEvents() may re-trigger _on_mode_changed.
         self._switching: bool = False
 
     def initialize(self, context: PluginContextProtocol) -> None:
@@ -103,7 +103,7 @@ class ModeSwitcherPlugin:
 
     def _on_mode_changed(self, mode: AppMode) -> None:
         """Handle mode change and reload plugins."""
-        # Empêche une réentrance déclenchée par les processEvents() ci-dessous.
+        # Prevent reentrancy triggered by the processEvents() calls below.
         if self._switching:
             logging.warning("Changement de mode ignoré : un switch est déjà en cours")
             return
@@ -192,12 +192,12 @@ class ModeSwitcherPlugin:
     def shutdown(self) -> None:
         """Cleanup on application exit.
 
-        Déconnecte mode_changed pour éviter un double déclenchement si le
-        plugin est rechargé dynamiquement.
+        Disconnects mode_changed to avoid a double trigger if the plugin is
+        reloaded dynamically.
         """
         if self.mode_manager is not None:
             try:
                 self.mode_manager.mode_changed.disconnect(self._on_mode_changed)
             except (RuntimeError, TypeError) as e:
-                # Connexion déjà rompue ou objet détruit : non bloquant.
+                # Connection already broken or object destroyed: non-blocking.
                 logging.debug("[Mode Switcher] mode_changed déjà déconnecté : %s", e)

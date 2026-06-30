@@ -72,21 +72,21 @@ class BaseVisualLayer(ABC):
         pass
 
     def prerender_gpu_frames(self) -> int:  # noqa: B027
-        """Pré-calcule les effets GPU pour toutes les frames.
+        """Pre-compute GPU effects for all frames.
 
-        Implémentation par défaut : aucune pré-computation GPU.
-        Les sous-classes qui utilisent le GPU doivent surcharger cette méthode.
+        Default implementation: no GPU pre-computation.
+        Subclasses that use the GPU must override this method.
 
         Returns:
-            Nombre de frames pré-calculées (0 par défaut).
+            Number of pre-computed frames (0 by default).
         """
         return 0
 
     def warmup_gpu_frames(self) -> None:  # noqa: B027
-        """Chauffe le renderer GPU sans pré-calculer toutes les frames.
+        """Warm up the GPU renderer without pre-computing all frames.
 
-        Implémentation par défaut : aucune action.
-        Les sous-classes GPU doivent surcharger cette méthode.
+        Default implementation: no action.
+        GPU subclasses must override this method.
         """
 
     def create_transparent_image(self) -> Image.Image:

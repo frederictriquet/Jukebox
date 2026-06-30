@@ -1,9 +1,9 @@
-"""Tests de libération du contexte GL partagé (sans dépendance à moderngl).
+"""Tests for releasing the shared GL context (without depending on moderngl).
 
-Couvre ``release_shared_gl_context`` indépendamment de la présence du runtime
-OpenGL : on injecte des doubles dans les ``threading.local`` du module pour
-vérifier que la libération est bien déclenchée et que l'état partagé est remis
-à zéro (isolation entre tests / process).
+Covers ``release_shared_gl_context`` independently of the presence of the
+OpenGL runtime: we inject doubles into the module's ``threading.local`` to
+verify that the release is properly triggered and that the shared state is
+reset (isolation between tests / processes).
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from plugins.video_exporter.layers import gpu_shaders
 
 @pytest.fixture(autouse=True)
 def _reset_thread_locals() -> Any:
-    """Garantit des thread-locals propres avant et après chaque test."""
+    """Guarantee clean thread-locals before and after each test."""
     gpu_shaders._thread_local_gl.ctx = None
     gpu_shaders._gpu_renderer_local.renderers = {}
     yield
@@ -26,11 +26,11 @@ def _reset_thread_locals() -> Any:
 
 
 def test_release_is_noop_without_context() -> None:
-    """Aucun contexte ni renderer : l'appel ne lève pas et reste idempotent."""
+    """No context and no renderer: the call does not raise and stays idempotent."""
     gpu_shaders._thread_local_gl.ctx = None
     gpu_shaders._gpu_renderer_local.renderers = {}
 
-    # Deux appels successifs : aucune exception, état toujours vide (idempotent).
+    # Two successive calls: no exception, state still empty (idempotent).
     gpu_shaders.release_shared_gl_context()
     gpu_shaders.release_shared_gl_context()
 
@@ -39,7 +39,7 @@ def test_release_is_noop_without_context() -> None:
 
 
 def test_release_cleans_renderers_and_context() -> None:
-    """Renderers nettoyés, contexte libéré et thread-locals remis à zéro."""
+    """Renderers cleaned up, context released and thread-locals reset."""
     cleaned: list[str] = []
 
     class FakeRenderer:
@@ -66,7 +66,7 @@ def test_release_cleans_renderers_and_context() -> None:
 
 
 def test_release_swallows_context_release_error() -> None:
-    """Une erreur de ctx.release() est logguée mais ne propage pas; état nettoyé."""
+    """An error from ctx.release() is logged but does not propagate; state cleaned up."""
 
     class ExplodingCtx:
         def release(self) -> None:

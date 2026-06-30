@@ -365,7 +365,7 @@ class WaveformVisualizerPlugin(SettingsSyncMixin):
             except (RuntimeError, TypeError) as e:
                 logging.debug("[WaveformVisualizer] Signaux déjà déconnectés : %s", e)
 
-        # Attendre tous les workers orphelins avant que Qt ne détruise les QThreads
+        # Wait for all orphan workers before Qt destroys the QThreads
         from jukebox.core.batch_processor import BatchProcessor
 
         BatchProcessor.shutdown_all_workers(timeout_ms=WORKER_WAIT_TIMEOUT_MS)
@@ -515,7 +515,7 @@ class WaveformWidget(QWidget):
 
             # Set range to fit data exactly
             self.plot_widget.setXRange(0, len(bass), padding=0)
-            # Garde : array vide → ValueError ; max nul → setYRange(0, 0) crashe pyqtgraph
+            # Guard: empty array → ValueError; zero max → setYRange(0, 0) crashes pyqtgraph
             max_total = float(np.max(treble_total)) if len(treble_total) > 0 else 0.0
             if max_total <= 0.0:
                 max_total = 1.0
@@ -554,7 +554,7 @@ class WaveformWidget(QWidget):
         if self.waveform_data is None:
             return
 
-        # Garde contre une waveform vide pour éviter une division par zéro
+        # Guard against an empty waveform to avoid a division by zero
         waveform_length = len(self.waveform_data)
         if waveform_length == 0:
             return
@@ -763,6 +763,6 @@ class CompleteWaveformWorker(QThread):
 
             filename = os.path.basename(self.filepath)
             error_msg = f"Error processing {filename}: {e}"
-            # exc_info=True journalise déjà la stack trace complète
+            # exc_info=True already logs the full stack trace
             logging.error("[WaveformWorker] %s", error_msg, exc_info=True)
             self.error.emit(error_msg)

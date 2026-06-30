@@ -27,7 +27,7 @@ class UIConfig(BaseModel):
     @field_validator("curating_directory", mode="after")
     @classmethod
     def _expand_user(cls, value: str) -> str:
-        """Expanse les chemins `~` non résolus par Pydantic (champ stocké en str)."""
+        """Expand `~` paths not resolved by Pydantic (field stored as str)."""
         return str(Path(value).expanduser()) if value else value
 
 
@@ -151,7 +151,7 @@ class FileManagerConfig(BaseModel):
     @field_validator("trash_directory", mode="after")
     @classmethod
     def _expand_user(cls, value: str) -> str:
-        """Expanse les chemins `~` non résolus par Pydantic (champ stocké en str)."""
+        """Expand `~` paths not resolved by Pydantic (field stored as str)."""
         return str(Path(value).expanduser()) if value else value
 
 
@@ -225,7 +225,7 @@ class VideoExporterConfig(BaseModel):
     ffmpeg_pixel_format: str = "yuv420p"
     ffmpeg_audio_codec: str = "aac"
     ffmpeg_audio_bitrate: str = "192k"
-    # Constrained CRF pour respecter le débit minimum Instagram Reels (3500 kbps)
+    # Constrained CRF to respect the minimum Instagram Reels bitrate (3500 kbps)
     ffmpeg_min_video_bitrate: str = "3500k"
     ffmpeg_max_video_bitrate: str = "5000k"
     ffmpeg_bufsize: str = "7000k"
@@ -241,7 +241,7 @@ class VideoExporterConfig(BaseModel):
     )
     @classmethod
     def _expand_user(cls, value: str) -> str:
-        """Expanse les chemins `~` non résolus par Pydantic (champs stockés en str)."""
+        """Expand `~` paths not resolved by Pydantic (fields stored as str)."""
         return str(Path(value).expanduser()) if value else value
 
 
@@ -257,7 +257,7 @@ class CueMakerConfig(BaseModel):
     @field_validator("shazamix_db_path", "mix_directory", mode="after")
     @classmethod
     def _expand_user(cls, value: Path) -> Path:
-        """Expanse les chemins `~` qui ne sont pas résolus par Pydantic."""
+        """Expand `~` paths that are not resolved by Pydantic."""
         return value.expanduser()
 
 
@@ -269,7 +269,7 @@ class EngineDJConfig(BaseModel):
     @field_validator("database_path", mode="after")
     @classmethod
     def _expand_user(cls, value: str) -> str:
-        """Expanse les chemins `~` non résolus par Pydantic (champ stocké en str)."""
+        """Expand `~` paths not resolved by Pydantic (field stored as str)."""
         return str(Path(value).expanduser()) if value else value
 
 
@@ -350,7 +350,7 @@ def load_config(config_path: Path | None = None) -> JukeboxConfig:
     with open(config_path) as f:
         data = yaml.safe_load(f)
 
-    # Un fichier YAML vide produit `None` ; on tombe alors sur la config par défaut.
+    # An empty YAML file yields `None`; fall back to the default config in that case.
     if data is None:
         data = {}
 

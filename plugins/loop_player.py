@@ -16,18 +16,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Nombre de boutons de raccourci vers les playlists récentes (slot 0 = la plus
-# récente). Sert à la fois à créer les boutons et à plafonner la liste des
-# playlists récentes mémorisées : c'est la seule source de vérité du nombre.
+# Number of shortcut buttons to recent playlists (slot 0 = the most recent).
+# Used both to create the buttons and to cap the list of remembered recent
+# playlists: this is the single source of truth for the count.
 PLAYLIST_BUTTON_COUNT = 3
 
-# Largeur maximale d'un bouton de raccourci playlist. Volontairement réduite
-# pour que les PLAYLIST_BUTTON_COUNT boutons ne saturent pas la barre de
-# contrôles ; les noms trop longs sont tronqués avec une ellipse.
+# Maximum width of a playlist shortcut button. Deliberately kept small so that
+# the PLAYLIST_BUTTON_COUNT buttons do not saturate the controls bar; overly
+# long names are truncated with an ellipsis.
 PLAYLIST_BUTTON_MAX_WIDTH = 90
 
-# Marge interne approximative (padding + bordure) déduite de la largeur utile
-# lors du calcul de l'ellipse du libellé.
+# Approximate inner margin (padding + border) subtracted from the usable width
+# when computing the label ellipsis.
 PLAYLIST_LABEL_PADDING = 16
 
 
@@ -43,13 +43,13 @@ class LoopPlayerPlugin(SettingsSyncMixin):
         """Initialize plugin."""
         self.context: PluginContextProtocol = None  # type: ignore[assignment]
         self.loop_button: QPushButton | None = None
-        # Boutons de raccourci vers les playlists les plus récemment utilisées
-        # (slot 0 = la plus récente). Source unique de vérité : une seule liste,
-        # ordonnée par slot, utilisée partout (pas d'attributs nommés dupliqués).
+        # Shortcut buttons to the most recently used playlists (slot 0 = the
+        # most recent). Single source of truth: one list, ordered by slot, used
+        # everywhere (no duplicated named attributes).
         self._playlist_buttons: list[QPushButton] = []
-        # Playlists récemment utilisées, plus récente en tête, dédupliquées.
+        # Recently used playlists, most recent first, deduplicated.
         self._recent_playlists: list[tuple[int, str]] = []
-        # Indique si les boutons doivent être visibles (mode jukebox actif).
+        # Whether the buttons should be visible (jukebox mode active).
         self._buttons_visible: bool = False
         self.loop_active: bool = False
         self.loop_start: float = 0.0  # Position in seconds
@@ -71,11 +71,11 @@ class LoopPlayerPlugin(SettingsSyncMixin):
         # Subscribe to waveform widget ready event (decoupled from waveform_visualizer)
         self.context.subscribe(Events.WAVEFORM_WIDGET_READY, self._on_waveform_widget_ready)
 
-        # Mémoriser la dernière playlist utilisée pour le bouton de re-copie rapide.
+        # Remember the last used playlist for the quick re-copy button.
         self.context.subscribe(Events.TRACK_ADDED_TO_PLAYLIST, self._on_track_added_to_playlist)
 
-        # Réconcilier les raccourcis avec la base après suppression/renommage
-        # d'une playlist (évite de conserver une référence morte).
+        # Reconcile the shortcuts with the database after a playlist is deleted
+        # or renamed (avoids keeping a dead reference).
         self.context.subscribe(Events.PLAYLIST_CHANGED, self._on_playlists_changed)
 
         # Load settings from database at startup
@@ -93,7 +93,7 @@ class LoopPlayerPlugin(SettingsSyncMixin):
 
         layout = controls.layout()
         if layout:
-            # Bouton de loop
+            # Loop button
             loop_duration = self.context.config.loop_player.duration
             self.loop_button = QPushButton("⟲")
             self.loop_button.setCheckable(True)
@@ -103,25 +103,25 @@ class LoopPlayerPlugin(SettingsSyncMixin):
             self.loop_button.clicked.connect(self._toggle_loop)
             self._update_button_style()
 
-            # Bouton de loop ferré à gauche : juste avant le ressort s'il existe.
+            # Loop button aligned left: just before the spacer if present.
             stretch_index = self._find_stretch_index(layout)
             if stretch_index >= 0:
                 ui_builder.insert_widget_in_layout(layout, stretch_index, self.loop_button)
             else:
                 layout.addWidget(self.loop_button)
 
-            # Crée les boutons de raccourci playlist (source unique : la liste).
-            # Toujours créés, même sans ressort, pour que les handlers
-            # (_on_track_added_to_playlist / _on_copy_to_recent_playlist)
-            # disposent de widgets valides plutôt que de lever une AttributeError.
+            # Create the playlist shortcut buttons (single source: the list).
+            # Always created, even without a spacer, so that the handlers
+            # (_on_track_added_to_playlist / _on_copy_to_recent_playlist) have
+            # valid widgets rather than raising an AttributeError.
             self._playlist_buttons = [
                 self._create_playlist_button(slot) for slot in range(PLAYLIST_BUTTON_COUNT)
             ]
 
-            # Place les boutons à droite du ressort (ferrés à droite, avant le
-            # timer de replay), dans l'ordre plus récente → moins récente. On
-            # relit la position du ressort APRÈS insertion du bouton de loop :
-            # pas de décalage d'index magique, robuste à l'ordre d'insertion.
+            # Place the buttons to the right of the spacer (right-aligned,
+            # before the replay timer), ordered most recent -> least recent.
+            # The spacer position is re-read AFTER inserting the loop button:
+            # no magic index offset, robust to insertion order.
             stretch_index = self._find_stretch_index(layout)
             if stretch_index >= 0:
                 for offset, btn in enumerate(self._playlist_buttons):
@@ -384,7 +384,7 @@ class LoopPlayerPlugin(SettingsSyncMixin):
 
     @staticmethod
     def _find_stretch_index(layout: Any) -> int:
-        """Retourne l'index du ressort (spacer) dans le layout, -1 s'il n'y en a pas."""
+        """Return the index of the spacer in the layout, or -1 if there is none."""
         for i in range(layout.count()):
             item = layout.itemAt(i)
             if item and item.spacerItem():
@@ -392,10 +392,10 @@ class LoopPlayerPlugin(SettingsSyncMixin):
         return -1
 
     def _create_playlist_button(self, slot: int) -> QPushButton:
-        """Crée un bouton de raccourci vers la playlist récente du slot donné.
+        """Create a shortcut button to the recent playlist at the given slot.
 
         Args:
-            slot: Index dans la liste des playlists récentes (0 = la plus récente).
+            slot: Index into the recent playlists list (0 = the most recent).
         """
         btn = QPushButton("→ playlist")
         btn.setToolTip("Copier le morceau courant dans une playlist récente")
@@ -407,20 +407,20 @@ class LoopPlayerPlugin(SettingsSyncMixin):
 
     @staticmethod
     def _format_playlist_label(btn: QPushButton, name: str) -> str:
-        """Construit le libellé « → nom » en tronquant le nom (ellipse) si besoin.
+        """Build the "→ name" label, truncating the name (ellipsis) if needed.
 
-        Évite qu'un nom long ne fasse déborder le bouton et sature la barre de
-        contrôles ; le nom complet reste accessible via l'info-bulle.
+        Prevents a long name from overflowing the button and saturating the
+        controls bar; the full name stays accessible via the tooltip.
         """
         prefix = "→ "
         metrics = btn.fontMetrics()
-        # Largeur utile pour le nom, préfixe et marges internes déduits.
+        # Usable width for the name, with prefix and inner margins subtracted.
         available = btn.maximumWidth() - metrics.horizontalAdvance(prefix) - PLAYLIST_LABEL_PADDING
         elided = metrics.elidedText(name, Qt.TextElideMode.ElideRight, max(available, 0))
         return f"{prefix}{elided}"
 
     def _refresh_playlist_buttons(self) -> None:
-        """Met à jour libellé, info-bulle, activation et visibilité des boutons."""
+        """Update label, tooltip, enabled state and visibility of the buttons."""
         for slot, btn in enumerate(self._playlist_buttons):
             has_playlist = slot < len(self._recent_playlists)
             if has_playlist:
@@ -431,12 +431,12 @@ class LoopPlayerPlugin(SettingsSyncMixin):
                 btn.setText("→ playlist")
                 btn.setToolTip("Copier le morceau courant dans une playlist récente")
             btn.setEnabled(has_playlist)
-            # Masqué tant qu'il n'y a pas assez de playlists récentes pour ce slot.
+            # Hidden until there are enough recent playlists for this slot.
             btn.setVisible(self._buttons_visible and has_playlist)
 
     def _on_track_added_to_playlist(self, playlist_id: int, playlist_name: str) -> None:
-        """Mémorise les playlists récentes et rafraîchit les boutons de re-copie."""
-        # Place la playlist en tête, dédupliquée, et plafonne au nombre de boutons.
+        """Remember recent playlists and refresh the re-copy buttons."""
+        # Move the playlist to the front, deduplicated, and cap at the button count.
         self._recent_playlists = [(playlist_id, playlist_name)] + [
             (pid, pname) for pid, pname in self._recent_playlists if pid != playlist_id
         ]
@@ -444,10 +444,10 @@ class LoopPlayerPlugin(SettingsSyncMixin):
         self._refresh_playlist_buttons()
 
     def _on_playlists_changed(self) -> None:
-        """Réconcilie les playlists récentes avec la base (suppression/renommage).
+        """Reconcile recent playlists with the database (deletion/rename).
 
-        Une playlist supprimée est retirée des raccourcis (plus de référence
-        morte) ; une playlist renommée voit son libellé mis à jour.
+        A deleted playlist is removed from the shortcuts (no more dead
+        reference); a renamed playlist has its label updated.
         """
         database = self.context.database
         if database.conn is None:
@@ -460,23 +460,23 @@ class LoopPlayerPlugin(SettingsSyncMixin):
             return
 
         names_by_id = {row["id"]: row["name"] for row in playlists}
-        # Conserve l'ordre de récence, retire les ids absents, réaligne les noms.
+        # Keep the recency order, drop missing ids, realign the names.
         reconciled = [
             (pid, names_by_id[pid]) for pid, _ in self._recent_playlists if pid in names_by_id
         ]
-        # Ajouter un morceau émet PLAYLIST_CHANGED *puis* TRACK_ADDED_TO_PLAYLIST
-        # pour la même mutation. Sur un simple ajout, la réconciliation ne change
-        # rien (aucune suppression ni renommage) et c'est _on_track_added_to_playlist
-        # qui rafraîchira ensuite ; repeindre ici serait redondant. On ne met donc
-        # à jour les boutons que si une suppression/renommage a réellement modifié
-        # la liste, garantissant un seul rafraîchissement par mutation.
+        # Adding a track emits PLAYLIST_CHANGED *then* TRACK_ADDED_TO_PLAYLIST
+        # for the same mutation. On a plain add, the reconciliation changes
+        # nothing (no deletion or rename) and _on_track_added_to_playlist will
+        # refresh afterwards; repainting here would be redundant. So we only
+        # update the buttons when a deletion/rename actually modified the list,
+        # guaranteeing a single refresh per mutation.
         if reconciled == self._recent_playlists:
             return
         self._recent_playlists = reconciled
         self._refresh_playlist_buttons()
 
     def _on_copy_to_recent_playlist(self, slot: int) -> None:
-        """Copie le morceau courant dans la playlist récente du slot donné."""
+        """Copy the current track into the recent playlist at the given slot."""
         if slot >= len(self._recent_playlists):
             return
         playlist_id, _ = self._recent_playlists[slot]

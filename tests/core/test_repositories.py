@@ -187,12 +187,12 @@ class TestTrackRepositoryAdd:
     def test_add_rescan_without_comment_preserves_existing(self, tmp_path: Path) -> None:
         """Re-scanning a file with no comment tag must not wipe a stored comment.
 
-        COALESCE protège les commentaires déjà présents (ex. valeur migrée ou éditée)
-        lorsqu'un re-scan apporte un track_data sans clé `comment`.
+        COALESCE protects comments that are already present (e.g. a migrated or edited value)
+        when a re-scan provides a track_data without a `comment` key.
         """
         db = make_db(tmp_path)
         db.tracks.add(sample_track(comment="Keep me"))
-        # Re-scan : même filepath, aucun commentaire fourni.
+        # Re-scan: same filepath, no comment provided.
         db.tracks.add(sample_track(title="Rescanned"))
         rows = db.tracks.get_all()
         assert len(rows) == 1

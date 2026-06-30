@@ -79,7 +79,7 @@ class MainWindow(QMainWindow):
         self.fallback_position_slider: Any = None
         self._position_seeking_provided = False
 
-        # Piste à lire après la mise à jour du modèle suite à une suppression.
+        # Track to play after the model is updated following a deletion.
         self.deleted_track_next_filepath: Path | None = None
 
         self._init_ui()
@@ -172,14 +172,14 @@ class MainWindow(QMainWindow):
         self.track_list.add_to_playlist_requested.connect(self._on_add_to_playlist)
         self.track_list.create_playlist_requested.connect(self._on_create_playlist_and_add)
 
-        # Après un tri, restaurer la sélection du morceau en cours de lecture
+        # After a sort, restore the selection on the currently playing track
         self.track_list.track_model.layoutChanged.connect(self._restore_playing_selection)
 
     def _restore_playing_selection(self) -> None:
-        """Restaure la sélection sur le morceau en cours après un tri.
+        """Restore the selection on the current track after a sort.
 
-        Différé via QTimer pour éviter un SIGSEGV : selectRow ne doit pas
-        être appelé pendant le traitement de layoutChanged par Qt.
+        Deferred via QTimer to avoid a SIGSEGV: selectRow must not be
+        called while Qt is processing layoutChanged.
         """
         if self.player.current_file:
             filepath = self.player.current_file
@@ -360,14 +360,14 @@ class MainWindow(QMainWindow):
         Args:
             deleted_row_index: The row that was deleted
         """
-        # Vérifie si un filepath a été enregistré pour la lecture
+        # Check whether a filepath was saved for playback
         next_filepath: Path | None = self.deleted_track_next_filepath
         if next_filepath is None:
             return
 
         self.deleted_track_next_filepath = None
 
-        # Trouve la ligne de ce filepath (elle a été décalée après la suppression)
+        # Find the row for this filepath (it has shifted after the deletion)
         self.track_list.select_track_by_filepath(next_filepath)
         row = self.track_list.track_model.find_row_by_filepath(next_filepath)
 
@@ -460,7 +460,7 @@ class MainWindow(QMainWindow):
         except Exception:
             logger.exception("Failed to create playlist")
             return
-        # La création émet PLAYLIST_CHANGED via _on_add_to_playlist.
+        # Creation emits PLAYLIST_CHANGED via _on_add_to_playlist.
         self._on_add_to_playlist(filepath, playlist_id)
 
     def _on_add_to_playlist(self, filepath: Path, playlist_id: int) -> None:
@@ -564,7 +564,7 @@ class MainWindow(QMainWindow):
 
         model = self.track_list.model()
         if model.rowCount() > 0:
-            # Sélection ludique d'une piste : aucun usage cryptographique.
+            # Playful track selection: no cryptographic use.
             random_row = randint(0, model.rowCount() - 1)  # noqa: S311
             self.track_list.selectRow(random_row)
             filepath = model.data(model.index(random_row, 0), Qt.ItemDataRole.UserRole)
@@ -582,14 +582,14 @@ class MainWindow(QMainWindow):
         if not filepaths or self.database.conn is None:
             return
 
-        # Batch SELECT par filepath (1 requête au lieu de N)
-        # Les filepaths absents de la DB sont silencieusement ignorés.
+        # Batch SELECT by filepath (1 query instead of N)
+        # Filepaths missing from the DB are silently ignored.
         fp_strs = [Path(fp).as_posix() for fp in filepaths]
         ph = ",".join("?" * len(fp_strs))
         sql = f"SELECT * FROM tracks WHERE filepath IN ({ph})"  # noqa: S608
         rows = self.database.conn.execute(sql, fp_strs).fetchall()
 
-        # Préserver l'ordre demandé par l'appelant
+        # Preserve the order requested by the caller
         fp_order = {fp: i for i, fp in enumerate(fp_strs)}
         tracks = sorted(
             [dict(r) for r in rows],

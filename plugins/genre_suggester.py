@@ -18,13 +18,13 @@ TOP_N = 5
 
 
 class PredictionWorker(QThread):
-    """Worker exécutant le chargement de features et la prédiction ML hors du thread UI.
+    """Worker running feature loading and ML prediction off the UI thread.
 
-    Le chargement de features (accès DB) et l'inférence du modèle peuvent être lents :
-    les exécuter sur le thread principal gèle l'interface.
+    Feature loading (DB access) and model inference can be slow:
+    running them on the main thread freezes the interface.
     """
 
-    # (predictions, error_message) — l'un des deux est None
+    # (predictions, error_message) — one of the two is None
     finished_prediction = Signal(object, object)
 
     def __init__(self, model: Any, track_id: int) -> None:
@@ -33,7 +33,7 @@ class PredictionWorker(QThread):
         self._track_id = track_id
 
     def run(self) -> None:
-        """Charge les features puis prédit, en propageant les erreurs via le signal."""
+        """Load the features then predict, propagating errors via the signal."""
         try:
             from ml.genre_classifier.data_loader import load_track_features
 
@@ -140,8 +140,8 @@ class GenreSuggesterPlugin:
             self.model = None
             logger.warning("[genre_suggester] Model not found at %s", MODEL_PATH)
         except ImportError as e:
-            # Dépendances ML optionnelles non installées (pandas, sklearn…)
-            # Installer avec : uv sync --all-extras
+            # Optional ML dependencies not installed (pandas, sklearn…)
+            # Install with: uv sync --all-extras
             self.model = None
             logger.warning("[genre_suggester] ML deps not available, suggestions disabled (%s)", e)
         except Exception:
@@ -164,10 +164,10 @@ class GenreSuggesterPlugin:
             self.widget.show_unavailable("Model not found")
             return
 
-        # Annule un éventuel worker précédent encore en cours
+        # Cancel any previous worker still running
         self._stop_worker()
 
-        # Affiche l'état de chargement pendant l'inférence asynchrone
+        # Show the loading state during the asynchronous inference
         self.widget.show_loading()
 
         self._worker = PredictionWorker(self.model, track_id)
@@ -177,7 +177,7 @@ class GenreSuggesterPlugin:
     def _on_prediction_ready(
         self, predictions: list[tuple[str, float]] | None, error: str | None
     ) -> None:
-        """Réceptionne le résultat de la prédiction sur le thread UI."""
+        """Receive the prediction result on the UI thread."""
         if self.widget is None:
             return
         if error is not None:
@@ -187,7 +187,7 @@ class GenreSuggesterPlugin:
             self.widget.display_suggestions(predictions)
 
     def _stop_worker(self) -> None:
-        """Arrête proprement le worker de prédiction en cours s'il existe."""
+        """Cleanly stop the running prediction worker if it exists."""
         if self._worker is not None and self._worker.isRunning():
             self._worker.requestInterruption()
             self._worker.quit()

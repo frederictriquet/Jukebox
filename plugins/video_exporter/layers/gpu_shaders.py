@@ -30,18 +30,18 @@ except ImportError:
 # Global lock for thread-safe GPU access (OpenGL contexts are NOT thread-safe)
 _gpu_lock = threading.Lock()
 
-# Contexte ModernGL par thread : sur macOS, NSOpenGLContext/CGL est lié au thread créateur.
-# Quand ce thread se termine, ModernGL invalide le contexte (classe → InvalidObject).
-# Un threading.local() garantit que chaque thread (preview, export…) a son propre contexte.
+# Per-thread ModernGL context: on macOS, NSOpenGLContext/CGL is bound to the creating thread.
+# When that thread terminates, ModernGL invalidates the context (class → InvalidObject).
+# A threading.local() guarantees that each thread (preview, export…) has its own context.
 _thread_local_gl = threading.local()
 
 
 def _is_gl_context_valid(ctx: Any) -> bool:
-    """Vérifie que ctx.mglo n'est pas un InvalidObject ModernGL.
+    """Check that ctx.mglo is not a ModernGL InvalidObject.
 
-    version_code est stocké comme entier Python sur le Context à la création :
-    ctx.version_code reste accessible même après ctx.release(). On inspecte
-    directement le type de ctx.mglo pour détecter les contextes libérés.
+    version_code is stored as a Python integer on the Context at creation:
+    ctx.version_code stays accessible even after ctx.release(). We inspect
+    the type of ctx.mglo directly to detect released contexts.
     """
     if ctx is None:
         return False
@@ -52,11 +52,11 @@ def _is_gl_context_valid(ctx: Any) -> bool:
 
 
 def get_shared_gl_context() -> Any:
-    """Retourne le contexte ModernGL du thread courant, le crée si nécessaire.
+    """Return the current thread's ModernGL context, creating it if necessary.
 
-    Tous les layers GPU (VJing, MilkDrop, etc.) du même thread partagent ce contexte
-    pour éviter les collisions de contexte OpenGL courant entre layers.
-    Doit être appelée depuis l'intérieur de _gpu_lock.
+    All GPU layers (VJing, MilkDrop, etc.) on the same thread share this context
+    to avoid current-OpenGL-context collisions between layers.
+    Must be called from inside _gpu_lock.
     """
     ctx = getattr(_thread_local_gl, "ctx", None)
     if not _is_gl_context_valid(ctx):
@@ -371,7 +371,7 @@ void main() {
 """
 )
 
-# Octagrams shader (raymarching, adapté du Shadertoy « Octagrams ») avec palette
+# Octagrams shader (raymarching, adapted from the Shadertoy "Octagrams") with palette
 OCTAGRAMS_SHADER = (
     """
 #version 330 core
@@ -525,11 +525,11 @@ class GPUShaderRenderer:
             return
 
         try:
-            # _init_context() appelle get_shared_gl_context() qui crée le contexte
-            # GL via create_standalone_context(). Cet appel DOIT être sérialisé par
-            # _gpu_lock : la création de contexte touche l'état CGL global du
-            # processus et n'est pas thread-safe (conflit potentiel sur macOS si
-            # deux threads d'export l'instancient simultanément). Voir [C23].
+            # _init_context() calls get_shared_gl_context(), which creates the GL
+            # context via create_standalone_context(). This call MUST be serialized by
+            # _gpu_lock: context creation touches the process-global CGL state and is
+            # not thread-safe (potential conflict on macOS if two export threads
+            # instantiate it simultaneously). See [C23].
             t0 = time.perf_counter()
             with _gpu_lock:
                 self._init_context()
@@ -544,7 +544,7 @@ class GPUShaderRenderer:
             )
         except Exception as e:
             logging.warning(f"[GPU Renderer] Failed to initialize: {e}")
-            # Libère toute ressource GL allouée avant l'échec
+            # Release any GL resource allocated before the failure
             self.cleanup()
 
     def _init_context(self) -> None:
@@ -721,9 +721,9 @@ class GPUShaderRenderer:
                 return None
 
     def cleanup(self) -> None:
-        """Libère les ressources GPU propres à ce renderer.
+        """Release the GPU resources owned by this renderer.
 
-        Ne libère PAS le contexte GL partagé — il est géré par
+        Does NOT release the shared GL context — it is managed by
         get_shared_gl_context() / _thread_local_gl.
         """
         if self._fbo:
@@ -763,24 +763,24 @@ class GPUShaderRenderer:
         logging.debug("[GPU Renderer] Cleaned up")
 
 
-# Renderers GPU par thread : chaque thread (main, export worker…) a ses propres renderers
-# pour éviter tout accès GL cross-thread (= SIGSEGV sur macOS/CGL).
-# Cache par taille (width, height) : plusieurs layers de tailles différentes peuvent
-# coexister dans le même thread (ex. playground : preview 512×512 + LED panel 64×64).
-# Un slot unique provoquait l'éviction (cleanup) du renderer de l'autre taille, laissant
-# le premier layer avec une référence morte → effets GPU silencieusement absents.
+# Per-thread GPU renderers: each thread (main, export worker…) has its own renderers
+# to avoid any cross-thread GL access (= SIGSEGV on macOS/CGL).
+# Cache keyed by size (width, height): several layers of different sizes can
+# coexist in the same thread (e.g. playground: 512×512 preview + 64×64 LED panel).
+# A single slot caused the eviction (cleanup) of the other size's renderer, leaving
+# the first layer with a dead reference → GPU effects silently missing.
 _gpu_renderer_local = threading.local()
 
 
 def get_gpu_renderer(width: int, height: int) -> GPUShaderRenderer | None:
-    """Retourne le renderer GPU du thread courant pour cette taille, le crée si nécessaire.
+    """Return the current thread's GPU renderer for this size, creating it if necessary.
 
     Args:
         width: Output width.
         height: Output height.
 
     Returns:
-        GPUShaderRenderer instance ou None si indisponible.
+        GPUShaderRenderer instance or None if unavailable.
     """
     if not MODERNGL_AVAILABLE:
         return None
@@ -801,14 +801,14 @@ def get_gpu_renderer(width: int, height: int) -> GPUShaderRenderer | None:
 
 
 def release_shared_gl_context() -> None:
-    """Libère le contexte ModernGL du thread courant et les renderers associés.
+    """Release the current thread's ModernGL context and its associated renderers.
 
-    À appeler explicitement en teardown (test, arrêt d'un worker d'export) pour
-    éviter qu'un contexte CGL/NSOpenGL vivant jusqu'à la finalisation de
-    l'interpréteur ne provoque un segfault au milieu des finaliseurs natifs
-    (moderngl / numpy / scipy) qui s'exécutent dans un ordre non déterministe.
+    Call this explicitly at teardown (test, shutdown of an export worker) to
+    prevent a CGL/NSOpenGL context that lives until interpreter finalization
+    from causing a segfault in the middle of the native finalizers
+    (moderngl / numpy / scipy) that run in a non-deterministic order.
 
-    Sans contexte ni renderer alloué, l'appel est un no-op sûr (idempotent).
+    With no context or renderer allocated, the call is a safe no-op (idempotent).
     """
     with _gpu_lock:
         renderers: dict[tuple[int, int], GPUShaderRenderer] | None = getattr(

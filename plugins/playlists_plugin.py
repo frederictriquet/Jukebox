@@ -40,25 +40,25 @@ class PlaylistsPlugin:
     def initialize(self, context: PluginContextProtocol) -> None:
         """Initialize plugin."""
         self.context = context
-        # Rafraîchit le menu contextuel quand une playlist change, via l'EventBus
-        # plutôt que par introspection depuis MainWindow.
+        # Refresh the context menu when a playlist changes, via the EventBus
+        # rather than by introspection from MainWindow.
         context.subscribe(Events.PLAYLIST_CHANGED, self._update_context_menu)
 
     def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register UI."""
         # Load existing playlists into context menu
         self._update_context_menu()
-        # Expose le gestionnaire de playlists via le menu : sans cette action,
-        # PlaylistDialog (création/suppression/export) était inaccessible.
+        # Expose the playlist manager via the menu: without this action,
+        # PlaylistDialog (create/delete/export) was inaccessible.
         menu = ui_builder.get_or_create_menu("&Playlists")
         ui_builder.add_menu_action(menu, "Manage Playlists...", self._show_playlists)
 
     def _show_playlists(self) -> None:
         """Show playlist dialog."""
         dialog = PlaylistDialog(self.context)
-        # On affiche le dialog de façon modale via une référence à la méthode :
-        # cela contourne un faux positif du hook de sécurité tout en restant
-        # conforme à ruff (B009).
+        # Show the dialog modally via a reference to the method: this works
+        # around a false positive in the security hook while staying compliant
+        # with ruff (B009).
         show_modal = dialog.exec
         show_modal()
 
@@ -222,8 +222,8 @@ class PlaylistDialog(QDialog):
         delete_action.triggered.connect(self._delete_playlist)
         menu.addAction(delete_action)
 
-        # Référence à la méthode pour afficher le menu modal sans déclencher le
-        # faux positif eval/exec du hook de sécurité.
+        # Reference to the method to show the menu modally without triggering
+        # the eval/exec false positive in the security hook.
         show_menu = menu.exec
         show_menu(self.playlist_list.mapToGlobal(position))  # type: ignore[call-overload]
 
@@ -261,5 +261,5 @@ class PlaylistDialog(QDialog):
                 logging.exception("[PlaylistDialog] Erreur lors de la suppression de la playlist")
 
     def _notify_playlist_changed(self) -> None:
-        """Émet PLAYLIST_CHANGED pour rafraîchir le menu contextuel et les abonnés."""
+        """Emit PLAYLIST_CHANGED to refresh the context menu and subscribers."""
         self.context.emit(Events.PLAYLIST_CHANGED)

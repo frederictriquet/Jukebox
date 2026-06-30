@@ -70,10 +70,10 @@ class DuplicateChecker:
 
         Args:
             track: Track dict with at least "artist", "title", "filename" keys.
-            build_if_needed: Si True (défaut), construit l'index en synchrone si
-                absent. Les appelants exécutés sur le thread UI doivent passer
-                False pour éviter un fetch bloquant de toute la bibliothèque ;
-                un index non construit retourne alors un résultat neutre (GREEN).
+            build_if_needed: If True (default), build the index synchronously if
+                missing. Callers running on the UI thread must pass
+                False to avoid a blocking fetch of the entire library;
+                an unbuilt index then returns a neutral result (GREEN).
 
         Returns:
             DuplicateResult with status and optional match description.
@@ -81,8 +81,8 @@ class DuplicateChecker:
         if build_if_needed:
             self._ensure_index()
         elif not self._index_built:
-            # Index pas encore prêt et construction interdite (thread UI) :
-            # on ne bloque pas, on renvoie un statut neutre.
+            # Index not yet ready and building is forbidden (UI thread):
+            # do not block, return a neutral status.
             return DuplicateResult(DuplicateStatus.GREEN, None)
 
         artist = track.get("artist") or ""
@@ -122,10 +122,10 @@ class DuplicateChecker:
         self._index_built = False
 
     def is_index_ready(self) -> bool:
-        """Vérification non-bloquante de l'état de l'index.
+        """Non-blocking check of the index state.
 
-        Permet à un appelant sur le thread UI de savoir si check() peut être
-        invoqué sans déclencher un fetch DB synchrone.
+        Lets a caller on the UI thread know whether check() can be
+        invoked without triggering a synchronous DB fetch.
         """
         return self._index_built
 

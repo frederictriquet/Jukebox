@@ -47,8 +47,8 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
     def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register UI elements."""
         main_window = self.context.app
-        # Couplage tolérant : si la fenêtre principale n'expose pas de barre de
-        # controls (refactor, mode headless…), on n'ajoute simplement pas le bouton.
+        # Lenient coupling: if the main window does not expose a controls bar
+        # (refactor, headless mode...), simply skip adding the button.
         controls = getattr(main_window, "controls", None)
         if controls is None:
             logging.warning("[File Manager] main_window.controls absent, bouton Remove non ajouté")
@@ -188,8 +188,8 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
             shutil.copy2(str(self.current_filepath), str(dest_path))
             logging.info("Copied %s -> %s", old_filepath, dest_path)
 
-            # M27 : vérifier l'intégrité de la copie avant de supprimer la source.
-            # Sans ce contrôle, une copie tronquée suivie d'un unlink détruit les données.
+            # M27: verify the copy integrity before deleting the source.
+            # Without this check, a truncated copy followed by an unlink destroys the data.
             source_size = old_filepath.stat().st_size
             dest_size = dest_path.stat().st_size
             if source_size != dest_size:
@@ -199,7 +199,7 @@ class FileManagerPlugin(SettingsSyncMixin, ShortcutMixin):
                     source_size,
                     dest_size,
                 )
-                # Nettoyer la copie corrompue, ne pas toucher à la source
+                # Clean up the corrupted copy, leave the source untouched
                 dest_path.unlink(missing_ok=True)
                 self.context.emit(
                     Events.STATUS_MESSAGE, message="Error: copy integrity check failed"

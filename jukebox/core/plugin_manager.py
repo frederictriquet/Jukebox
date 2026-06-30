@@ -216,12 +216,12 @@ class PluginManager:
 
     @staticmethod
     def _is_plugin_class(obj: type) -> bool:
-        """Vérifie qu'une classe respecte le protocole plugin.
+        """Check that a class conforms to the plugin protocol.
 
-        Heuristique stricte : on exige les trois méthodes de cycle de vie
-        (initialize, register_ui, shutdown) ET un attribut de classe `name`
-        non vide de type str. Cela évite d'instancier des classes utilitaires
-        qui possèderaient par hasard une méthode `initialize` et un `name`.
+        Strict heuristic: require the three lifecycle methods
+        (initialize, register_ui, shutdown) AND a non-empty class attribute
+        `name` of type str. This avoids instantiating utility classes
+        that happen to have an `initialize` method and a `name`.
         """
         if not all(
             callable(getattr(obj, method, None))

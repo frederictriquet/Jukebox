@@ -74,7 +74,7 @@ COLUMN_WIDTHS = {
     "comment": 250,  # Free-text comment (jukebox only, editable inline)
     "stats": 30,  # Small icon column
     "duplicate": 30,  # Duplicate status indicator (curating only)
-    "path": 300,  # Répertoire parent (curating only)
+    "path": 300,  # Parent directory (curating only)
 }
 
 # Row height
@@ -148,18 +148,18 @@ class BackgroundCheckWorker(QThread):
 
 
 class WaveformBatchLoader(QThread):
-    """Récupère les bytes waveform et la présence de stats en arrière-plan.
+    """Fetch waveform bytes and stats presence in the background.
 
-    Le coût qui figeait l'UI était le N+1 SELECT (3 requêtes par track) ; c'est ce
-    travail d'I/O qui est déporté ici via 2 requêtes batch. La désérialisation numpy
-    reste sur le thread Qt principal (numpy en thread secondaire segfaulte sur macOS
-    ARM, cf. bug librosa). Le worker ne renvoie donc que des bytes bruts.
+    The cost that froze the UI was the N+1 SELECT (3 queries per track); that
+    I/O work is offloaded here via 2 batch queries. numpy deserialization stays
+    on the main Qt thread (numpy on a secondary thread segfaults on macOS ARM,
+    cf. librosa bug). The worker therefore only returns raw bytes.
 
-    Émet `batch_ready` ; les données sont lues via `self.result`
+    Emits `batch_ready`; data is read via `self.result`
     (`{track_id: (waveform_bytes | None, has_stats)}`).
     """
 
-    batch_ready = Signal()  # notification — lire self.result pour les données
+    batch_ready = Signal()  # notification — read self.result for the data
 
     def __init__(self, db_path: Path, track_ids: list[int]) -> None:
         super().__init__()
@@ -200,8 +200,8 @@ class WaveformBatchLoader(QThread):
         finally:
             if self in _live_workers:
                 _live_workers.remove(self)
-            # N'émettre que si le chargement a abouti : une interruption laisse `result`
-            # partiel (tracks traités avant l'arrêt), il ne faut pas l'appliquer.
+            # Only emit if the load completed: an interruption leaves `result`
+            # partial (tracks processed before the stop), which must not be applied.
             if not self.isInterruptionRequested():
                 self.result = result
                 self.batch_ready.emit()
@@ -233,9 +233,9 @@ class TrackListModel(QAbstractTableModel):
         self.filepath_to_row: dict[Path, int] = {}  # Cache for fast lookup
         self._mode = mode
 
-        # Files d'événements remplies depuis n'importe quel thread (EventBus),
-        # drainées sur le thread Qt principal via QMetaObject.invokeMethod.
-        # Protégées par un lock car push (thread background) et pop (thread UI) concurrents.
+        # Event queues filled from any thread (EventBus), drained on the main Qt
+        # thread via QMetaObject.invokeMethod.
+        # Protected by a lock because push (background thread) and pop (UI thread) are concurrent.
         self._event_lock = Lock()
         self._pending_metadata: list[Path] = []
         self._pending_waveform: list[int] = []
@@ -274,10 +274,10 @@ class TrackListModel(QAbstractTableModel):
             event_bus.subscribe(Events.TRACK_DELETED, self._on_track_deleted)
 
     def _on_track_metadata_updated(self, filepath: Path) -> None:
-        """Réceptionne l'événement EventBus (potentiellement depuis un thread background).
+        """Receive the EventBus event (potentially from a background thread).
 
-        Bufferise l'argument puis reporte le traitement sur le thread Qt propriétaire :
-        émettre dataChanged hors du thread principal est un comportement indéfini.
+        Buffer the argument then defer processing to the owning Qt thread:
+        emitting dataChanged off the main thread is undefined behavior.
         """
         if not isinstance(filepath, Path):
             filepath = Path(filepath)
@@ -287,7 +287,7 @@ class TrackListModel(QAbstractTableModel):
 
     @Slot()
     def _process_metadata_updates(self) -> None:
-        """Draine la file des mises à jour de métadonnées sur le thread Qt principal."""
+        """Drain the metadata-update queue on the main Qt thread."""
         with self._event_lock:
             pending = self._pending_metadata
             self._pending_metadata = []
@@ -295,7 +295,7 @@ class TrackListModel(QAbstractTableModel):
             self._apply_metadata_update(filepath)
 
     def _apply_metadata_update(self, filepath: Path) -> None:
-        """Applique une mise à jour de métadonnées pour un fichier (thread Qt principal)."""
+        """Apply a metadata update for a file (main Qt thread)."""
         row = self.find_row_by_filepath(filepath)
         if row < 0 or not self.database or self.database.conn is None:
             return
@@ -328,9 +328,9 @@ class TrackListModel(QAbstractTableModel):
             )
 
     def _on_waveform_complete(self, track_id: int) -> None:
-        """Réceptionne l'événement EventBus (potentiellement depuis un thread background).
+        """Receive the EventBus event (potentially from a background thread).
 
-        Bufferise l'argument puis reporte le traitement sur le thread Qt propriétaire.
+        Buffer the argument then defer processing to the owning Qt thread.
         """
         with self._event_lock:
             self._pending_waveform.append(track_id)
@@ -338,7 +338,7 @@ class TrackListModel(QAbstractTableModel):
 
     @Slot()
     def _process_waveform_updates(self) -> None:
-        """Draine la file des waveforms terminées sur le thread Qt principal."""
+        """Drain the queue of completed waveforms on the main Qt thread."""
         with self._event_lock:
             pending = self._pending_waveform
             self._pending_waveform = []
@@ -346,7 +346,7 @@ class TrackListModel(QAbstractTableModel):
             self._apply_waveform_update(track_id)
 
     def _apply_waveform_update(self, track_id: int) -> None:
-        """Applique une waveform terminée pour un track_id (thread Qt principal)."""
+        """Apply a completed waveform for a track_id (main Qt thread)."""
         if not self.database or self.database.conn is None:
             return
 
@@ -377,7 +377,7 @@ class TrackListModel(QAbstractTableModel):
                 # Update track data
                 self.tracks[row]["waveform_data"] = waveform
 
-                # Invalide le cache pour ce fichier afin de forcer un re-rendu
+                # Invalidate the cache for this file to force a re-render
                 from jukebox.ui.components.track_cell_renderer import WaveformStyler
 
                 WaveformStyler.invalidate(filepath)
@@ -395,9 +395,9 @@ class TrackListModel(QAbstractTableModel):
                 )
 
     def _on_stats_complete(self, track_id: int) -> None:
-        """Réceptionne l'événement EventBus (potentiellement depuis un thread background).
+        """Receive the EventBus event (potentially from a background thread).
 
-        Bufferise l'argument puis reporte le traitement sur le thread Qt propriétaire.
+        Buffer the argument then defer processing to the owning Qt thread.
         """
         with self._event_lock:
             self._pending_stats.append(track_id)
@@ -405,7 +405,7 @@ class TrackListModel(QAbstractTableModel):
 
     @Slot()
     def _process_stats_updates(self) -> None:
-        """Draine la file des analyses audio terminées sur le thread Qt principal."""
+        """Drain the queue of completed audio analyses on the main Qt thread."""
         with self._event_lock:
             pending = self._pending_stats
             self._pending_stats = []
@@ -413,7 +413,7 @@ class TrackListModel(QAbstractTableModel):
             self._apply_stats_update(track_id)
 
     def _apply_stats_update(self, track_id: int) -> None:
-        """Applique une analyse audio terminée pour un track_id (thread Qt principal)."""
+        """Apply a completed audio analysis for a track_id (main Qt thread)."""
         if not self.database or self.database.conn is None:
             return
 
@@ -531,7 +531,7 @@ class TrackListModel(QAbstractTableModel):
         return self.cell_renderer.get_style(track, index.column(), role)
 
     def _is_editable_comment(self, index: QModelIndex | QPersistentModelIndex) -> bool:
-        """La cellule est la colonne comment, éditable (mode jukebox uniquement)."""
+        """The cell is the comment column, editable (jukebox mode only)."""
         if self._mode != AppMode.JUKEBOX.value:
             return False
         columns = self.cell_renderer.columns
@@ -539,7 +539,7 @@ class TrackListModel(QAbstractTableModel):
         return 0 <= col < len(columns) and columns[col] == "comment"
 
     def flags(self, index: QModelIndex | QPersistentModelIndex) -> Qt.ItemFlag:
-        """Rend la colonne comment éditable en mode jukebox."""
+        """Make the comment column editable in jukebox mode."""
         base = super().flags(index)
         if index.isValid() and self._is_editable_comment(index):
             return base | Qt.ItemFlag.ItemIsEditable
@@ -551,7 +551,7 @@ class TrackListModel(QAbstractTableModel):
         value: Any,
         role: int = Qt.ItemDataRole.EditRole,
     ) -> bool:
-        """Valide l'édition inline du commentaire : DB + tag du fichier audio."""
+        """Commit the inline comment edit: DB + audio file tag."""
         if role != Qt.ItemDataRole.EditRole or not index.isValid():
             return False
         if index.row() >= len(self.tracks) or not self._is_editable_comment(index):
@@ -560,11 +560,11 @@ class TrackListModel(QAbstractTableModel):
         new_comment = str(value).strip() if value is not None else ""
         track = self.tracks[index.row()]
         if (track.get("comment") or "") == new_comment:
-            return False  # Pas de changement
+            return False  # No change
 
         filepath = track.get("filepath")
-        # Sans filepath on ne peut ni écrire le tag ni résoudre la ligne DB :
-        # mettre à jour le modèle en mémoire seul créerait une divergence silencieuse.
+        # Without a filepath we can neither write the tag nor resolve the DB row:
+        # updating the in-memory model alone would create a silent divergence.
         if filepath is None:
             logging.error(
                 "[TrackListModel] Édition du commentaire impossible : filepath manquant "
@@ -573,18 +573,17 @@ class TrackListModel(QAbstractTableModel):
             )
             return False
 
-        # [M32] Invariant fichier-d'abord : on écrit le TAG du fichier audio AVANT
-        # la base de données. La DB (et le modèle en mémoire) ne sont mis à jour
-        # QUE si l'écriture du tag a réussi, afin d'éviter toute divergence
-        # DB/fichier en cas d'échec d'écriture du tag.
+        # [M32] File-first invariant: write the audio file TAG BEFORE the database.
+        # The DB (and the in-memory model) are updated ONLY if the tag write
+        # succeeded, to avoid any DB/file divergence when the tag write fails.
         from jukebox.utils.tag_writer import save_audio_tags
 
         if not save_audio_tags(str(filepath), {"comment": new_comment}):
-            # Pas d'échec silencieux : la DB reste inchangée, on logue l'erreur.
+            # No silent failure: the DB stays unchanged, log the error.
             logging.error("[TrackListModel] Échec d'écriture du tag comment pour %s", filepath)
             return False
 
-        # Le tag est écrit : la DB peut être mise à jour sans risque de divergence.
+        # The tag is written: the DB can be updated without divergence risk.
         if self.database is not None:
             track_id = track.get("_db_id")
             if track_id is None:
@@ -592,14 +591,14 @@ class TrackListModel(QAbstractTableModel):
                 if db_track:
                     track_id = db_track.get("id")
             if track_id is None:
-                # Pas d'échec silencieux : le tag fichier a été écrit mais la ligne
-                # DB est introuvable, on logue la divergence.
+                # No silent failure: the file tag was written but the DB row
+                # cannot be found, log the divergence.
                 logging.error(
                     "[TrackListModel] Commentaire non persisté en base : id introuvable pour %s",
                     filepath,
                 )
             elif not self.database.tracks.update_metadata(int(track_id), {"comment": new_comment}):
-                # update_metadata renvoie False si aucune ligne n'a été modifiée.
+                # update_metadata returns False if no row was modified.
                 logging.error(
                     "[TrackListModel] Échec de mise à jour du commentaire en base pour %s "
                     "(track_id=%s)",
@@ -607,12 +606,12 @@ class TrackListModel(QAbstractTableModel):
                     track_id,
                 )
 
-        # Mise à jour du modèle en mémoire seulement après les écritures réussies.
+        # Update the in-memory model only after the successful writes.
         track["comment"] = new_comment
 
         self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole])
 
-        # Notifie les autres vues qu'une métadonnée a changé (api-contract).
+        # Notify other views that a metadata field changed (api-contract).
         if self.event_bus is not None:
             self.event_bus.emit(Events.TRACK_METADATA_UPDATED, filepath=filepath)
 
@@ -631,8 +630,8 @@ class TrackListModel(QAbstractTableModel):
             "title": lambda t: (t.get("title") or "").lower(),
             "filename": lambda t: (t.get("filename") or "").lower(),
             "genre": lambda t: (t.get("genre") or "").lower(),
-            # Tri alphabétique insensible à la casse ; les commentaires vides sont
-            # regroupés en dernier (clé booléenne True triée après False).
+            # Case-insensitive alphabetical sort; empty comments are grouped
+            # last (boolean key True sorts after False).
             "comment": lambda t: (
                 not (t.get("comment") or "").strip(),
                 (t.get("comment") or "").strip().lower(),
@@ -650,7 +649,7 @@ class TrackListModel(QAbstractTableModel):
         }
 
         if column == -1 or column >= len(columns) or columns[column] not in sort_key_map:
-            # Tri par défaut : date_added DESC (ordre d'insertion)
+            # Default sort: date_added DESC (insertion order)
             def _default_key(t: dict[str, Any]) -> str:
                 return t.get("date_added") or ""
 
@@ -681,7 +680,7 @@ class TrackListModel(QAbstractTableModel):
         comment = ""
         track_db_id: int | None = None
         if self.database and self.database.conn is not None:
-            # Get track_id + commentaire existant depuis la DB
+            # Get track_id + existing comment from the DB
             track_db = self.database.conn.execute(
                 "SELECT id, comment FROM tracks WHERE filepath = ?", (str(filepath),)
             ).fetchone()
@@ -746,10 +745,10 @@ class TrackListModel(QAbstractTableModel):
         self._schedule_background_checks()
 
     def load_tracks_batch(self, tracks: list[dict[str, Any]]) -> None:
-        """Charge toutes les tracks en une seule opération (sans waveforms).
+        """Load all tracks in a single operation (without waveforms).
 
-        Les waveforms sont chargées séparément en arrière-plan par WaveformBatchLoader.
-        Élimine le N+1 SELECT en remplaçant N beginInsertRows par un seul beginResetModel.
+        Waveforms are loaded separately in the background by WaveformBatchLoader.
+        Eliminates the N+1 SELECT by replacing N beginInsertRows with a single beginResetModel.
         """
         self.beginResetModel()
         self.tracks = []
@@ -780,12 +779,12 @@ class TrackListModel(QAbstractTableModel):
         self._schedule_background_checks()
 
     def apply_waveform_batch(self, data: dict[int, tuple[bytes | None, bool]]) -> None:
-        """Désérialise et applique waveforms + stats (thread Qt principal).
+        """Deserialize and apply waveforms + stats (main Qt thread).
 
-        `data` contient les bytes bruts récupérés par WaveformBatchLoader ; la
-        désérialisation numpy a lieu ici, sur le thread principal (jamais en thread
-        secondaire — voir WaveformBatchLoader). Émet un seul dataChanged couvrant
-        toutes les lignes modifiées.
+        `data` contains the raw bytes fetched by WaveformBatchLoader; numpy
+        deserialization happens here, on the main thread (never on a secondary
+        thread — see WaveformBatchLoader). Emits a single dataChanged covering
+        all modified rows.
         """
         if not data or not self.tracks:
             return
@@ -798,9 +797,9 @@ class TrackListModel(QAbstractTableModel):
         from jukebox.ui.components.track_cell_renderer import WaveformStyler
         from jukebox.utils.waveform_serializer import deserialize_waveform
 
-        # Ne repeindre que les lignes réellement modifiées (waveform ou stats présents).
-        # Une ligne dont les deux restent à leur valeur par défaut (None/False) n'a pas
-        # changé visuellement : l'inclure ne ferait que provoquer un repaint inutile.
+        # Only repaint rows that actually changed (waveform or stats present).
+        # A row where both keep their default value (None/False) has not changed
+        # visually: including it would only cause a needless repaint.
         min_row, max_row = len(self.tracks), -1
         for track_id, (raw_bytes, has_stats) in data.items():
             target_row = id_to_row.get(track_id)
@@ -831,7 +830,7 @@ class TrackListModel(QAbstractTableModel):
 
     @property
     def db_path(self) -> Path | None:
-        """Chemin du fichier DB (pour les workers qui ouvrent leur propre connexion)."""
+        """Path of the DB file (for workers that open their own connection)."""
         return self._db_path
 
     def clear(self) -> None:
@@ -907,16 +906,16 @@ class TrackListModel(QAbstractTableModel):
         if not self._duplicate_checker or self._mode != AppMode.CURATING.value:
             return
 
-        # Stop previous worker if still running, sans bloquer le thread Qt.
-        # On demande l'interruption et on déconnecte son signal pour ignorer
-        # d'éventuels résultats périmés ; le worker s'auto-retire de
-        # _live_workers à la fin de run() (et atexit le draine au pire).
+        # Stop previous worker if still running, without blocking the Qt thread.
+        # Request interruption and disconnect its signal to ignore any stale
+        # results; the worker removes itself from _live_workers at the end of
+        # run() (and atexit drains it as a last resort).
         if self._bg_worker is not None and self._bg_worker.isRunning():
             self._bg_worker.requestInterruption()
             try:
                 self._bg_worker.results.disconnect(self._on_duplicate_check_results)
             except (RuntimeError, TypeError) as e:
-                # Signal déjà déconnecté ou worker détruit : sans conséquence.
+                # Signal already disconnected or worker destroyed: harmless.
                 logging.debug(f"[TrackListModel] Déconnexion worker précédent ignorée: {e}")
         self._bg_worker = None
 
@@ -924,8 +923,8 @@ class TrackListModel(QAbstractTableModel):
         track_dicts = [dict(t) for t in self.tracks]
 
         worker = BackgroundCheckWorker(self._duplicate_checker, track_dicts)
-        # QueuedConnection explicite : le slot s'exécute dans le thread Qt principal
-        # même si le signal est émis depuis run() du worker thread.
+        # Explicit QueuedConnection: the slot runs on the main Qt thread
+        # even though the signal is emitted from the worker thread's run().
         worker.results.connect(self._on_duplicate_check_results, Qt.ConnectionType.QueuedConnection)
         self._bg_worker = worker
         worker.start()
@@ -952,7 +951,7 @@ class TrackListModel(QAbstractTableModel):
         try:
             dup_col = self.cell_renderer.columns.index("duplicate")
         except ValueError as e:
-            # Colonne 'duplicate' absente des colonnes du renderer — mise à jour UI ignorée
+            # 'duplicate' column absent from the renderer columns — UI update skipped
             logging.debug(
                 f"[TrackListModel] Colonne 'duplicate' absente des colonnes du renderer: {e}"
             )
@@ -975,8 +974,8 @@ class ColorPreservingDelegate(QStyledItemDelegate):
         # Get the ForegroundRole color from the model
         color = index.data(Qt.ItemDataRole.ForegroundRole)
         if color:
-            # Préserve la couleur même quand l'item est sélectionné/surligné.
-            # `palette` existe au runtime mais pas dans les stubs : cast vers Any.
+            # Preserve the color even when the item is selected/highlighted.
+            # `palette` exists at runtime but not in the stubs: cast to Any.
             cast(Any, option).palette.setColor(QPalette.ColorRole.HighlightedText, color)
 
 
@@ -1015,7 +1014,7 @@ class TrackList(QTableView):
         self.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QTableView.SelectionMode.SingleSelection)
         self.setShowGrid(False)  # No grid lines
-        # Édition inline au double-clic uniquement (colonne comment en mode jukebox).
+        # Inline editing on double-click only (comment column in jukebox mode).
         self.setEditTriggers(QTableView.EditTrigger.DoubleClicked)
 
         # Vertical header shows row numbers (n/total)
@@ -1051,7 +1050,7 @@ class TrackList(QTableView):
         # Playlists for context menu
         self.playlists: list[Any] = []
 
-        # Background waveform loader (annulé et remplacé à chaque batch load)
+        # Background waveform loader (cancelled and replaced on each batch load)
         self._waveform_loader: WaveformBatchLoader | None = None
 
     @property
@@ -1073,8 +1072,8 @@ class TrackList(QTableView):
         self.setModel(self._track_model)
 
     def load_tracks_batch(self, tracks: list[dict[str, Any]]) -> None:
-        """Charge les tracks en batch et lance le loader de waveforms en arrière-plan."""
-        # Annuler le loader précédent s'il tourne encore
+        """Load tracks in batch and start the waveform loader in the background."""
+        # Cancel the previous loader if it is still running
         if self._waveform_loader is not None and self._waveform_loader.isRunning():
             self._waveform_loader.requestInterruption()
             self._waveform_loader.quit()
@@ -1082,7 +1081,7 @@ class TrackList(QTableView):
 
         self._track_model.load_tracks_batch(tracks)
 
-        # Lancer le chargement async des waveforms si la DB est accessible
+        # Start the async waveform load if the DB is accessible
         db_path = self._track_model.db_path
         track_ids: list[int] = []
         for t in tracks:
@@ -1092,18 +1091,18 @@ class TrackList(QTableView):
         if db_path and track_ids:
             loader = WaveformBatchLoader(db_path, track_ids)
             self._waveform_loader = loader
-            # Connexion par méthode liée (pas de lambda) : Qt déconnecte automatiquement
-            # quand ce TrackList est détruit, évitant tout use-after-free si le loader
-            # se termine après la destruction du widget.
+            # Bound-method connection (no lambda): Qt disconnects automatically
+            # when this TrackList is destroyed, avoiding any use-after-free if the
+            # loader finishes after the widget is destroyed.
             loader.batch_ready.connect(self._on_waveform_batch_loaded)
             loader.start()
 
     @Slot()
     def _on_waveform_batch_loaded(self) -> None:
-        """Applique le résultat du loader émetteur, sauf s'il a été remplacé entre-temps."""
+        """Apply the result of the emitting loader, unless it has been replaced meanwhile."""
         loader = self.sender()
-        # Ignorer un loader obsolète : un rechargement l'a remplacé et les _db_id
-        # ne correspondraient plus aux lignes actuelles du modèle.
+        # Ignore a stale loader: a reload replaced it and the _db_id values
+        # would no longer match the model's current rows.
         if isinstance(loader, WaveformBatchLoader) and loader is self._waveform_loader:
             self._track_model.apply_waveform_batch(loader.result)
 
@@ -1335,11 +1334,11 @@ class TrackList(QTableView):
         menu.exec_(self.mapToGlobal(position))
 
     def _show_in_file_manager(self, filepath: Path) -> None:
-        """Ouvre le gestionnaire de fichiers de la plateforme et sélectionne le fichier."""
+        """Open the platform file manager and select the file."""
         from PySide6.QtCore import QUrl
         from PySide6.QtGui import QDesktopServices
 
-        # QDesktopServices ouvre le répertoire parent sur toutes les plateformes
+        # QDesktopServices opens the parent directory on all platforms
         parent_dir = filepath.parent if isinstance(filepath, Path) else Path(filepath).parent
         url = QUrl.fromLocalFile(str(parent_dir))
         QDesktopServices.openUrl(url)

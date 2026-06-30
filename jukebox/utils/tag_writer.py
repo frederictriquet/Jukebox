@@ -4,10 +4,10 @@ import logging
 from pathlib import Path
 from typing import Any
 
-# Mapping nom de tag → frame ID3 pour formats ID3-based (AIFF, WAV).
-# La valeur est le nom de la classe Frame mutagen, résolue de façon lazy
-# dans save_audio_tags (l'import de mutagen.id3 y est différé).
-# Source de vérité unique : le frame ID est dérivé du nom de classe.
+# Mapping of tag name → ID3 frame for ID3-based formats (AIFF, WAV).
+# The value is the name of the mutagen Frame class, resolved lazily
+# in save_audio_tags (where the mutagen.id3 import is deferred).
+# Single source of truth: the frame ID is derived from the class name.
 _TAG_TO_ID3_FRAME_CLASS_NAME: dict[str, str] = {
     "genre": "TCON",
     "title": "TIT2",
@@ -47,7 +47,7 @@ def _register_easyid3_comment() -> None:
         EasyID3.RegisterKey("comment", getter, setter, deleter)
 
 
-# Enregistrement à l'import du module
+# Register on module import
 _register_easyid3_comment()
 
 
@@ -93,8 +93,8 @@ def save_audio_tags(
         TPE2,
     )
 
-    # Résolution des classes Frame à partir du mapping de référence unique.
-    # Évite la désynchronisation entre le nom de frame et la classe.
+    # Resolve the Frame classes from the single reference mapping.
+    # Avoids desynchronization between the frame name and the class.
     _frame_classes: dict[str, type] = {
         "TCON": TCON,
         "TIT2": TIT2,
@@ -108,46 +108,46 @@ def save_audio_tags(
 
     try:
         if filepath_str.lower().endswith(".mp3"):
-            # Utilisation d'EasyID3 pour les fichiers MP3
+            # Use EasyID3 for MP3 files
             try:
                 audio: Any = EasyID3(filepath_str)
             except ID3NoHeaderError:
-                # Aucun tag ID3 existant, en créer un
+                # No existing ID3 tag, create one
                 audio = File(filepath_str, easy=True)
                 if audio is None:
                     logging.warning(f"Failed to open MP3 file: {filepath_str}")
                     return False
                 audio.add_tags()
 
-            # Mise à jour des tags
+            # Update the tags
             for tag_name, value in tags.items():
                 if value:
-                    # EasyID3 attend des listes
+                    # EasyID3 expects lists
                     audio[tag_name] = [value]
                 elif tag_name in audio:
-                    # Suppression du tag si la valeur est vide
+                    # Delete the tag if the value is empty
                     del audio[tag_name]
 
             audio.save()
 
         else:
-            # Utilisation de l'interface générique mutagen pour FLAC, AIFF, WAV, etc.
+            # Use the generic mutagen interface for FLAC, AIFF, WAV, etc.
             audio = File(filepath_str)
             if audio is None:
                 logging.warning(f"Unsupported file format: {filepath_str}")
                 return False
 
-            # Détecter si les tags sont ID3-based (AIFF, WAV utilisent ID3 au lieu de Vorbis comments)
+            # Detect whether the tags are ID3-based (AIFF, WAV use ID3 instead of Vorbis comments)
             is_id3_based = isinstance(getattr(audio, "tags", None), ID3)
 
             for tag_name, value in tags.items():
-                # Normalisation du nom de tag pour les formats non-MP3
+                # Normalize the tag name for non-MP3 formats
                 normalized_tag = tag_name.lower() if lowercase_tags_for_non_mp3 else tag_name
 
                 if is_id3_based:
                     if normalized_tag == "comment":
-                        # Supprime toutes les frames COMM existantes quelle que soit
-                        # leur langue/desc pour éviter les doublons (ex. COMM::fra).
+                        # Remove all existing COMM frames regardless of
+                        # their language/desc to avoid duplicates (e.g. COMM::fra).
                         for frame_key in [k for k in audio.tags if k.startswith("COMM")]:
                             del audio.tags[frame_key]
                         if value:
@@ -162,7 +162,7 @@ def save_audio_tags(
                         elif frame_id in audio.tags:
                             del audio.tags[frame_id]
                 else:
-                    # Formats Vorbis comments (FLAC, OGG, etc.)
+                    # Vorbis comments formats (FLAC, OGG, etc.)
                     if value:
                         audio[normalized_tag] = [value]
                     elif normalized_tag in audio:

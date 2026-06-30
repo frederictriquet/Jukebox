@@ -46,10 +46,10 @@ class TrackInfoPlugin:
         main_window = self.context.app
         controls = main_window.controls
         layout = controls.layout()
-        # Insertion juste avant le label "Volume:" qui précède le slider de volume.
-        # On localise dynamiquement la position pour rester robuste à un refactor du layout.
+        # Insert just before the "Volume:" label that precedes the volume slider.
+        # Locate the position dynamically to stay robust against a layout refactor.
         volume_index = layout.indexOf(controls.volume_slider)
-        # Le label "Volume:" est ajouté juste avant le slider ; on insère avant ce label.
+        # The "Volume:" label is added just before the slider; insert before that label.
         insert_index = max(0, volume_index - 1)
         ui_builder.insert_widget_in_layout(layout, insert_index, self.info_widget)
 
@@ -71,7 +71,7 @@ class TrackInfoPlugin:
             )
 
     def _on_position_update(self, position: float) -> None:
-        """Handle position update — utilise la durée mise en cache, sans requête DB."""
+        """Handle position update — use the cached duration, no DB query."""
         if not self.info_widget or self._current_duration_seconds is None:
             return
         current_time = position * self._current_duration_seconds

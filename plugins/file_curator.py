@@ -33,8 +33,8 @@ class FileCuratorPlugin:
     def register_ui(self, ui_builder: UIBuilderProtocol) -> None:
         """Register UI."""
         menu = ui_builder.get_or_create_menu("&Tools")
-        # L'interface de l'organiseur n'est pas encore implémentée : on désactive
-        # l'action plutôt que d'exposer un dialog vide « Feature coming soon ».
+        # The organizer UI is not implemented yet: disable the action rather
+        # than exposing an empty "Feature coming soon" dialog.
         action = ui_builder.add_menu_action(
             menu, "Organize Files... (coming soon)", self._show_organizer
         )
@@ -43,9 +43,9 @@ class FileCuratorPlugin:
     def _show_organizer(self) -> None:
         """Show file organizer dialog."""
         dialog = OrganizerDialog(self.context)
-        # On affiche le dialog de façon modale via une référence à la méthode :
-        # cela contourne un faux positif du hook de sécurité tout en restant
-        # conforme à ruff (B009).
+        # Show the dialog modally via a reference to the method: this works
+        # around a false positive from the security hook while staying
+        # compliant with ruff (B009).
         show_modal = dialog.exec
         show_modal()
 
@@ -69,8 +69,8 @@ class FileCuratorPlugin:
         if not track:
             return None
 
-        # M26 : le formatage peut lever KeyError/ValueError si un tag contient
-        # des accolades non échappées ou si le pattern référence une clé inconnue.
+        # M26: formatting can raise KeyError/ValueError if a tag contains
+        # unescaped braces or if the pattern references an unknown key.
         try:
             formatted = pattern.format(
                 artist=track["artist"] or "Unknown",
@@ -85,9 +85,9 @@ class FileCuratorPlugin:
         orig_path = Path(track["filepath"])
         new_path = (dest_root / formatted).with_suffix(orig_path.suffix)
 
-        # M25 : opération atomique. On met d'abord la DB à jour (rollback possible
-        # si le move échoue), puis on déplace le fichier. Si le move échoue, on
-        # restaure l'ancien filepath en DB pour éviter qu'elle pointe ailleurs.
+        # M25: atomic operation. First update the DB (rollback is possible if
+        # the move fails), then move the file. If the move fails, restore the
+        # old filepath in the DB so it doesn't point elsewhere.
         try:
             new_path.parent.mkdir(parents=True, exist_ok=True)
             self.context.database.tracks.update_filepath(track_id, new_path)
@@ -99,7 +99,7 @@ class FileCuratorPlugin:
             shutil.move(str(orig_path), str(new_path))
         except Exception as e:
             logger.error("Failed to move file, rolling back database: %s", e, exc_info=True)
-            # Rollback : la DB doit continuer à pointer le fichier d'origine
+            # Rollback: the DB must keep pointing to the original file
             try:
                 self.context.database.tracks.update_filepath(track_id, orig_path)
             except Exception as rollback_error:

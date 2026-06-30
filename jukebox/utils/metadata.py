@@ -146,7 +146,7 @@ class MetadataExtractor:
         Returns:
             Basic file information
         """
-        # Un seul appel à stat() pour éviter deux syscalls
+        # Single stat() call to avoid two syscalls
         stat_result = filepath.stat()
         return {
             "filepath": str(filepath),

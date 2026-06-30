@@ -267,9 +267,9 @@ class TestCommentColumn:
     def test_set_comment_tag_failure_leaves_db_unchanged(self, qapp, tmp_path, caplog):  # type: ignore
         """[M32] A failed tag write must NOT touch the DB nor the in-memory model.
 
-        Le tag fichier est écrit en premier : si l'écriture échoue, la base de
-        données et le modèle restent inchangés (pas de divergence DB/fichier),
-        l'erreur est loguée (pas d'échec silencieux) et setData renvoie False.
+        The file tag is written first: if the write fails, the database and the
+        model stay unchanged (no DB/file divergence), the error is logged (no
+        silent failure) and setData returns False.
         """
         import logging
 
@@ -283,12 +283,12 @@ class TestCommentColumn:
         ):
             updated = model.setData(index, "With error", Qt.ItemDataRole.EditRole)
 
-        assert updated is False  # Écriture du tag échouée → édition refusée
+        assert updated is False  # Tag write failed → edit refused
         db_track = db.tracks.get_by_id(track_id)
         assert db_track is not None
-        # La DB ne doit PAS avoir été modifiée.
+        # The DB must NOT have been modified.
         assert (db_track["comment"] or "") == ""
-        # Le modèle en mémoire ne doit pas non plus refléter la valeur échouée.
+        # The in-memory model must not reflect the failed value either.
         assert (model.tracks[0].get("comment") or "") == ""
         assert any("tag comment" in rec.message for rec in caplog.records)
         db.close()
@@ -378,7 +378,7 @@ class TestCommentColumn:
         import logging
 
         db, model, audio, track_id = self._make_model_with_db(tmp_path)
-        # Supprime la ligne en base : l'id n'est plus résolvable.
+        # Delete the row from the database: the id is no longer resolvable.
         db.tracks.delete(track_id)
         model.tracks[0]["_db_id"] = None
         comment_col = model.cell_renderer.columns.index("comment")
@@ -390,8 +390,8 @@ class TestCommentColumn:
         ):
             updated = model.setData(index, "Orphan", Qt.ItemDataRole.EditRole)
 
-        # Le tag fichier a été écrit : l'édition réussit côté modèle, mais
-        # l'impossibilité de persister en base est loguée (pas d'échec silencieux).
+        # The file tag was written: the edit succeeds on the model side, but
+        # the inability to persist to the database is logged (no silent failure).
         assert updated is True
         assert any("introuvable" in rec.message for rec in caplog.records)
         db.close()
@@ -420,8 +420,8 @@ class TestCommentColumn:
         import logging
 
         model = TrackListModel(mode="jukebox")
-        # Ligne sans filepath, insérée directement pour ne pas déclencher le
-        # background check (qui appellerait Path(None)).
+        # Row without a filepath, inserted directly so as not to trigger the
+        # background check (which would call Path(None)).
         model.tracks = [{"filepath": None, "comment": ""}]
         comment_col = model.cell_renderer.columns.index("comment")
         index = model.index(0, comment_col)
@@ -495,9 +495,9 @@ class TestCommentColumnSorting:
         model.sort(comment_col, Qt.SortOrder.AscendingOrder)
 
         ordered = self._comments_in_order(model)
-        # Les deux premiers sont les commentaires non vides, triés alphabétiquement.
+        # The first two are the non-empty comments, sorted alphabetically.
         assert ordered[:2] == ["alpha", "zulu"]
-        # Les deux derniers sont les commentaires vides (chaîne vide ou blancs).
+        # The last two are the empty comments (empty string or blanks).
         assert all(c.strip() == "" for c in ordered[2:])
 
     def test_comment_sort_toggles_with_order(self, qapp):  # type: ignore

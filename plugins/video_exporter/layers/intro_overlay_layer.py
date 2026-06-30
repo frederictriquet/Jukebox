@@ -19,8 +19,8 @@ if TYPE_CHECKING:
 class IntroOverlayLayer(BaseVisualLayer):
     """Intro overlay layer that plays a video file once on top of other layers.
 
-    Les frames sont décodées à la demande via cv2.VideoCapture (seeking) — aucune
-    pré-allocation RAM. Thread-safe via un verrou sur le VideoCapture.
+    Frames are decoded on demand via cv2.VideoCapture (seeking) — no RAM
+    pre-allocation. Thread-safe via a lock on the VideoCapture.
     """
 
     z_index = 100
@@ -52,7 +52,7 @@ class IntroOverlayLayer(BaseVisualLayer):
         super().__init__(width, height, fps, audio, sr, duration, **kwargs)
 
     def _precompute(self) -> None:
-        """Valide la vidéo et lit ses métadonnées sans charger les pixels."""
+        """Validate the video and read its metadata without loading the pixels."""
         if not self.video_path:
             logging.info("[Intro Overlay] Aucun chemin vidéo spécifié")
             return
@@ -72,8 +72,8 @@ class IntroOverlayLayer(BaseVisualLayer):
             ) from e
 
         cap = cv2.VideoCapture(str(self.video_path))
-        # try/finally : libère le VideoCapture si une exception survient avant qu'il
-        # ne soit confié à self._cap (sinon fuite de ressource OpenCV).
+        # try/finally: release the VideoCapture if an exception occurs before it
+        # is handed off to self._cap (otherwise OpenCV resource leak).
         kept = False
         try:
             video_fps = cap.get(cv2.CAP_PROP_FPS)
@@ -93,7 +93,7 @@ class IntroOverlayLayer(BaseVisualLayer):
             self.video_duration_frames = int(total_video_frames / self._frame_ratio)
             self.fade_out_frames = int(self.fade_out_duration * self.fps)
 
-            # Garder le VideoCapture ouvert pour le seeking en render()
+            # Keep the VideoCapture open for seeking in render()
             self._cap = cap
             kept = True
         finally:
@@ -108,7 +108,7 @@ class IntroOverlayLayer(BaseVisualLayer):
         )
 
     def _read_video_frame(self, video_frame_idx: int) -> np.ndarray | None:
-        """Seek et lit une frame brute depuis le VideoCapture (thread-safe)."""
+        """Seek and read a raw frame from the VideoCapture (thread-safe)."""
         import cv2
 
         with self._cap_lock:
@@ -124,7 +124,7 @@ class IntroOverlayLayer(BaseVisualLayer):
         return cv2.cvtColor(frame, cv2.COLOR_BGRA2RGBA)
 
     def render(self, frame_idx: int, time_pos: float) -> Image.Image:  # noqa: ARG002
-        """Décode et retourne la frame de la vidéo d'intro pour frame_idx."""
+        """Decode and return the intro video frame for frame_idx."""
         if self._cap is None or frame_idx >= self.video_duration_frames:
             return self.create_transparent_image()
 
@@ -156,7 +156,7 @@ class IntroOverlayLayer(BaseVisualLayer):
     def _resize_with_aspect_ratio(
         self, frame: np.ndarray, target_width: int, target_height: int
     ) -> np.ndarray:
-        """Resize en préservant le ratio, centré sur fond transparent."""
+        """Resize while preserving the ratio, centered on a transparent background."""
         import cv2
 
         h, w = frame.shape[:2]
@@ -179,7 +179,7 @@ class IntroOverlayLayer(BaseVisualLayer):
         return canvas
 
     def _apply_chroma_key(self, frame: np.ndarray) -> np.ndarray:
-        """Rend transparents les pixels sombres (chroma key noir)."""
+        """Make dark pixels transparent (black chroma key)."""
         brightness = np.max(frame[:, :, :3], axis=2)
         alpha = np.clip(
             (brightness.astype(float) - self.chroma_key_threshold)

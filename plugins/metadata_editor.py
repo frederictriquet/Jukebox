@@ -157,7 +157,7 @@ class MetadataEditorPlugin:
                         file_meta = MetadataExtractor.extract(Path(track["filepath"]))
                         comment = file_meta.get("comment", "") or ""
                     except Exception:
-                        # M31 : ne pas avaler silencieusement l'erreur d'extraction
+                        # M31: do not silently swallow the extraction error
                         logging.warning(
                             "Failed to extract comment from %s, defaulting to empty",
                             track["filepath"],
@@ -193,25 +193,25 @@ class MetadataEditorPlugin:
 
         sanitized_values = {name: sanitize(value) for name, value in field_values.items()}
 
-        # M32 : écrire d'abord le tag fichier, puis la DB. Si l'écriture fichier
-        # échoue, on n'altère pas la DB afin d'éviter une divergence DB/fichier.
+        # M32: write the file tag first, then the DB. If the file write fails,
+        # we leave the DB untouched to avoid a DB/file divergence.
         from jukebox.utils.tag_writer import save_audio_tags
 
         success = save_audio_tags(filepath, sanitized_values)
         if not success:
             logging.error("Failed to save file tags: %s", filepath)
-            # Retour visuel dans la status bar en cas d'échec de sauvegarde
+            # Visual feedback in the status bar when saving fails
             self.context.emit(
                 Events.STATUS_MESSAGE,
                 message=f"Erreur : impossible de sauvegarder les métadonnées dans {Path(filepath).name}",
             )
             return
 
-        # Le fichier est à jour : on synchronise la DB avec les colonnes mappées
+        # The file is up to date: sync the DB with the mapped columns
         db_updates = {}
         for tag, value in sanitized_values.items():
             db_column = TAG_TO_DB_COLUMN.get(tag, tag)
-            # Convertir year en entier si c'est un nombre
+            # Convert year to an integer if it is a number
             if db_column == "year" and value.isdigit():
                 db_updates[db_column] = int(value)
             else:
@@ -243,9 +243,9 @@ class MetadataEditorPlugin:
 
     def shutdown(self) -> None:
         """Cleanup on application exit."""
-        # Retire le filtre TAB de QApplication pour éviter une fuite mémoire
-        # et un overhead sur tous les événements clavier (le widget peut être
-        # encore visible au moment du shutdown, donc hideEvent n'a pas suffi).
+        # Remove the TAB filter from QApplication to avoid a memory leak and
+        # overhead on every keyboard event (the widget may still be visible at
+        # shutdown time, so hideEvent was not enough).
         if self.tab_event_filter is not None:
             from PySide6.QtWidgets import QApplication
 
@@ -280,7 +280,7 @@ class MetadataEditorWidget(QWidget):
 
         label_width = 65
 
-        # Grid 4 colonnes : label | input | label | input
+        # 4-column grid: label | input | label | input
         grid = QGridLayout()
         grid.setSpacing(5)
         grid.setContentsMargins(0, 0, 0, 0)
@@ -301,7 +301,7 @@ class MetadataEditorWidget(QWidget):
             if config.width:
                 line_edit.setMaximumWidth(config.width)
 
-            # Comment : col_span sur les 3 colonnes restantes
+            # Comment: col_span across the 3 remaining columns
             is_last_alone = idx == len(self.field_configs) - 1 and idx % 2 == 0
             col_span = 3 if is_last_alone else 1
 
@@ -378,7 +378,7 @@ class MetadataEditorWidget(QWidget):
             self._on_field_changed()
 
     def _on_copy_artist_title(self) -> None:
-        """Copie « Artist - Title » dans le presse-papiers."""
+        """Copy "Artist - Title" to the clipboard."""
         artist = (self.field_map.get("artist") or QLineEdit()).text().strip()
         title = (self.field_map.get("title") or QLineEdit()).text().strip()
         text = f"{artist} - {title}" if artist and title else artist or title
@@ -410,7 +410,7 @@ class MetadataEditorWidget(QWidget):
         self._on_field_changed()
 
     def showEvent(self, event: Any) -> None:  # noqa: N802
-        """Installe le filtre TAB quand le widget devient visible."""
+        """Install the TAB filter when the widget becomes visible."""
         super().showEvent(event)
         from PySide6.QtWidgets import QApplication
 
@@ -419,7 +419,7 @@ class MetadataEditorWidget(QWidget):
             app.installEventFilter(self.tab_filter)
 
     def hideEvent(self, event: Any) -> None:  # noqa: N802
-        """Retire le filtre TAB quand le widget est masqué."""
+        """Remove the TAB filter when the widget is hidden."""
         super().hideEvent(event)
         from PySide6.QtWidgets import QApplication
 

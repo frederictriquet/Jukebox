@@ -47,20 +47,20 @@ class RecommendationsPlugin:
         """Get track recommendations."""
         tracks_repo = self.context.database.tracks
 
-        # Couples (artist, genre) des pistes récemment terminées.
+        # (artist, genre) pairs from recently finished tracks.
         recent = tracks_repo.get_recently_played_artists_genres(limit=20)
 
         if not recent:
-            # Aucun historique : recommandations aléatoires.
+            # No history: random recommendations.
             return tracks_repo.get_random(limit)
 
-        # Artistes et genres favoris déduits de l'historique.
+        # Favorite artists and genres inferred from the history.
         artists = [r["artist"] for r in recent if r["artist"]]
         genres = [r["genre"] for r in recent if r["genre"]]
 
         recommendations = []
 
-        # Pistes d'artistes similaires non jouées récemment.
+        # Tracks from similar artists not played recently.
         if artists:
             artist_sample = random.sample(artists, min(3, len(artists)))
             for artist in artist_sample:
@@ -68,7 +68,7 @@ class RecommendationsPlugin:
                     tracks_repo.get_random_by_artist_unplayed(artist, limit // 3)
                 )
 
-        # Pistes de genres similaires.
+        # Tracks from similar genres.
         if genres and len(recommendations) < limit:
             genre_sample = random.sample(genres, min(2, len(genres)))
             for genre in genre_sample:

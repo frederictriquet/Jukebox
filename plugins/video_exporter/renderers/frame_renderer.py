@@ -219,7 +219,7 @@ class FrameRenderer:
             except Exception as e:
                 logging.warning(f"[Frame Renderer] Failed to init text layer: {e}")
 
-        # Couche MilkDrop (projectM v4)
+        # MilkDrop layer (projectM v4)
         if layers_config.get("milkdrop_enabled", False):
             logging.info("[Frame Renderer] initializing MilkDrop layer...")
             try:
@@ -237,9 +237,9 @@ class FrameRenderer:
                 self.layers.append(layer)
                 logging.info("[Frame Renderer] MilkDrop layer enabled")
             except Exception:
-                # Désactivation du layer (comme les autres) : on logue la trace
-                # complète et on continue l'export sans MilkDrop plutôt que de
-                # tout faire échouer.
+                # Disable the layer (like the others): log the full traceback
+                # and continue the export without MilkDrop rather than failing
+                # everything.
                 logging.exception(
                     "[Frame Renderer] Échec d'initialisation MilkDrop — couche désactivée. "
                     "Vérifiez que libprojectM est installé et que le chemin des presets est valide."
@@ -258,8 +258,8 @@ class FrameRenderer:
                 self.layers.append(layer)
                 logging.info("[Frame Renderer] Intro overlay layer enabled")
             except Exception:
-                # Désactivation du layer : trace complète loguée, export poursuivi
-                # sans la vidéo d'intro.
+                # Disable the layer: full traceback logged, export continued
+                # without the intro video.
                 logging.exception(
                     "[Frame Renderer] Échec d'initialisation de la vidéo d'intro '%s' "
                     "— couche désactivée.",
@@ -285,10 +285,10 @@ class FrameRenderer:
         return total_prerendered
 
     def warmup_gpu(self) -> None:
-        """Chauffe les couches GPU sans pré-calculer toutes les frames.
+        """Warm up the GPU layers without pre-computing all frames.
 
-        Appeler depuis le thread principal avant la preview pour que les
-        effets GPU (MilkDrop) soient visibles dès le premier frame.
+        Call from the main thread before the preview so that the GPU
+        effects (MilkDrop) are visible from the very first frame.
         """
         for layer in self.layers:
             layer.warmup_gpu_frames()
