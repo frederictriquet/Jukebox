@@ -82,8 +82,8 @@ class DynamicsLayer(BaseVisualLayer):
         max_energy = max(self.energy_envelope) if max(self.energy_envelope) > 0 else 1.0
         max_bass = max(self.bass_energy_envelope) if max(self.bass_energy_envelope) > 0 else 1.0
 
-        self.energy_envelope = np.array(self.energy_envelope) / max_energy
-        self.bass_energy_envelope = np.array(self.bass_energy_envelope) / max_bass
+        self.energy_envelope = np.array(self.energy_envelope) / max_energy  # type: ignore[assignment]
+        self.bass_energy_envelope = np.array(self.bass_energy_envelope) / max_bass  # type: ignore[assignment]
 
         # Pre-compute vignette mask
         self._create_vignette_mask()

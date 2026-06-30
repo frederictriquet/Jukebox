@@ -3,7 +3,7 @@
 import sys
 
 
-def pytest_configure(config):
+def pytest_configure(config):  # type: ignore[no-untyped-def]
     """Configure pytest - mock VLC module before any test imports."""
     if "vlc" not in sys.modules:
         from tests.mocks.mock_vlc import mock_vlc_module

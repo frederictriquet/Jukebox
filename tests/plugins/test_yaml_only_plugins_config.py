@@ -34,7 +34,7 @@ YAML_ONLY_PLUGINS = [
 ]
 
 
-def _load_plugin(module_path: str, class_name: str):  # type: ignore[return]
+def _load_plugin(module_path: str, class_name: str):  # type: ignore[no-untyped-def]
     mod = importlib.import_module(module_path)
     return getattr(mod, class_name)()
 

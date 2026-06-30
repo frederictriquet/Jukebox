@@ -24,7 +24,7 @@ class _FakeUIBuilder:
     def add_menu_separator(self, menu) -> None:  # type: ignore[no-untyped-def]
         ...
 
-    def add_menu_action(self, *args, **kwargs) -> None: ...
+    def add_menu_action(self, *args, **kwargs) -> None: ...  # type: ignore[no-untyped-def]
 
 
 def _stretch_index(layout) -> int:  # type: ignore[no-untyped-def]

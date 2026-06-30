@@ -440,18 +440,18 @@ class WaveformWidget(QWidget):
 
         # Remove all padding/margins
         self.plot_widget.setContentsMargins(0, 0, 0, 0)
-        self.plot_widget.plotItem.setContentsMargins(0, 0, 0, 0)  # type: ignore[attr-defined]
+        self.plot_widget.plotItem.setContentsMargins(0, 0, 0, 0)
 
         # Disable auto-range padding
-        self.plot_widget.plotItem.vb.setDefaultPadding(0)  # type: ignore[attr-defined]
-        self.plot_widget.plotItem.vb.enableAutoRange(enable=False)  # type: ignore[attr-defined]
+        self.plot_widget.plotItem.vb.setDefaultPadding(0)
+        self.plot_widget.plotItem.vb.enableAutoRange(enable=False)
 
         height = waveform_config.height if waveform_config else 120
         self.plot_widget.setMaximumHeight(height)
         self.plot_widget.setMinimumHeight(height)
 
         # Click to seek
-        self.plot_widget.scene().sigMouseClicked.connect(self._on_click)  # type: ignore[attr-defined]
+        self.plot_widget.scene().sigMouseClicked.connect(self._on_click)
 
         layout.addWidget(self.plot_widget)
         self.setLayout(layout)
@@ -465,8 +465,8 @@ class WaveformWidget(QWidget):
         self.plot_widget.addItem(self.cursor_line)
 
         # Set initial viewport range with no padding
-        self.plot_widget.setXRange(0, 100, padding=0)  # type: ignore[call-arg]
-        self.plot_widget.setYRange(0, 1, padding=0)  # type: ignore[call-arg]
+        self.plot_widget.setXRange(0, 100, padding=0)
+        self.plot_widget.setYRange(0, 1, padding=0)
 
     def display_waveform(self, waveform: Any) -> None:
         """Display waveform data with 3 colors stacked (Engine DJ style)."""
@@ -514,12 +514,12 @@ class WaveformWidget(QWidget):
             )
 
             # Set range to fit data exactly
-            self.plot_widget.setXRange(0, len(bass), padding=0)  # type: ignore[call-arg]
+            self.plot_widget.setXRange(0, len(bass), padding=0)
             # Garde : array vide → ValueError ; max nul → setYRange(0, 0) crashe pyqtgraph
             max_total = float(np.max(treble_total)) if len(treble_total) > 0 else 0.0
             if max_total <= 0.0:
                 max_total = 1.0
-            self.plot_widget.setYRange(0, max_total * 1.05, padding=0)  # type: ignore[call-arg]
+            self.plot_widget.setYRange(0, max_total * 1.05, padding=0)
 
         # Re-add cursor line after clear (cleared removes it)
         if self.cursor_line:
@@ -560,7 +560,7 @@ class WaveformWidget(QWidget):
             return
 
         # Get click position
-        mouse_point = self.plot_widget.plotItem.vb.mapSceneToView(event.scenePos())  # type: ignore[union-attr]
+        mouse_point = self.plot_widget.plotItem.vb.mapSceneToView(event.scenePos())
         x = mouse_point.x()
 
         # Convert to position (0.0-1.0)

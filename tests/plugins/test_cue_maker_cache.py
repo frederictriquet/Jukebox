@@ -23,7 +23,7 @@ class TestCueMakerCache:
             for record in caplog.records
         )
 
-    def test_load_cached_entries_handles_missing_file_gracefully(self) -> None:  # type: ignore
+    def test_load_cached_entries_handles_missing_file_gracefully(self) -> None:
         """Test load_cached_entries returns None when cache file doesn't exist."""
         # This tests the normal case where cache simply doesn't exist yet
         fake_path = "/some/valid/path/mix.mp3"

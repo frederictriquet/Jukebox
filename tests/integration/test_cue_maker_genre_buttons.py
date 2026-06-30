@@ -15,7 +15,7 @@ from plugins.search_and_filter import SearchAndFilterPlugin
 
 def _find_genre_buttons_in_widget(widget: QWidget, depth: int = 0, max_depth: int = 10) -> list:
     """Recursively find all genre filter buttons in a widget tree."""
-    buttons = []
+    buttons = []  # type: ignore[var-annotated]
     if depth > max_depth:
         return buttons
     if isinstance(widget, QPushButton):
@@ -90,6 +90,6 @@ def test_drawer_genre_buttons_are_separate_instances(qapp) -> None:  # type: ign
     assert len(drawer_buttons) == 4, f"Expected 4 drawer buttons, found {len(drawer_buttons)}"
 
     # Drawer buttons should be different widget instances from toolbar buttons
-    toolbar_buttons = _find_genre_buttons_in_widget(plugin.toolbar_container)
+    toolbar_buttons = _find_genre_buttons_in_widget(plugin.toolbar_container)  # type: ignore[arg-type]
     for db in drawer_buttons:
         assert db not in toolbar_buttons, "Drawer buttons should be separate instances"

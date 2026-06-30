@@ -294,7 +294,7 @@ class EngineDJExporter:
                     """,
                     (list_id, engine_track_id, db_uuid, prev_entity_id),
                 )
-                prev_entity_id = cursor.lastrowid
+                prev_entity_id = cursor.lastrowid  # type: ignore[assignment]
 
             # Verify linked list integrity
             self._verify_linked_list(conn, list_id, len(resolved_track_ids))
@@ -425,7 +425,7 @@ def get_engine_db_path(context: PluginContextProtocol, parent: QWidget | None) -
     # Save using the same key convention as conf_manager
     engine_path = Path(path)
     context.database.settings.save("general", "engine_dj_database_path", str(engine_path))
-    context.config.engine_dj.database_path = str(engine_path)  # type: ignore[misc]
+    context.config.engine_dj.database_path = str(engine_path)
     return engine_path
 
 

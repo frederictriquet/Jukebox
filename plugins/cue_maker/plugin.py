@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QSortFilterProxyModel, Qt  # type: ignore[import-untyped]
-from PySide6.QtWidgets import QSplitter, QVBoxLayout, QWidget  # type: ignore[import-untyped]
+from PySide6.QtCore import QSortFilterProxyModel, Qt
+from PySide6.QtWidgets import QSplitter, QVBoxLayout, QWidget
 
 from jukebox.core.constants import WORKER_WAIT_TIMEOUT_MS
 from jukebox.core.event_bus import Events
@@ -183,7 +183,7 @@ class CueMakerPlugin:
                 drawer_genres = search_filter_plugin.get_drawer_genre_buttons_container()
             else:
                 # Fallback: create a simple container
-                from PySide6.QtWidgets import QHBoxLayout, QLabel  # type: ignore[import-untyped]
+                from PySide6.QtWidgets import QHBoxLayout, QLabel
 
                 drawer_genres = QWidget()
                 layout = QHBoxLayout(drawer_genres)
@@ -401,7 +401,7 @@ class CueMakerPlugin:
         db_path = str(cue_config.shazamix_db_path.expanduser()) if cue_config else ""
         if not db_path:
             logger.warning("[Cue Maker] No shazamix database path configured")
-            from PySide6.QtWidgets import QMessageBox  # type: ignore[import-untyped]
+            from PySide6.QtWidgets import QMessageBox
 
             QMessageBox.warning(
                 self.main_widget,
@@ -467,7 +467,7 @@ class CueMakerPlugin:
         cue_config = getattr(self.context.config, "cue_maker", None)
         db_path = str(cue_config.shazamix_db_path.expanduser()) if cue_config else ""
         if not db_path:
-            from PySide6.QtWidgets import QMessageBox  # type: ignore[import-untyped]
+            from PySide6.QtWidgets import QMessageBox
 
             QMessageBox.warning(
                 self.main_widget,

@@ -12,7 +12,7 @@ import numpy as np
 from PIL import Image
 
 try:
-    import moderngl  # type: ignore[import-untyped]
+    import moderngl
 except ImportError:
     moderngl = None  # type: ignore[assignment]
 
@@ -198,7 +198,7 @@ class MilkDropLayer(BaseVisualLayer):
     def _precompute_beats(self) -> list[int]:
         """Calcule les indices de frames correspondant aux beats."""
         try:
-            import librosa  # type: ignore[import-untyped]
+            import librosa
         except ImportError:
             logger.warning("[MilkDropLayer] librosa absent — détection de beats désactivée")
             return []
@@ -219,11 +219,11 @@ class MilkDropLayer(BaseVisualLayer):
         """
         logger.debug("[MilkDropLayer] _init_gl: destruction ressources précédentes")
         if self._handle is not None and self._lib is not None:
-            self._lib.projectm_destroy(self._handle)  # type: ignore[union-attr]
+            self._lib.projectm_destroy(self._handle)
             self._handle = None
         if self._fbo is not None:
             try:
-                self._fbo.release()  # type: ignore[union-attr]
+                self._fbo.release()  # type: ignore[attr-defined]
             except Exception:
                 logger.debug("[MilkDropLayer] FBO stale (contexte déjà libéré), release ignoré")
             self._fbo = None
@@ -324,7 +324,7 @@ class MilkDropLayer(BaseVisualLayer):
             # Cycle de preset : avance comme le ferait render() en live
             if self._presets and wi > 0 and wi % frames_per_preset == 0:
                 self._live_preset_idx = (self._live_preset_idx + 1) % len(self._presets)
-                self._lib.projectm_load_preset_file(  # type: ignore[union-attr]
+                self._lib.projectm_load_preset_file(
                     self._handle, self._presets[self._live_preset_idx].encode(), True
                 )
                 self._live_frames_since_cut = 0
@@ -338,21 +338,21 @@ class MilkDropLayer(BaseVisualLayer):
                 pcm_w[: w_end - w_start] = warmup_audio[w_start:w_end].astype(np.float32)
 
             pcm_w_ptr = pcm_w.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
-            self._lib.projectm_pcm_add_float(self._handle, pcm_w_ptr, samples_per_frame, 1)  # type: ignore[union-attr]
+            self._lib.projectm_pcm_add_float(self._handle, pcm_w_ptr, samples_per_frame, 1)
 
-            self._fbo.use()  # type: ignore[union-attr]
-            self._lib.projectm_opengl_render_frame_fbo(  # type: ignore[union-attr]
-                self._handle, ctypes.c_uint(self._fbo.glo)  # type: ignore[union-attr]
+            self._fbo.use()  # type: ignore[attr-defined]
+            self._lib.projectm_opengl_render_frame_fbo(
+                self._handle, ctypes.c_uint(self._fbo.glo)  # type: ignore[attr-defined]
             )
 
             self._live_frames_since_cut += 1
 
             # Flush périodique
             if wi % 100 == 0:
-                self._fbo.read(components=1)  # type: ignore[union-attr]
+                self._fbo.read(components=1)  # type: ignore[attr-defined]
 
         if self._ctx:
-            self._ctx.finish()  # type: ignore[union-attr]
+            self._ctx.finish()  # type: ignore[attr-defined]
 
         logger.info("[MilkDropLayer] Chauffe terminée")
 
@@ -476,9 +476,9 @@ class MilkDropLayer(BaseVisualLayer):
         """Libère les ressources projectM."""
         with _gpu_lock:
             if self._handle is not None and self._lib is not None:
-                self._lib.projectm_destroy(self._handle)  # type: ignore[union-attr]
+                self._lib.projectm_destroy(self._handle)
                 self._handle = None
             if self._fbo is not None:
-                self._fbo.release()  # type: ignore[union-attr]
+                self._fbo.release()  # type: ignore[attr-defined]
                 self._fbo = None
         logger.info("[MilkDropLayer] shutdown")

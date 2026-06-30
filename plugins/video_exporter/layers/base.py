@@ -135,4 +135,4 @@ class BaseVisualLayer(ABC):
 
         rms = np.sqrt(np.mean(samples**2))
         # Normalize (typical RMS values are 0.0-0.3 for music)
-        return min(1.0, rms * 3.0)
+        return min(1.0, rms * 3.0)  # type: ignore[no-any-return]

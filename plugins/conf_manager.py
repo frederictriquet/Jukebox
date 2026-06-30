@@ -204,10 +204,10 @@ class ListEditor(QWidget):
                 widget = DirectoryInput()
                 widget.setText(value)
             elif field_type == "shortcut":
-                widget = ShortcutInput()
+                widget = ShortcutInput()  # type: ignore[assignment]
                 widget.setText(value)
             else:  # string
-                widget = QLineEdit(value)
+                widget = QLineEdit(value)  # type: ignore[assignment]
 
             self.table.setCellWidget(row, col, widget)
 
@@ -445,40 +445,40 @@ class ConfigDialog(QDialog):
                 input_widget = ListEditor(item_schema)
             elif setting_type == "choice":
                 # Dropdown with predefined options
-                input_widget = QComboBox()
+                input_widget = QComboBox()  # type: ignore[assignment]
                 options = setting_config.get("options", [])
                 for option in options:
                     # Support both simple strings and dict with label/value
                     if isinstance(option, dict):
-                        input_widget.addItem(option.get("label", ""), option.get("value", ""))
+                        input_widget.addItem(option.get("label", ""), option.get("value", ""))  # type: ignore[attr-defined]
                     else:
-                        input_widget.addItem(str(option), str(option))
+                        input_widget.addItem(str(option), str(option))  # type: ignore[attr-defined]
             elif setting_type == "bool":
-                input_widget = QCheckBox()
-                input_widget.setChecked(setting_config.get("default", False))
+                input_widget = QCheckBox()  # type: ignore[assignment]
+                input_widget.setChecked(setting_config.get("default", False))  # type: ignore[attr-defined]
             elif setting_type == "directory":
-                input_widget = DirectoryInput()
+                input_widget = DirectoryInput()  # type: ignore[assignment]
             elif setting_type == "shortcut":
-                input_widget = ShortcutInput()
+                input_widget = ShortcutInput()  # type: ignore[assignment]
             elif setting_type == "int":
-                input_widget = QSpinBox()
-                input_widget.setRange(setting_config.get("min", 0), setting_config.get("max", 1000))
+                input_widget = QSpinBox()  # type: ignore[assignment]
+                input_widget.setRange(setting_config.get("min", 0), setting_config.get("max", 1000))  # type: ignore[attr-defined]
                 if "suffix" in setting_config:
-                    input_widget.setSuffix(setting_config["suffix"])
+                    input_widget.setSuffix(setting_config["suffix"])  # type: ignore[attr-defined]
             elif setting_type == "float":
                 # Use QDoubleSpinBox for float values
-                input_widget = QDoubleSpinBox()
-                input_widget.setRange(
+                input_widget = QDoubleSpinBox()  # type: ignore[assignment]
+                input_widget.setRange(  # type: ignore[attr-defined]
                     setting_config.get("min", 0.0),
                     setting_config.get("max", 100.0),
                 )
-                input_widget.setSingleStep(0.1)  # Step by 0.1
-                input_widget.setDecimals(1)  # Show 1 decimal place
-                input_widget.setSuffix(setting_config.get("suffix", ""))
+                input_widget.setSingleStep(0.1)  # type: ignore[attr-defined]  # Step by 0.1
+                input_widget.setDecimals(1)  # type: ignore[attr-defined]  # Show 1 decimal place
+                input_widget.setSuffix(setting_config.get("suffix", ""))  # type: ignore[attr-defined]
             else:  # string
-                input_widget = QLineEdit()
+                input_widget = QLineEdit()  # type: ignore[assignment]
                 if "placeholder" in setting_config:
-                    input_widget.setPlaceholderText(setting_config["placeholder"])
+                    input_widget.setPlaceholderText(setting_config["placeholder"])  # type: ignore[attr-defined]
 
             # Store widget reference
             self._plugin_inputs[plugin_name][setting_key] = input_widget
@@ -565,7 +565,7 @@ class ConfigDialog(QDialog):
 
         Retourne le défaut du schema si la valeur est invalide pour le type attendu.
         """
-        from pydantic import TypeAdapter, ValidationError  # type: ignore[import]
+        from pydantic import TypeAdapter, ValidationError
 
         default = setting_config.get("default", 0 if target_type in (int, float) else False)
         if not raw:

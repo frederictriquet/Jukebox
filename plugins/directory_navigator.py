@@ -364,10 +364,8 @@ class DirectoryNavigatorPlugin:
         db = self.context.database
 
         # Get filepaths for current mode only
-        mode = self.context.app.mode_manager.get_mode().value  # type: ignore[attr-defined]
-        rows = db.conn.execute(  # type: ignore[attr-defined]
-            "SELECT filepath FROM tracks WHERE mode = ?", (mode,)
-        ).fetchall()
+        mode = self.context.app.mode_manager.get_mode().value
+        rows = db.conn.execute("SELECT filepath FROM tracks WHERE mode = ?", (mode,)).fetchall()
         filepaths = [row["filepath"] for row in rows]
 
         # Get playlists with track counts
@@ -377,7 +375,7 @@ class DirectoryNavigatorPlugin:
             LEFT JOIN playlist_tracks pt ON p.id = pt.playlist_id
             GROUP BY p.id
             ORDER BY p.name
-            """).fetchall()  # type: ignore[attr-defined]
+            """).fetchall()
         playlists = [
             {"id": row["id"], "name": row["name"], "track_count": row["track_count"]}
             for row in playlist_rows
@@ -408,7 +406,7 @@ class DirectoryNavigatorPlugin:
 
         if node_type == "all_directories":
             # Load all tracks from DB — genre/search filters apply on top
-            rows = db.conn.execute(  # type: ignore[attr-defined]
+            rows = db.conn.execute(
                 "SELECT filepath FROM tracks WHERE mode = 'jukebox' ORDER BY date_added DESC"
             ).fetchall()
             filepaths = [Path(row["filepath"]) for row in rows]
@@ -417,7 +415,7 @@ class DirectoryNavigatorPlugin:
 
         if node_type == "directory":
             # Filter by directory (recursive: LIKE 'path%')
-            rows = db.conn.execute(  # type: ignore[attr-defined]
+            rows = db.conn.execute(
                 "SELECT filepath FROM tracks WHERE filepath LIKE ?",
                 (path_data + "/%",),
             ).fetchall()
@@ -426,7 +424,7 @@ class DirectoryNavigatorPlugin:
         elif node_type == "playlist":
             # Load playlist tracks
             playlist_id = int(path_data.split(":")[1])
-            rows = db.conn.execute(  # type: ignore[attr-defined]
+            rows = db.conn.execute(
                 """
                 SELECT t.filepath
                 FROM tracks t
@@ -499,10 +497,8 @@ class DirectoryNavigatorPlugin:
             return
 
         db = self.context.database
-        db.conn.execute(  # type: ignore[attr-defined]
-            "DELETE FROM playlists WHERE id = ?", (playlist_id,)
-        )
-        db.conn.commit()  # type: ignore[attr-defined]
+        db.conn.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
+        db.conn.commit()
         logger.info(
             "[Directory Navigator] Deleted playlist '%s' (id=%d)", playlist_name, playlist_id
         )

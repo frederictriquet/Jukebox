@@ -12,24 +12,24 @@ from enum import Enum
 from random import Random
 from typing import TYPE_CHECKING, Any
 
-import numpy as np  # type: ignore[import-untyped]
-from PIL import Image, ImageDraw  # type: ignore[import-untyped]
+import numpy as np
+from PIL import Image, ImageDraw
 
 from plugins.video_exporter.layers.base import BaseVisualLayer
 
 # Try to import noise library, fallback to pseudo-noise if not available
 try:
-    from noise import pnoise2, snoise2  # type: ignore[import-untyped]
+    from noise import pnoise2, snoise2
 
     NOISE_AVAILABLE = True
 except ImportError:
     NOISE_AVAILABLE = False
     logging.warning("[VJingLayer] noise library not installed, using pseudo-noise fallback")
 
-    def pnoise2(x: float, y: float, **_: Any) -> float:  # type: ignore[misc]
+    def pnoise2(x: float, y: float, **_: Any) -> float:
         return 0.0
 
-    def snoise2(x: float, y: float, **_: Any) -> float:  # type: ignore[misc]
+    def snoise2(x: float, y: float, **_: Any) -> float:
         return 0.0
 
 
@@ -47,17 +47,17 @@ except ImportError:
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from numpy.typing import NDArray  # type: ignore[import-untyped]
+    from numpy.typing import NDArray
 
 # scipy.fft (pocketfft C++) est multi-threadé via workers=-1 et n'utilise pas
 # BLAS/vecLib (pas de SIGBUS macOS ARM hors main thread). Repli sur np.fft
 # (mêmes résultats, mono-thread) si scipy est absent.
 try:
-    from scipy import fft as _fft_module  # type: ignore[import-untyped]
+    from scipy import fft as _fft_module
 
     _FFT_KWARGS: dict[str, Any] = {"workers": -1}
 except ImportError:
-    _fft_module = np.fft  # type: ignore[assignment]
+    _fft_module = np.fft
     _FFT_KWARGS = {}
     logging.info("[VJingLayer] scipy absent, FFT numpy mono-thread utilisée")
 
@@ -155,7 +155,7 @@ def compute_audio_analysis(
         boucle Python par frame ; mêmes valeurs au bruit float64 près)."""
         csum = np.concatenate(([0.0], np.cumsum(x.astype(np.float64) ** 2)))
         sums = csum[ends] - csum[starts]
-        return np.sqrt(sums / np.maximum(counts, 1))
+        return np.sqrt(sums / np.maximum(counts, 1))  # type: ignore[no-any-return]
 
     def normalize(arr: NDArray) -> NDArray:
         max_val = np.max(arr) if len(arr) > 0 and np.max(arr) > 0 else 1.0
@@ -320,7 +320,7 @@ def perlin2d(x: float, y: float, octaves: int = 1, persistence: float = 0.5) -> 
         Noise value in range [-1, 1].
     """
     if NOISE_AVAILABLE:
-        return pnoise2(x, y, octaves=octaves, persistence=persistence)
+        return pnoise2(x, y, octaves=octaves, persistence=persistence)  # type: ignore[no-any-return]
     else:
         # Fallback pseudo-noise
         return _pseudo_perlin2d(x, y, octaves, persistence)
@@ -339,7 +339,7 @@ def simplex2d(x: float, y: float, octaves: int = 1, persistence: float = 0.5) ->
         Noise value in range [-1, 1].
     """
     if NOISE_AVAILABLE:
-        return snoise2(x, y, octaves=octaves, persistence=persistence)
+        return snoise2(x, y, octaves=octaves, persistence=persistence)  # type: ignore[no-any-return]
     else:
         return _pseudo_perlin2d(x, y, octaves, persistence)
 
@@ -683,7 +683,7 @@ class VJingLayer(BaseVisualLayer):
         self.use_all_effects = use_all_effects
         self.enabled_post_processing: set[str] = set(enabled_post_processing or [])
         self.use_gpu = use_gpu
-        self._gpu_renderer: GPUShaderRenderer | None = None  # type: ignore[valid-type]
+        self._gpu_renderer: GPUShaderRenderer | None = None
         # Cache for pre-rendered GPU frames: {frame_idx: {effect_name: Image}}
         self._gpu_frame_cache: dict[int, dict[str, Image.Image]] = {}
 
@@ -1724,7 +1724,7 @@ class VJingLayer(BaseVisualLayer):
                         "vx": math.cos(angle) * speed,
                         "vy": math.sin(angle) * speed,
                         "size": (self._rng.random() * 5 + 2) * s,
-                        "color": self._get_random_palette_color(),  # type: ignore[arg-type]
+                        "color": self._get_random_palette_color(),  # type: ignore[dict-item]
                         "life": 40 + self._rng.random() * 20,
                     }
                 )
@@ -1751,7 +1751,7 @@ class VJingLayer(BaseVisualLayer):
                     if 0 <= x < self.width and 0 <= y < self.height:
                         draw.ellipse(
                             [x - size, y - size, x + size, y + size],
-                            fill=(*p["color"], alpha),  # type: ignore[arg-type]
+                            fill=(*p["color"], alpha),  # type: ignore[misc]
                         )
 
     # ========================================================================
@@ -2043,7 +2043,7 @@ class VJingLayer(BaseVisualLayer):
         angle = math.sin(time_pos) * 2
 
         # Transform feedback buffer
-        rotated = self.feedback_buffer.rotate(  # type: ignore[union-attr]
+        rotated = self.feedback_buffer.rotate(
             angle, center=(self.width // 2, self.height // 2), expand=False
         )
 
@@ -2244,7 +2244,7 @@ class VJingLayer(BaseVisualLayer):
                 new_ripples.append(ripple)
 
                 # Get ripple color from palette
-                color = colors[ripple.get("color_idx", 0) % len(colors)]  # type: ignore[index]
+                color = colors[ripple.get("color_idx", 0) % len(colors)]  # type: ignore[call-overload]
 
                 # Draw concentric circles - increased alpha from 100 to 200
                 alpha = int(200 * (ripple["life"] / 60) * self._current_intensity)
@@ -3438,7 +3438,7 @@ class VJingLayer(BaseVisualLayer):
                 continue
 
             # Use palette color based on particle index with desaturation for smoke
-            base_color = colors[p.get("color_idx", 0) % len(colors)]  # type: ignore[index]
+            base_color = colors[p.get("color_idx", 0) % len(colors)]  # type: ignore[call-overload]
             # Desaturate: blend toward gray for smoke effect
             gray = (base_color[0] + base_color[1] + base_color[2]) // 3
             desaturate = 0.6  # 60% toward gray
@@ -3492,7 +3492,7 @@ class VJingLayer(BaseVisualLayer):
         sw, sh = max(16, w // max(1, ds)), max(16, h // max(1, ds))
 
         # Precompute coordinate grids (lazy, constant once w/h is set)
-        if not hasattr(self, "_nebula_xs") or self._nebula_xs.shape != (sh, sw):
+        if not hasattr(self, "_nebula_xs") or self._nebula_xs.shape != (sh, sw):  # type: ignore[has-type]
             self._nebula_ys, self._nebula_xs = np.mgrid[0:sh, 0:sw].astype(np.float32)
             self._nebula_r = np.empty((sh, sw), dtype=np.float32)
             self._nebula_g = np.empty((sh, sw), dtype=np.float32)
@@ -3663,7 +3663,7 @@ class VJingLayer(BaseVisualLayer):
 
                 cy += hex_h
                 row += 1
-            cx += hex_w * 0.75
+            cx += hex_w * 0.75  # type: ignore[assignment]
             col += 1
 
     # =========================================================================
@@ -3922,7 +3922,7 @@ class VJingLayer(BaseVisualLayer):
             if wave["life"] <= 0:
                 continue
 
-            cx, cy = wave["cx"], wave["cy"]
+            cx, cy = wave["cx"], wave["cy"]  # type: ignore[assignment]
             radius = wave["radius"]
             strength = wave["strength"] * wave["life"] * intensity
 
@@ -4545,7 +4545,7 @@ class VJingLayer(BaseVisualLayer):
                 if la > 3:
                     color = self._get_palette_color(int(self._swarm_color_idx[ii]))
                     draw.line(
-                        [(xs[ii], ys[ii]), (xs[jj], ys[jj])],  # type: ignore[arg-type]
+                        [(xs[ii], ys[ii]), (xs[jj], ys[jj])],
                         fill=(*color, la),
                         width=line_w,
                     )
@@ -4802,7 +4802,7 @@ class VJingLayer(BaseVisualLayer):
         like real neon signs radiating light.  Uses three blur passes at
         different scales and composites via screen blending for maximum impact.
         """
-        from PIL import ImageFilter  # type: ignore[import-untyped]
+        from PIL import ImageFilter
 
         treble = ctx["treble"]
         energy = ctx["energy"]
@@ -5071,7 +5071,7 @@ class VJingLayer(BaseVisualLayer):
         c_arr = np.sin(time_pos + i_arr * i_arr)
         pos = c_arr > 0
         lut_idx = (c_arr[pos] * 511.0).clip(0, 511).astype(np.int32)
-        colors = self._emission_lut[lut_idx]  # (N_pos, 3) float32  # type: ignore[index]
+        colors = self._emission_lut[lut_idx]  # type: ignore[index]  # (N_pos, 3) float32
 
         # Max-blend: bright regions accumulate without clamping
         np.maximum.at(buf[:, :, 0], (py[pos], px[pos]), colors[:, 0])

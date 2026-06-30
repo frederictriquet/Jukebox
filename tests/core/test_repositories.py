@@ -78,12 +78,12 @@ class TestBaseRepository:
         db = make_db(tmp_path)
         repo = TrackRepository(db)
         # Insert a row manually without committing, then call _commit
-        db.conn.execute(
+        db.conn.execute(  # type: ignore[union-attr]
             "INSERT INTO tracks (filepath, filename) VALUES (?, ?)",
             ("/tmp/commit_test.mp3", "commit_test.mp3"),
         )
         repo._commit()
-        row = db.conn.execute(
+        row = db.conn.execute(  # type: ignore[union-attr]
             "SELECT id FROM tracks WHERE filepath = ?", ("/tmp/commit_test.mp3",)
         ).fetchone()
         assert row is not None

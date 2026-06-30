@@ -136,7 +136,7 @@ class FrameRenderer:
                 from plugins.video_exporter.layers.video_layer import VideoBackgroundLayer
 
                 layer = VideoBackgroundLayer(
-                    **common_kwargs,
+                    **common_kwargs,  # type: ignore[arg-type]
                     video_folder=self.video_clips_folder,
                 )
                 self.layers.append(layer)
@@ -149,8 +149,8 @@ class FrameRenderer:
             try:
                 from plugins.video_exporter.layers.waveform_layer import WaveformLayer
 
-                layer = WaveformLayer(
-                    **common_kwargs,
+                layer = WaveformLayer(  # type: ignore[assignment]
+                    **common_kwargs,  # type: ignore[arg-type]
                     waveform_height_ratio=self.waveform_config.get("height_ratio", 0.3),
                     bass_color=self.waveform_config.get("bass_color"),
                     mid_color=self.waveform_config.get("mid_color"),
@@ -167,7 +167,7 @@ class FrameRenderer:
             try:
                 from plugins.video_exporter.layers.dynamics_layer import DynamicsLayer
 
-                layer = DynamicsLayer(**common_kwargs)
+                layer = DynamicsLayer(**common_kwargs)  # type: ignore[arg-type, assignment]
                 self.layers.append(layer)
                 logging.info("[Frame Renderer] Dynamics layer enabled")
             except Exception as e:
@@ -184,8 +184,8 @@ class FrameRenderer:
                     f"[Frame Renderer] VJing: genre='{genre}', "
                     f"preset='{self.vjing_preset}', mappings={self.vjing_mappings}"
                 )
-                layer = VJingLayer(
-                    **common_kwargs,
+                layer = VJingLayer(  # type: ignore[assignment]
+                    **common_kwargs,  # type: ignore[arg-type]
                     genre=genre,
                     effect_mappings=self.vjing_mappings,
                     preset=self.vjing_preset,
@@ -209,8 +209,8 @@ class FrameRenderer:
             try:
                 from plugins.video_exporter.layers.text_layer import TextLayer
 
-                layer = TextLayer(
-                    **common_kwargs,
+                layer = TextLayer(  # type: ignore[assignment]
+                    **common_kwargs,  # type: ignore[arg-type]
                     artist=self._get_metadata("artist", "Unknown"),
                     title=self._get_metadata("title", "Unknown"),
                 )
@@ -227,8 +227,8 @@ class FrameRenderer:
                     MilkDropLayer,
                 )
 
-                layer = MilkDropLayer(
-                    **common_kwargs,
+                layer = MilkDropLayer(  # type: ignore[assignment]
+                    **common_kwargs,  # type: ignore[arg-type]
                     preset_path=layers_config.get("milkdrop_preset_path", ""),
                     preset_duration=layers_config.get("milkdrop_preset_duration", 8.0),
                     hard_cut_on_beat=layers_config.get("milkdrop_hard_cut_on_beat", True),
@@ -251,8 +251,8 @@ class FrameRenderer:
             try:
                 from plugins.video_exporter.layers.intro_overlay_layer import IntroOverlayLayer
 
-                layer = IntroOverlayLayer(
-                    **common_kwargs,
+                layer = IntroOverlayLayer(  # type: ignore[assignment]
+                    **common_kwargs,  # type: ignore[arg-type]
                     video_path=self.intro_video_path,
                 )
                 self.layers.append(layer)

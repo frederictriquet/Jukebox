@@ -239,13 +239,13 @@ make test
 
 ```bash
 # Format code
-uv run black jukebox tests
+uv run black jukebox plugins tests
 
 # Lint
-uv run ruff check jukebox tests
+uv run ruff check jukebox plugins tests
 
 # Type check
-uv run mypy jukebox
+uv run mypy jukebox plugins tests
 
 # Or run all checks
 make ci

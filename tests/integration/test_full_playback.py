@@ -7,7 +7,7 @@ from jukebox.ui.main_window import MainWindow
 
 
 @pytest.fixture
-def test_config():
+def test_config():  # type: ignore[no-untyped-def]
     """Test configuration."""
     return JukeboxConfig(
         audio=AudioConfig(

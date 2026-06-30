@@ -122,7 +122,7 @@ def _setting_id(case: tuple) -> str:
 class TestDbConfigPriority:
     """For each setting: DB overrides yaml, yaml is fallback, hot reload works."""
 
-    def test_db_overrides_yaml(
+    def test_db_overrides_yaml(  # type: ignore[no-untyped-def]
         self,
         module,
         cls_name,
@@ -144,7 +144,7 @@ class TestDbConfigPriority:
         actual = getattr(getattr(plugin.context.config, cfg_attr), field)
         assert actual == expected
 
-    def test_falls_back_to_yaml(
+    def test_falls_back_to_yaml(  # type: ignore[no-untyped-def]
         self,
         module,
         cls_name,
@@ -165,7 +165,7 @@ class TestDbConfigPriority:
         actual = getattr(getattr(plugin.context.config, cfg_attr), field)
         assert actual == _expected_yaml(field, yaml_val)
 
-    def test_hot_reload(
+    def test_hot_reload(  # type: ignore[no-untyped-def]
         self,
         module,
         cls_name,
@@ -387,7 +387,7 @@ COMBINED_CASES = [
     COMBINED_CASES,
     ids=["LoopPlayer", "PlaybackNavigation", "WaveformVisualizer", "VideoExporter"],
 )
-def test_all_settings_from_db(
+def test_all_settings_from_db(  # type: ignore[no-untyped-def]
     module,
     cls_name,
     cfg_attr,
@@ -461,7 +461,7 @@ TIMING_GAP_CASES = [
     TIMING_GAP_CASES,
     ids=["FileManager.trash_directory", "GenreEditor.rating_key"],
 )
-def test_timing_gap_yaml_until_register_shortcuts(
+def test_timing_gap_yaml_until_register_shortcuts(  # type: ignore[no-untyped-def]
     module,
     cls_name,
     cfg_attr,
@@ -793,5 +793,5 @@ def test_rapid_press_threshold_default_fn_converts_to_ms() -> None:
     config = MagicMock()
     config.rapid_press_threshold = 0.5
 
-    default = threshold_setting.default_fn(config)
+    default = threshold_setting.default_fn(config)  # type: ignore[misc]
     assert default == 500  # 0.5s * 1000 = 500ms

@@ -123,7 +123,7 @@ class CueTimingBar(QWidget):
         """Hide handles (no entry selected)."""
         self._has_entry = False
         self._dragging = None
-        self._snap_points: list[int] = []
+        self._snap_points: list[int] = []  # type: ignore[no-redef]
         self.update()
 
     def set_snap_points(self, points: list[int]) -> None:
@@ -357,7 +357,7 @@ class ActionsDelegate(QStyledItemDelegate):
             return False
 
         actions = self._actions_for_index(index)
-        x_click = event.position().x() - option.rect.left() - 2  # type: ignore[union-attr,attr-defined]
+        x_click = event.position().x() - option.rect.left() - 2  # type: ignore[attr-defined]
         visual_idx = int(x_click // _ACTION_ICON_WIDTH)
 
         if 0 <= visual_idx < len(actions):
@@ -378,14 +378,14 @@ class ActionsDelegate(QStyledItemDelegate):
             return super().helpEvent(event, view, option, index)  # type: ignore[arg-type]
 
         actions = self._actions_for_index(index)
-        x_hover = event.pos().x() - option.rect.left() - 2  # type: ignore[union-attr,attr-defined]
+        x_hover = event.pos().x() - option.rect.left() - 2  # type: ignore[attr-defined]
         visual_idx = int(x_hover // _ACTION_ICON_WIDTH)
 
         if 0 <= visual_idx < len(actions):
             from PySide6.QtWidgets import QToolTip
 
             QToolTip.showText(
-                event.globalPos(),  # type: ignore[union-attr]
+                event.globalPos(),  # type: ignore[attr-defined]
                 actions[visual_idx][1],
                 view,
             )
@@ -610,7 +610,7 @@ class CueMakerWidget(QWidget):
         except RuntimeError as e:
             logger.debug("[CueMakerWidget] Signal déjà déconnecté : %s", e)
 
-    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # type: ignore  # noqa: N802
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
         """Accept drag events for audio files."""
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
@@ -622,7 +622,7 @@ class CueMakerWidget(QWidget):
                     return
         event.ignore()
 
-    def dropEvent(self, event: QDropEvent) -> None:  # type: ignore  # noqa: N802
+    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
         """Handle dropped audio files."""
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
@@ -816,16 +816,16 @@ class CueMakerWidget(QWidget):
         chunk_dur = chunk_duration.chunk_duration if chunk_duration else 10.0
 
         self._mix_filepath = filepath
-        self._waveform_worker = CompleteWaveformWorker(
+        self._waveform_worker = CompleteWaveformWorker(  # type: ignore[assignment]
             track_id=0,
             filepath=filepath,
             chunk_duration=chunk_dur,
         )
-        self._waveform_worker.setObjectName("CueMaker-WaveformWorker")
-        self._waveform_worker.progress_update.connect(self._on_waveform_progress)
-        self._waveform_worker.complete.connect(self._on_waveform_complete)
-        self._waveform_worker.error.connect(self._on_waveform_error)
-        self._waveform_worker.start()
+        self._waveform_worker.setObjectName("CueMaker-WaveformWorker")  # type: ignore[attr-defined]
+        self._waveform_worker.progress_update.connect(self._on_waveform_progress)  # type: ignore[attr-defined]
+        self._waveform_worker.complete.connect(self._on_waveform_complete)  # type: ignore[attr-defined]
+        self._waveform_worker.error.connect(self._on_waveform_error)  # type: ignore[attr-defined]
+        self._waveform_worker.start()  # type: ignore[attr-defined]
         logger.info("[Cue Maker] Waveform generation started for %s", filepath)
 
     def _on_waveform_progress(self, _track_id: int, partial_waveform: dict) -> None:
@@ -1124,7 +1124,7 @@ class CueMakerWidget(QWidget):
             return
 
         cursor_x = position * expected_length
-        inside = region_range[0] <= cursor_x <= region_range[1]  # type: ignore[operator]
+        inside = region_range[0] <= cursor_x <= region_range[1]
 
         if inside != self._cursor_inside_region:
             self._cursor_inside_region = inside

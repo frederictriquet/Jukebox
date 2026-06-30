@@ -23,8 +23,8 @@ def find_all_genre_buttons(widget: QWidget, path: str = "root") -> list[tuple[QW
     for i, child in enumerate(widget.children()):
         if isinstance(child, QWidget):
             child_path = f"{path}/{child.__class__.__name__}[{i}]"
-            buttons.extend(find_all_genre_buttons(child, child_path))
-    return buttons
+            buttons.extend(find_all_genre_buttons(child, child_path))  # type: ignore[arg-type]
+    return buttons  # type: ignore[return-value]
 
 
 def _make_plugin_with_codes(codes: list[tuple[str, str]]) -> SearchAndFilterPlugin:
@@ -79,9 +79,9 @@ def test_toolbar_container_layout(qapp) -> None:  # type: ignore
     # Verify Row 1 has horizontal layout
     main_layout = container.layout()
     if main_layout and main_layout.count() > 0:
-        row1 = main_layout.itemAt(0).widget()
+        row1 = main_layout.itemAt(0).widget()  # type: ignore[union-attr]
         assert isinstance(
-            row1.layout(), QHBoxLayout
+            row1.layout(), QHBoxLayout  # type: ignore[union-attr]
         ), "Row 1 (buttons row) should use horizontal layout"
 
 
@@ -131,7 +131,7 @@ def test_drawer_buttons_exist_independently(qapp) -> None:  # type: ignore
     drawer_container = plugin.get_drawer_genre_buttons_container()
     assert drawer_container is not plugin.toolbar_container
 
-    toolbar_btns = find_all_genre_buttons(plugin.toolbar_container)
+    toolbar_btns = find_all_genre_buttons(plugin.toolbar_container)  # type: ignore[arg-type]
     drawer_btns = find_all_genre_buttons(drawer_container)
 
     assert len(toolbar_btns) == 2

@@ -13,15 +13,15 @@ import threading
 import time
 from typing import Any
 
-import numpy as np  # type: ignore[import-untyped]
-from PIL import Image  # type: ignore[import-untyped]
+import numpy as np
+from PIL import Image
 
 # Try to import moderngl, fallback gracefully if not available
 try:
-    import moderngl  # type: ignore[import-untyped]
+    import moderngl
 
     MODERNGL_AVAILABLE = True
-    _TRIANGLE_STRIP: Any = moderngl.TRIANGLE_STRIP  # type: ignore[attr-defined]
+    _TRIANGLE_STRIP: Any = moderngl.TRIANGLE_STRIP
 except ImportError:
     MODERNGL_AVAILABLE = False
     _TRIANGLE_STRIP = None
@@ -64,7 +64,7 @@ def get_shared_gl_context() -> Any:
             logging.warning("[GPU Shaders] Contexte GL invalide (mglo = InvalidObject), recréation")
         if not MODERNGL_AVAILABLE:
             raise RuntimeError("moderngl absent — installer avec : uv sync --extra video")
-        import moderngl as _mgl  # type: ignore[import-untyped]
+        import moderngl as _mgl
 
         new_ctx = _mgl.create_standalone_context()
         if not _is_gl_context_valid(new_ctx):
@@ -706,7 +706,7 @@ class GPUShaderRenderer:
                 # Render to framebuffer
                 self._fbo.use()
                 self._ctx.clear(0.0, 0.0, 0.0, 0.0)
-                program.vao.render(_TRIANGLE_STRIP)  # type: ignore[attr-defined]
+                program.vao.render(_TRIANGLE_STRIP)
 
                 # Read pixels
                 data = self._fbo.read(components=4)

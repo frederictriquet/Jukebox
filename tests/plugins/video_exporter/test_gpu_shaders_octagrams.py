@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from PIL import Image  # type: ignore[import-untyped]
+from PIL import Image
 
 from plugins.video_exporter.layers.gpu_shaders import (
     MODERNGL_AVAILABLE,

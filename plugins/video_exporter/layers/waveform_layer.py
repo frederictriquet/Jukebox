@@ -131,7 +131,7 @@ class WaveformLayer(BaseVisualLayer):
             max_val = np.max(np.abs(chunk)) if len(chunk) > 0 else 0.0
             self.waveform_data.append(max_val)
 
-        self.waveform_data = np.array(self.waveform_data)
+        self.waveform_data = np.array(self.waveform_data)  # type: ignore[assignment]
 
     def _compute_waveform_envelope(self) -> None:
         """Compute envelope for each frequency band."""
@@ -163,9 +163,9 @@ class WaveformLayer(BaseVisualLayer):
         max_mid = max(self.mid_envelope) if max(self.mid_envelope) > 0 else 1.0
         max_treble = max(self.treble_envelope) if max(self.treble_envelope) > 0 else 1.0
 
-        self.bass_envelope = np.array(self.bass_envelope) / max_bass
-        self.mid_envelope = np.array(self.mid_envelope) / max_mid
-        self.treble_envelope = np.array(self.treble_envelope) / max_treble
+        self.bass_envelope = np.array(self.bass_envelope) / max_bass  # type: ignore[assignment]
+        self.mid_envelope = np.array(self.mid_envelope) / max_mid  # type: ignore[assignment]
+        self.treble_envelope = np.array(self.treble_envelope) / max_treble  # type: ignore[assignment]
 
     def render(self, frame_idx: int, time_pos: float) -> Image.Image:
         """Render waveform with cursor for the current frame.
@@ -189,16 +189,16 @@ class WaveformLayer(BaseVisualLayer):
 
         if self._use_filtering:
             # Draw 3-band waveform
-            self._draw_band(draw, self.bass_envelope, y_center, waveform_height, self.bass_color)
+            self._draw_band(draw, self.bass_envelope, y_center, waveform_height, self.bass_color)  # type: ignore[arg-type]
             self._draw_band(
-                draw, self.mid_envelope, y_center, waveform_height * 0.7, self.mid_color
+                draw, self.mid_envelope, y_center, waveform_height * 0.7, self.mid_color  # type: ignore[arg-type]
             )
             self._draw_band(
-                draw, self.treble_envelope, y_center, waveform_height * 0.4, self.treble_color
+                draw, self.treble_envelope, y_center, waveform_height * 0.4, self.treble_color  # type: ignore[arg-type]
             )
         else:
             # Draw simple waveform
-            self._draw_band(draw, self.waveform_data, y_center, waveform_height, self.mid_color)
+            self._draw_band(draw, self.waveform_data, y_center, waveform_height, self.mid_color)  # type: ignore[arg-type]
 
         # Draw cursor
         draw.line(

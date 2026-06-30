@@ -39,14 +39,14 @@ test:
 	uv run pytest --cov=jukebox --cov-report=html --cov-report=term-missing -v
 
 lint:
-	uv run ruff check jukebox tests
+	uv run ruff check jukebox plugins tests
 
 format:
-	uv run black jukebox tests
-	uv run ruff check --fix jukebox tests
+	uv run black jukebox plugins tests
+	uv run ruff check --fix jukebox plugins tests
 
 type-check:
-	uv run mypy jukebox
+	uv run mypy jukebox plugins tests
 
 clean:
 	rm -rf dist build *.egg-info

@@ -92,12 +92,12 @@ class TextLayer(BaseVisualLayer):
 
             if self.title_font is None:
                 # Use default font
-                self.title_font = ImageFont.load_default()
-                self.artist_font = ImageFont.load_default()
+                self.title_font = ImageFont.load_default()  # type: ignore[assignment]
+                self.artist_font = ImageFont.load_default()  # type: ignore[assignment]
 
         except Exception:
-            self.title_font = ImageFont.load_default()
-            self.artist_font = ImageFont.load_default()
+            self.title_font = ImageFont.load_default()  # type: ignore[assignment]
+            self.artist_font = ImageFont.load_default()  # type: ignore[assignment]
 
     def render(self, frame_idx: int, time_pos: float) -> Image.Image:
         """Render text overlay for the current frame.

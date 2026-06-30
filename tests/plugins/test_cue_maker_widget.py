@@ -431,9 +431,9 @@ class TestCueMakerWidget:
         widget = CueMakerWidget(mock_context)
         assert widget._cursor_inside_region is None
 
-    def test_create_waveform_logs_debug_on_config_fallback(
+    def test_create_waveform_logs_debug_on_config_fallback(  # type: ignore[no-untyped-def]
         self, qapp, caplog
-    ) -> None:  # type: ignore
+    ) -> None:
         """Test _create_waveform logs debug when waveform config is unavailable."""
         # Create context without waveform config (AttributeError will be raised)
         context = Mock()

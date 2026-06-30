@@ -149,11 +149,11 @@ class VideoBackgroundLayer(BaseVisualLayer):
         image_extensions = {".jpg", ".jpeg", ".png", ".gif", ".bmp"}
 
         for ext in image_extensions:
-            for img_path in self.video_folder.glob(f"*{ext}"):
+            for img_path in self.video_folder.glob(f"*{ext}"):  # type: ignore[union-attr]
                 try:
                     img = Image.open(img_path)
-                    img = img.convert("RGB")
-                    img = img.resize((self.width, self.height), Image.Resampling.LANCZOS)
+                    img = img.convert("RGB")  # type: ignore[assignment]
+                    img = img.resize((self.width, self.height), Image.Resampling.LANCZOS)  # type: ignore[assignment]
                     self.all_frames.append(img)
                 except Exception as e:
                     logging.warning(f"[Video Layer] Could not load image {img_path}: {e}")
@@ -261,7 +261,7 @@ class VideoBackgroundLayer(BaseVisualLayer):
         elif self.blend_mode == "screen":
             bg_arr = np.array(background, dtype=float) / 255
             fg_arr = np.array(foreground, dtype=float) / 255
-            result = (1 - (1 - bg_arr) * (1 - fg_arr)) * 255
+            result = (1 - (1 - bg_arr) * (1 - fg_arr)) * 255  # type: ignore[assignment]
             return Image.fromarray(result.astype(np.uint8), mode="RGBA")
 
         return Image.alpha_composite(background, foreground)

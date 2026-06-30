@@ -134,6 +134,38 @@ ignore_missing_imports = true
 module = "mutagen.*"
 ignore_missing_imports = true
 
+# Bibliothèques tierces sans stubs ni marqueur py.typed (utilisées par plugins/).
+[[tool.mypy.overrides]]
+module = [
+    "pyqtgraph",
+    "pyqtgraph.*",
+    "moderngl",
+    "moderngl.*",
+    "noise",
+    "noise.*",
+    "cv2",
+    "cv2.*",
+    "scipy",
+    "scipy.*",
+]
+ignore_missing_imports = true
+
+# ml/ et shazamix/ ne font pas partie du périmètre de type-check (jukebox + plugins +
+# tests) ; ils ne sont tirés que par les imports des tests. On les analyse sans
+# remonter d'erreurs plutôt que d'élargir la rigueur mypy à ces paquets.
+[[tool.mypy.overrides]]
+module = [
+    "ml.*",
+    "shazamix.*",
+]
+follow_imports = "silent"
+
+# Les Mock unittest.mock branchés sur des callables/protocols typés exposent
+# return_value/side_effect et renvoient Any : codes propres au mock-heavy test.
+[[tool.mypy.overrides]]
+module = "tests.shazamix.test_matcher"
+disable_error_code = ["attr-defined", "no-any-return"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

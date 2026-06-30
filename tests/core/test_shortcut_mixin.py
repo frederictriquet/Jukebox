@@ -292,5 +292,5 @@ class TestReloadPluginConfig:
     def test_reload_plugin_config_is_no_op(self) -> None:
         """Default _reload_plugin_config does nothing and returns None."""
         plugin = ConcretePlugin()
-        result = plugin._reload_plugin_config()
+        result = plugin._reload_plugin_config()  # type: ignore[func-returns-value]
         assert result is None

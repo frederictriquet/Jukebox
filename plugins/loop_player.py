@@ -474,7 +474,7 @@ class LoopPlayerPlugin(SettingsSyncMixin):
         filepath = self.context.player.current_file
         if not filepath:
             return
-        self.context.app._on_add_to_playlist(filepath, playlist_id)  # type: ignore[union-attr]
+        self.context.app._on_add_to_playlist(filepath, playlist_id)
 
     def _on_track_loaded(self, track_id: int) -> None:
         """Reset loop when new track is loaded."""

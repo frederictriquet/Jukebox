@@ -8,12 +8,12 @@ import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import numpy as np  # type: ignore[import-untyped]
-import vlc  # type: ignore[import-untyped]
-from PIL import Image  # type: ignore[import-untyped]
-from PySide6.QtCore import Qt, QTimer  # type: ignore[import-untyped]
-from PySide6.QtGui import QImage, QPixmap  # type: ignore[import-untyped]
-from PySide6.QtWidgets import (  # type: ignore[import-untyped]
+import numpy as np
+import vlc
+from PIL import Image
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -158,7 +158,7 @@ class EffectPreviewDialog(QDialog):
 
         # Local VLC player (independent from main app player)
         self._vlc_instance = vlc.Instance()
-        self._vlc_player = self._vlc_instance.media_player_new()  # type: ignore[attr-defined]
+        self._vlc_player = self._vlc_instance.media_player_new()
         self._vlc_released = False  # Track if VLC resources were released
 
         self.setWindowTitle(f"Preview: {effect_name}")
@@ -233,7 +233,7 @@ class EffectPreviewDialog(QDialog):
     def _load_effect(self) -> None:
         """Load audio and initialize the effect renderer."""
         try:
-            import librosa  # type: ignore[import-untyped]
+            import librosa
 
             from plugins.video_exporter.layers.vjing_layer import VJingLayer
         except ImportError as e:
@@ -246,7 +246,7 @@ class EffectPreviewDialog(QDialog):
 
         try:
             # Load audio
-            self._audio, self._sr = librosa.load(
+            self._audio, self._sr = librosa.load(  # type: ignore[assignment]
                 str(self.filepath),
                 sr=AUDIO_SAMPLE_RATE,
                 offset=self.loop_start,
@@ -257,11 +257,11 @@ class EffectPreviewDialog(QDialog):
             # Create VJingLayer with only this effect active
             # We use a custom preset that only has this effect
             # NOTE: use_gpu=False to ensure palette colors are applied (GPU shaders have hardcoded colors)
-            self._vjing_layer = VJingLayer(
+            self._vjing_layer = VJingLayer(  # type: ignore[assignment]
                 width=width,
                 height=height,
                 fps=fps,
-                audio=self._audio,
+                audio=self._audio,  # type: ignore[arg-type]
                 sr=int(self._sr),
                 duration=duration,
                 genre="",  # No genre mapping
@@ -319,7 +319,7 @@ class EffectPreviewDialog(QDialog):
         interval = int(1000 / self._fps)
 
         # Load audio file in local VLC player
-        media = self._vlc_instance.media_new(str(self.filepath))  # type: ignore[attr-defined]
+        media = self._vlc_instance.media_new(str(self.filepath))
         self._vlc_player.set_media(media)
         # Position at loop start (en millisecondes)
         self._vlc_player.play()
@@ -406,8 +406,8 @@ class EffectPreviewDialog(QDialog):
             self._vlc_released = True
             try:
                 self._vlc_player.stop()
-                self._vlc_player.release()  # type: ignore[attr-defined]
-                self._vlc_instance.release()  # type: ignore[attr-defined]
+                self._vlc_player.release()
+                self._vlc_instance.release()
             except Exception as e:
                 logging.debug(f"VLC cleanup error: {e}")
 
@@ -463,7 +463,7 @@ class ExportDialog(QDialog):
 
         # Local VLC player for preview (independent from main app player)
         self._vlc_instance = vlc.Instance()
-        self._vlc_player = self._vlc_instance.media_player_new()  # type: ignore[attr-defined]
+        self._vlc_player = self._vlc_instance.media_player_new()
 
         self.setWindowTitle("Export Video")
         self.setMinimumWidth(600)
@@ -848,7 +848,7 @@ class ExportDialog(QDialog):
         self.video_folder_edit.setPlaceholderText("Click to select folder...")
         self.video_folder_edit.setReadOnly(True)
         self.video_folder_edit.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.video_folder_edit.mousePressEvent = lambda e: self._browse_video_folder()
+        self.video_folder_edit.mousePressEvent = lambda e: self._browse_video_folder()  # type: ignore[method-assign]
         video_folder_layout.addWidget(self.video_folder_edit)
         layers_layout.addLayout(video_folder_layout)
 
@@ -859,7 +859,7 @@ class ExportDialog(QDialog):
         self.intro_video_edit.setPlaceholderText("Optional video overlay (plays once)")
         self.intro_video_edit.setReadOnly(True)
         self.intro_video_edit.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.intro_video_edit.mousePressEvent = lambda e: self._browse_intro_video()
+        self.intro_video_edit.mousePressEvent = lambda e: self._browse_intro_video()  # type: ignore[method-assign]
         intro_video_layout.addWidget(self.intro_video_edit)
         clear_intro_btn = QPushButton("X")
         clear_intro_btn.setFixedWidth(30)
@@ -1173,7 +1173,7 @@ class ExportDialog(QDialog):
     def _load_preview(self) -> None:
         """Load audio and initialize preview renderer."""
         try:
-            import librosa  # type: ignore[import-untyped]
+            import librosa
 
             from plugins.video_exporter.renderers.frame_renderer import FrameRenderer
         except ImportError as e:
@@ -1196,7 +1196,7 @@ class ExportDialog(QDialog):
 
         try:
             # Load audio
-            self._preview_audio, self._preview_sr = librosa.load(
+            self._preview_audio, self._preview_sr = librosa.load(  # type: ignore[assignment]
                 str(self.filepath),
                 sr=AUDIO_SAMPLE_RATE,
                 offset=self.loop_start,
@@ -1226,14 +1226,14 @@ class ExportDialog(QDialog):
             }
 
             # Create renderer
-            self._preview_renderer = FrameRenderer(
+            self._preview_renderer = FrameRenderer(  # type: ignore[assignment]
                 width=preview_width,
                 height=preview_height,
                 fps=fps,
-                audio=self._preview_audio,
+                audio=self._preview_audio,  # type: ignore[arg-type]
                 sr=int(self._preview_sr),
                 duration=duration,
-                layers_config=layers_config,
+                layers_config=layers_config,  # type: ignore[arg-type]
                 track_metadata=self.track_metadata,
                 video_clips_folder=self.video_folder_edit.text(),
                 vjing_mappings={
@@ -1327,7 +1327,7 @@ class ExportDialog(QDialog):
             interval = int(1000 / fps)  # milliseconds per frame
 
             # Load audio file in local VLC player
-            media = self._vlc_instance.media_new(str(self.filepath))  # type: ignore[attr-defined]
+            media = self._vlc_instance.media_new(str(self.filepath))
             self._vlc_player.set_media(media)
             self._vlc_player.play()
             # Wait a bit for player to initialize, then seek
@@ -1566,8 +1566,8 @@ class ExportDialog(QDialog):
             self._preview_timer.stop()
         try:
             self._vlc_player.stop()
-            self._vlc_player.release()  # type: ignore[attr-defined]
-            self._vlc_instance.release()  # type: ignore[attr-defined]
+            self._vlc_player.release()
+            self._vlc_instance.release()
         except Exception as e:
             logging.debug(f"VLC cleanup error: {e}")
         self._preview_renderer = None
@@ -1607,12 +1607,12 @@ class ExportDialog(QDialog):
         # Import and create worker
         from plugins.video_exporter.export_worker import VideoExportWorker
 
-        self.worker = VideoExportWorker(config, self.context)
-        self.worker.progress.connect(self._on_progress)
-        self.worker.status.connect(self._on_status)
-        self.worker.finished.connect(self._on_export_finished)
-        self.worker.error.connect(self._on_export_error)
-        self.worker.start()
+        self.worker = VideoExportWorker(config, self.context)  # type: ignore[assignment]
+        self.worker.progress.connect(self._on_progress)  # type: ignore[attr-defined]
+        self.worker.status.connect(self._on_status)  # type: ignore[attr-defined]
+        self.worker.finished.connect(self._on_export_finished)  # type: ignore[attr-defined]
+        self.worker.error.connect(self._on_export_error)  # type: ignore[attr-defined]
+        self.worker.start()  # type: ignore[attr-defined]
 
     def _on_progress(self, value: int) -> None:
         """Handle progress update.

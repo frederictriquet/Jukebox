@@ -35,7 +35,7 @@ class TestPluginManager:
             config = "config"
             event_bus = "bus"
 
-        context = PluginContext(MockApp())  # type: ignore
+        context = PluginContext(MockApp())
 
         assert context.database == "db"
         assert context.player == "player"

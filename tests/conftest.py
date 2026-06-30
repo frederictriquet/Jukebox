@@ -8,7 +8,7 @@ pytest_plugins = ["tests.pytest_vlc_mock"]
 
 
 @pytest.fixture(scope="session")
-def qapp():
+def qapp():  # type: ignore[no-untyped-def]
     """Create QApplication instance for tests."""
     app = QApplication.instance()
     if app is None:
@@ -17,7 +17,7 @@ def qapp():
 
 
 @pytest.fixture
-def test_config():
+def test_config():  # type: ignore[no-untyped-def]
     """Provide test configuration."""
     from jukebox.core.config import AudioConfig, JukeboxConfig, LoggingConfig, UIConfig
 
@@ -40,7 +40,7 @@ def audio_player(qapp):  # type: ignore
 
 
 @pytest.fixture
-def sample_tracks(tmp_path):
+def sample_tracks(tmp_path):  # type: ignore[no-untyped-def]
     """Provide sample track paths."""
     tracks = []
     for i in range(5):

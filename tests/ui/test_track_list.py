@@ -218,7 +218,7 @@ class TestCommentColumn:
         assert model.data(index, Qt.ItemDataRole.DisplayRole) == "Banger"
         assert model.data(index, Qt.ItemDataRole.EditRole) == "Banger"
 
-    def _make_model_with_db(self, tmp_path):
+    def _make_model_with_db(self, tmp_path):  # type: ignore[no-untyped-def]
         """Build a jukebox-mode model backed by a real DB with one track."""
         db = Database(tmp_path / "test.db")
         db.connect()
@@ -441,7 +441,7 @@ class TestCommentColumn:
 class TestCommentColumnSorting:
     """Tests for sorting the comment column (jukebox mode)."""
 
-    def _make_model_with_comments(self, comments):
+    def _make_model_with_comments(self, comments):  # type: ignore[no-untyped-def]
         """Build a jukebox-mode model loaded with tracks carrying the given comments.
 
         Each comment is keyed to a unique filepath so the resulting order can be
@@ -456,7 +456,7 @@ class TestCommentColumnSorting:
         return model
 
     @staticmethod
-    def _comments_in_order(model):
+    def _comments_in_order(model):  # type: ignore[no-untyped-def]
         """Return the comment of each row in current model order."""
         return [track.get("comment") or "" for track in model.tracks]
 

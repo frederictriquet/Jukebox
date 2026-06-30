@@ -34,12 +34,12 @@ def make_plugin_context(
         plugin_name, key
     )
 
-    def get_setting(
+    def get_setting(  # type: ignore[no-untyped-def]
         plugin_name: str,
         key: str,
         value_type: type,
-        default=None,  # type: ignore[assignment]
-    ):  # type: ignore[return]
+        default=None,
+    ):
         value = store.get(plugin_name, key)
         if value is None:
             return default

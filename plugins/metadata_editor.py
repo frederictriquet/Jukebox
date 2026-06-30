@@ -215,7 +215,7 @@ class MetadataEditorPlugin:
             if db_column == "year" and value.isdigit():
                 db_updates[db_column] = int(value)
             else:
-                db_updates[db_column] = value
+                db_updates[db_column] = value  # type: ignore[assignment]
 
         self.context.database.tracks.update_metadata(self.current_track_id, db_updates)
         logging.info("Saved metadata for track %d", self.current_track_id)
