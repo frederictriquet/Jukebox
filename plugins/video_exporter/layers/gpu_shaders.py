@@ -798,3 +798,34 @@ def get_gpu_renderer(width: int, height: int) -> GPUShaderRenderer | None:
         renderers[(width, height)] = renderer
 
     return renderer if renderer.available else None
+
+
+def release_shared_gl_context() -> None:
+    """Libère le contexte ModernGL du thread courant et les renderers associés.
+
+    À appeler explicitement en teardown (test, arrêt d'un worker d'export) pour
+    éviter qu'un contexte CGL/NSOpenGL vivant jusqu'à la finalisation de
+    l'interpréteur ne provoque un segfault au milieu des finaliseurs natifs
+    (moderngl / numpy / scipy) qui s'exécutent dans un ordre non déterministe.
+
+    Sans contexte ni renderer alloué, l'appel est un no-op sûr (idempotent).
+    """
+    with _gpu_lock:
+        renderers: dict[tuple[int, int], GPUShaderRenderer] | None = getattr(
+            _gpu_renderer_local, "renderers", None
+        )
+        if renderers:
+            for renderer in renderers.values():
+                renderer.cleanup()
+            renderers.clear()
+
+        ctx = getattr(_thread_local_gl, "ctx", None)
+        if ctx is not None:
+            try:
+                ctx.release()
+            except Exception:
+                logging.debug(
+                    "[GPU Shaders] release_shared_gl_context: ctx.release() ignoré "
+                    "(contexte déjà libéré)"
+                )
+            _thread_local_gl.ctx = None
