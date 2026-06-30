@@ -461,9 +461,18 @@ class LoopPlayerPlugin(SettingsSyncMixin):
 
         names_by_id = {row["id"]: row["name"] for row in playlists}
         # Conserve l'ordre de récence, retire les ids absents, réaligne les noms.
-        self._recent_playlists = [
+        reconciled = [
             (pid, names_by_id[pid]) for pid, _ in self._recent_playlists if pid in names_by_id
         ]
+        # Ajouter un morceau émet PLAYLIST_CHANGED *puis* TRACK_ADDED_TO_PLAYLIST
+        # pour la même mutation. Sur un simple ajout, la réconciliation ne change
+        # rien (aucune suppression ni renommage) et c'est _on_track_added_to_playlist
+        # qui rafraîchira ensuite ; repeindre ici serait redondant. On ne met donc
+        # à jour les boutons que si une suppression/renommage a réellement modifié
+        # la liste, garantissant un seul rafraîchissement par mutation.
+        if reconciled == self._recent_playlists:
+            return
+        self._recent_playlists = reconciled
         self._refresh_playlist_buttons()
 
     def _on_copy_to_recent_playlist(self, slot: int) -> None:

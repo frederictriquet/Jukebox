@@ -1,7 +1,7 @@
 """Tests for the loop player plugin UI placement."""
 
 import logging
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
@@ -354,6 +354,37 @@ def test_playlists_changed_handles_get_all_error(qapp, caplog) -> None:  # type:
     assert plugin._playlist_buttons[1].text() == "→ Alpha"
     assert plugin._playlist_buttons[0].isEnabled() is True
     assert plugin._playlist_buttons[1].isEnabled() is True
+
+
+def test_add_to_playlist_refreshes_buttons_once(qapp) -> None:  # type: ignore[no-untyped-def]
+    """Une mutation (PLAYLIST_CHANGED + TRACK_ADDED_TO_PLAYLIST) ne rafraîchit qu'une fois.
+
+    Reproduit l'ordre d'émission de MainWindow._on_add_to_playlist : un seul ajout
+    déclenche les deux événements, mais boutons et get_all() ne doivent être
+    sollicités qu'une seule fois (pas de double rafraîchissement ni requête DB
+    redondante).
+    """
+    plugin, _ = _make_plugin(qapp)
+    plugin.activate("jukebox")
+    # Amorce une playlist récente (le bump n'appelle pas get_all()).
+    plugin._on_track_added_to_playlist(1, "Alpha")
+
+    plugin.context.database.conn = object()
+    plugin.context.database.playlists.get_all.return_value = [{"id": 1, "name": "Alpha"}]
+    plugin.context.database.playlists.get_all.reset_mock()
+
+    with patch.object(
+        plugin, "_refresh_playlist_buttons", wraps=plugin._refresh_playlist_buttons
+    ) as refresh_spy:
+        # Ordre réel : PLAYLIST_CHANGED puis TRACK_ADDED_TO_PLAYLIST.
+        plugin._on_playlists_changed()
+        plugin._on_track_added_to_playlist(1, "Alpha")
+
+    assert refresh_spy.call_count == 1
+    assert plugin.context.database.playlists.get_all.call_count == 1
+    # Comportement visible inchangé : le bouton reflète la playlist récente.
+    assert plugin._playlist_buttons[0].text() == "→ Alpha"
+    assert plugin._recent_playlists == [(1, "Alpha")]
 
 
 def test_long_playlist_name_is_elided(qapp) -> None:  # type: ignore[no-untyped-def]
