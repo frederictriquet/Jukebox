@@ -155,7 +155,8 @@ def compute_audio_analysis(
         boucle Python par frame ; mêmes valeurs au bruit float64 près)."""
         csum = np.concatenate(([0.0], np.cumsum(x.astype(np.float64) ** 2)))
         sums = csum[ends] - csum[starts]
-        return np.sqrt(sums / np.maximum(counts, 1))  # type: ignore[no-any-return]
+        rms: NDArray[np.float64] = np.sqrt(sums / np.maximum(counts, 1))
+        return rms
 
     def normalize(arr: NDArray) -> NDArray:
         max_val = np.max(arr) if len(arr) > 0 and np.max(arr) > 0 else 1.0
@@ -320,7 +321,8 @@ def perlin2d(x: float, y: float, octaves: int = 1, persistence: float = 0.5) -> 
         Noise value in range [-1, 1].
     """
     if NOISE_AVAILABLE:
-        return pnoise2(x, y, octaves=octaves, persistence=persistence)  # type: ignore[no-any-return]
+        # noise n'est pas typé (Any) : float() borne le type de retour.
+        return float(pnoise2(x, y, octaves=octaves, persistence=persistence))
     else:
         # Fallback pseudo-noise
         return _pseudo_perlin2d(x, y, octaves, persistence)
@@ -339,7 +341,8 @@ def simplex2d(x: float, y: float, octaves: int = 1, persistence: float = 0.5) ->
         Noise value in range [-1, 1].
     """
     if NOISE_AVAILABLE:
-        return snoise2(x, y, octaves=octaves, persistence=persistence)  # type: ignore[no-any-return]
+        # noise n'est pas typé (Any) : float() borne le type de retour.
+        return float(snoise2(x, y, octaves=octaves, persistence=persistence))
     else:
         return _pseudo_perlin2d(x, y, octaves, persistence)
 
@@ -686,6 +689,10 @@ class VJingLayer(BaseVisualLayer):
         self._gpu_renderer: GPUShaderRenderer | None = None
         # Cache for pre-rendered GPU frames: {frame_idx: {effect_name: Image}}
         self._gpu_frame_cache: dict[int, dict[str, Image.Image]] = {}
+        # Grille de coordonnées nebula : (re)créée paresseusement dans _render_nebula
+        # selon la résolution courante. Déclarée ici (sans valeur) pour typer l'accès
+        # .shape dans la garde hasattr — l'attribut reste absent tant qu'inutilisé.
+        self._nebula_xs: NDArray[np.float32]
 
         # Merge custom mappings with defaults (custom takes precedence)
         self.effect_mappings: dict[str, list[str]] = {
@@ -1121,7 +1128,8 @@ class VJingLayer(BaseVisualLayer):
 
     def _init_explosion(self) -> None:
         """Initialize explosion particles."""
-        self.explosion_particles: list[dict[str, float]] = []
+        # Valeurs hétérogènes : coordonnées/vitesses (float) + couleur (tuple RGB).
+        self.explosion_particles: list[dict[str, Any]] = []
         self.explosion_active = False
         self.explosion_frame = 0
 
@@ -1724,7 +1732,7 @@ class VJingLayer(BaseVisualLayer):
                         "vx": math.cos(angle) * speed,
                         "vy": math.sin(angle) * speed,
                         "size": (self._rng.random() * 5 + 2) * s,
-                        "color": self._get_random_palette_color(),  # type: ignore[dict-item]
+                        "color": self._get_random_palette_color(),
                         "life": 40 + self._rng.random() * 20,
                     }
                 )
@@ -1751,7 +1759,7 @@ class VJingLayer(BaseVisualLayer):
                     if 0 <= x < self.width and 0 <= y < self.height:
                         draw.ellipse(
                             [x - size, y - size, x + size, y + size],
-                            fill=(*p["color"], alpha),  # type: ignore[misc]
+                            fill=(*p["color"], alpha),
                         )
 
     # ========================================================================
@@ -2244,7 +2252,7 @@ class VJingLayer(BaseVisualLayer):
                 new_ripples.append(ripple)
 
                 # Get ripple color from palette
-                color = colors[ripple.get("color_idx", 0) % len(colors)]  # type: ignore[call-overload]
+                color = colors[int(ripple.get("color_idx", 0)) % len(colors)]
 
                 # Draw concentric circles - increased alpha from 100 to 200
                 alpha = int(200 * (ripple["life"] / 60) * self._current_intensity)
@@ -3438,7 +3446,7 @@ class VJingLayer(BaseVisualLayer):
                 continue
 
             # Use palette color based on particle index with desaturation for smoke
-            base_color = colors[p.get("color_idx", 0) % len(colors)]  # type: ignore[call-overload]
+            base_color = colors[int(p.get("color_idx", 0)) % len(colors)]
             # Desaturate: blend toward gray for smoke effect
             gray = (base_color[0] + base_color[1] + base_color[2]) // 3
             desaturate = 0.6  # 60% toward gray
@@ -3492,7 +3500,7 @@ class VJingLayer(BaseVisualLayer):
         sw, sh = max(16, w // max(1, ds)), max(16, h // max(1, ds))
 
         # Precompute coordinate grids (lazy, constant once w/h is set)
-        if not hasattr(self, "_nebula_xs") or self._nebula_xs.shape != (sh, sw):  # type: ignore[has-type]
+        if not hasattr(self, "_nebula_xs") or self._nebula_xs.shape != (sh, sw):
             self._nebula_ys, self._nebula_xs = np.mgrid[0:sh, 0:sw].astype(np.float32)
             self._nebula_r = np.empty((sh, sw), dtype=np.float32)
             self._nebula_g = np.empty((sh, sw), dtype=np.float32)
@@ -3620,7 +3628,8 @@ class VJingLayer(BaseVisualLayer):
         # Build hex centers with scroll offset
         col = 0
         bin_idx = 0
-        cx = hex_r
+        # Position flottante : incrémentée de hex_w * 0.75 à chaque colonne.
+        cx = float(hex_r)
         while cx < w + hex_r:
             row = 0
             # Offset odd columns
@@ -3663,7 +3672,7 @@ class VJingLayer(BaseVisualLayer):
 
                 cy += hex_h
                 row += 1
-            cx += hex_w * 0.75  # type: ignore[assignment]
+            cx += hex_w * 0.75
             col += 1
 
     # =========================================================================
@@ -3922,13 +3931,13 @@ class VJingLayer(BaseVisualLayer):
             if wave["life"] <= 0:
                 continue
 
-            cx, cy = wave["cx"], wave["cy"]  # type: ignore[assignment]
+            wave_cx, wave_cy = wave["cx"], wave["cy"]
             radius = wave["radius"]
             strength = wave["strength"] * wave["life"] * intensity
 
             # Distance from each pixel to wave center
-            dx = xs - cx
-            dy = ys - cy
+            dx = xs - wave_cx
+            dy = ys - wave_cy
             dist = np.sqrt(dx * dx + dy * dy)
 
             # Ring mask: pixels near the wave radius get displaced
@@ -5043,8 +5052,12 @@ class VJingLayer(BaseVisualLayer):
         buf = self._emission_buf
         buf *= 0.88 - energy * 0.04  # faster fade when energetic
 
-        # Palette gradient LUT (512 entries, cached until palette changes)
-        if getattr(self, "_emission_lut_key", "") != self.color_palette_name:
+        # Palette gradient LUT (512 entries, cached until palette changes).
+        # getattr défensif : _init_emission n'est jamais appelé, les attributs
+        # n'existent qu'après la première construction ci-dessous (lut is None
+        # court-circuite l'accès à _emission_lut_key au premier rendu).
+        lut: np.ndarray | None = getattr(self, "_emission_lut", None)
+        if lut is None or self._emission_lut_key != self.color_palette_name:
             palette = self.color_palette
             n_c = len(palette)
             lut = np.zeros((512, 3), dtype=np.float32)
@@ -5071,7 +5084,7 @@ class VJingLayer(BaseVisualLayer):
         c_arr = np.sin(time_pos + i_arr * i_arr)
         pos = c_arr > 0
         lut_idx = (c_arr[pos] * 511.0).clip(0, 511).astype(np.int32)
-        colors = self._emission_lut[lut_idx]  # type: ignore[index]  # (N_pos, 3) float32
+        colors = lut[lut_idx]  # (N_pos, 3) float32
 
         # Max-blend: bright regions accumulate without clamping
         np.maximum.at(buf[:, :, 0], (py[pos], px[pos]), colors[:, 0])
