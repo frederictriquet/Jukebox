@@ -157,3 +157,4 @@ paths + line numbers — open them with `Read`.
 - make type-check (mypy) doit couvrir plugins/ et tests/, pas uniquement jukebox/.
 - Toute nouvelle branche conditionnelle ou comportement limite (fallback, valeur vide/blanche, ordre de tri, chemin d'erreur) DOIT être couvert par un test ; pas de branche non testée.
 - Interdire les # type: ignore et suppressions mypy/pyright génériques (module-wide, follow_imports=silent) qui masquent de vraies erreurs ; cibler chaque ignore sur un code d'erreur précis et justifié en commentaire.
+- Ne jamais attraper Exception de façon large là où un type précis est attendu ; les boucles de nettoyage/libération de ressources doivent isoler chaque échec pour ne pas bloquer les libérations suivantes.
