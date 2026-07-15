@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import secrets
 from pathlib import Path
@@ -38,22 +37,16 @@ from PySide6.QtWidgets import (
 
 from jukebox.core.constants import AUDIO_SAMPLE_RATE, VLC_SEEK_DELAY_MS, StatusColors
 from jukebox.core.event_bus import Events
+from plugins.video_exporter.export_config import (
+    RESOLUTION_PRESETS,
+    compute_deterministic_seed,
+    default_output_filename,
+    write_video_description,
+)
 from plugins.video_exporter.layers.vjing_layer import VJingLayer
 
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol
-
-
-# Resolution presets: name -> (width, height)
-RESOLUTION_PRESETS: dict[str, tuple[int, int]] = {
-    "1080p": (1920, 1080),
-    "720p": (1280, 720),
-    "square_1080": (1080, 1080),
-    "square_720": (720, 720),
-    "reels_9x16 (1080×1920)": (1080, 1920),  # Reels / Stories — boostable
-    "feed_4x5 (1080×1350)": (1080, 1350),  # Feed portrait standard
-    "feed_3x4 (1080×1440)": (1080, 1440),  # Wide feed portrait
-}
 
 # Palette display names for tooltips
 PALETTE_NAMES: dict[str, str] = {
@@ -447,10 +440,7 @@ class ExportDialog(QDialog):
         self.worker = None
 
         # Deterministic seed for reproducible VJing effects across preview and export
-        # SHA-256 instead of hash(): hash() is randomized by PYTHONHASHSEED, which
-        # would break reproducibility from one session to the next.
-        seed_str = f"{track_metadata.get('title', '')}:{track_metadata.get('genre', '')}"
-        self._rng_seed = int.from_bytes(hashlib.sha256(seed_str.encode()).digest()[:4], "big")
+        self._rng_seed = compute_deterministic_seed(track_metadata)
 
         # Preview state
         self._preview_renderer = None
@@ -1120,12 +1110,7 @@ class ExportDialog(QDialog):
 
     def _generate_default_filename(self) -> None:
         """Generate a default filename based on track metadata."""
-        artist = self._get_metadata("artist")
-        title = self._get_metadata("title")
-        # Sanitize filename
-        safe_artist = "".join(c if c.isalnum() or c in " -_" else "_" for c in artist)
-        safe_title = "".join(c if c.isalnum() or c in " -_" else "_" for c in title)
-        self.filename_edit.setText(f"{safe_artist} - {safe_title}.mp4")
+        self.filename_edit.setText(default_output_filename(self.track_metadata))
 
     def _browse_output_dir(self) -> None:
         """Browse for output directory."""
@@ -1213,6 +1198,7 @@ class ExportDialog(QDialog):
                 "video_background": self.video_bg_check.isChecked(),
                 "milkdrop_enabled": self.milkdrop_check.isChecked(),
                 "milkdrop_preset_path": self.context.config.video_exporter.milkdrop_preset_path,
+                "milkdrop_texture_path": self.context.config.video_exporter.milkdrop_texture_path,
                 "milkdrop_preset_duration": self.context.config.video_exporter.milkdrop_preset_duration,
                 "milkdrop_hard_cut_on_beat": self.context.config.video_exporter.milkdrop_hard_cut_on_beat,
             }
@@ -1495,6 +1481,7 @@ class ExportDialog(QDialog):
                 "video_background": self.video_bg_check.isChecked(),
                 "milkdrop_enabled": self.milkdrop_check.isChecked(),
                 "milkdrop_preset_path": self.context.config.video_exporter.milkdrop_preset_path,
+                "milkdrop_texture_path": self.context.config.video_exporter.milkdrop_texture_path,
                 "milkdrop_preset_duration": self.context.config.video_exporter.milkdrop_preset_duration,
                 "milkdrop_hard_cut_on_beat": self.context.config.video_exporter.milkdrop_hard_cut_on_beat,
             },
@@ -1653,57 +1640,10 @@ class ExportDialog(QDialog):
         Args:
             video_path: Path to the exported video file.
         """
-        lines: list[str] = []
-
         # Re-read metadata from the DB to get the most recent genre
         # (self.track_metadata may be a stale snapshot if the genre was modified after the dialog was opened)
         fresh = self.context.database.tracks.get_by_filepath(self.filepath) or self.track_metadata
-
-        # Line 1: Artist - Title
-        artist = (fresh.get("artist") or "").strip()
-        title = (fresh.get("title") or "").strip()
-        if artist and title:
-            lines.append(f"{artist} - {title}")
-        elif artist or title:
-            lines.append(artist or title)
-
-        # Genre hashtags
-        genre_str = (fresh.get("genre") or "").strip()
-        logging.info(
-            "[Video Exporter] description: genre=%r artist=%r title=%r", genre_str, artist, title
-        )
-        if genre_str:
-            try:
-                code_to_hashtags: dict[str, list[str]] = {}
-                for gc in self.context.config.genre_editor.codes:
-                    if gc.hashtags:
-                        code_to_hashtags[gc.code] = [
-                            t if t.startswith("#") else f"#{t}" for t in gc.hashtags
-                        ]
-                logging.info(
-                    "[Video Exporter] code_to_hashtags keys: %s", list(code_to_hashtags.keys())
-                )
-
-                codes = [p for p in genre_str.split("-") if not p.startswith("*")]
-                hashtags: list[str] = []
-                for c in codes:
-                    if c in code_to_hashtags:
-                        hashtags.extend(code_to_hashtags[c])
-                logging.info("[Video Exporter] codes=%s hashtags=%s", codes, hashtags)
-                if hashtags:
-                    lines.append(" ".join(hashtags))
-            except Exception:
-                logging.exception("[Video Exporter] Failed to generate genre hashtags")
-
-        if not lines:
-            return
-
-        txt_path = Path(video_path).with_suffix(".txt")
-        try:
-            txt_path.write_text("\n".join(lines), encoding="utf-8")
-            logging.info("[Video Exporter] Description written to %s", txt_path)
-        except OSError as e:
-            logging.warning("[Video Exporter] Failed to write description file: %s", e)
+        write_video_description(video_path, fresh, self.context.config.genre_editor.codes)
 
     def _on_export_error(self, error: str) -> None:
         """Handle export error.

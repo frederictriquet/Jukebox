@@ -109,6 +109,12 @@ class DatabaseProtocol(Protocol):
 
     def transaction(self) -> Generator[None, None, None]: ...
 
+    def connect(self) -> None: ...
+
+    def initialize_schema(self) -> None: ...
+
+    def close(self) -> None: ...
+
 
 # ============================================================================
 # Event Bus Protocol
@@ -246,6 +252,7 @@ class VideoExporterConfigProtocol(Protocol):
     video_background_enabled: bool
     milkdrop_enabled: bool
     milkdrop_preset_path: str
+    milkdrop_texture_path: str
     milkdrop_preset_duration: float
     milkdrop_hard_cut_on_beat: bool
     waveform_height_ratio: float
@@ -255,6 +262,8 @@ class VideoExporterConfigProtocol(Protocol):
     waveform_cursor_color: str
     vjing_mappings: list[Any]
     vjing_presets: list[Any]
+    vjing_default_preset: str
+    vjing_simultaneous_effects: int
     ffmpeg_video_codec: str
 
     ffmpeg_preset: str

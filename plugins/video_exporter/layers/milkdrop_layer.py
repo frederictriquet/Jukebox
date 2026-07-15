@@ -50,6 +50,15 @@ class MilkDropLayer(BaseVisualLayer):
     # Z-index below VJingLayer (z=4)
     z_index: int = 3
 
+    # Many presets in large public packs (e.g. "cream of the crop") include
+    # intentional fade-to-black or decay-to-black cycles, designed to be seen
+    # for a few seconds within minutes of continuous play. On a short export
+    # clip that same cycle can dominate the whole clip. Mean pixel value (0-255)
+    # below which a frame counts as "dark".
+    _DARK_BRIGHTNESS_THRESHOLD: float = 8.0
+    # How long a preset is allowed to stay dark before it's force-cut early.
+    _DARK_STREAK_SECONDS: float = 1.5
+
     def __init__(
         self,
         width: int,
@@ -63,6 +72,7 @@ class MilkDropLayer(BaseVisualLayer):
         super().__init__(width, height, fps, audio, sr, duration, **kwargs)
 
         self._preset_path: str = kwargs.get("preset_path", "")
+        self._texture_path: str = kwargs.get("texture_path", "")
         self._preset_duration: float = float(kwargs.get("preset_duration", 8.0))
         self._hard_cut_on_beat: bool = bool(kwargs.get("hard_cut_on_beat", True))
         self._rng_seed: int = int(kwargs.get("rng_seed", 0))
@@ -76,9 +86,14 @@ class MilkDropLayer(BaseVisualLayer):
         self._fbo: object | None = None
         self._ctx: object | None = None
         self._presets: list[str] = []
+        # Not all libprojectM v4 builds expose this (added in a later minor
+        # version); set by _setup_ctypes(), checked before use in _init_gl().
+        self._has_texture_search_api: bool = False
         # Preset rotation state for on-demand rendering
         self._live_preset_idx: int = 0
         self._live_frames_since_cut: int = 0
+        # Consecutive dark frames rendered so far (see _DARK_BRIGHTNESS_THRESHOLD).
+        self._dark_frame_streak: int = 0
 
         self._lib = self._load_library()
         self._setup_ctypes()
@@ -154,6 +169,63 @@ class MilkDropLayer(BaseVisualLayer):
 
         self._lib.projectm_get_preset_duration.restype = ctypes.c_double
         self._lib.projectm_get_preset_duration.argtypes = [ctypes.c_void_p]
+
+        self._has_texture_search_api = hasattr(self._lib, "projectm_set_texture_search_paths")
+        if self._has_texture_search_api:
+            self._lib.projectm_set_texture_search_paths.restype = None
+            self._lib.projectm_set_texture_search_paths.argtypes = [
+                ctypes.c_void_p,
+                ctypes.POINTER(ctypes.c_char_p),
+                ctypes.c_size_t,
+            ]
+        else:
+            logger.warning(
+                "[MilkDropLayer] projectm_set_texture_search_paths absente de cette "
+                "libprojectM — les presets utilisant des textures sprite externes "
+                "s'afficheront sans elles (fallback texture zéro)."
+            )
+
+    @staticmethod
+    def _dir_and_textures_subfolder(directory: str) -> list[str]:
+        """Return [directory] plus its "textures" subfolder (any casing), if present.
+
+        Matched by lowercased name rather than trying "textures"/"Textures" as
+        two literal candidates: on a case-insensitive filesystem (macOS/APFS
+        default) those resolve to the same directory and would be added twice.
+        """
+        if not directory:
+            return []
+
+        path = Path(directory)
+        if not path.exists():
+            return []
+        base_dir = path if path.is_dir() else path.parent
+
+        paths = [str(base_dir)]
+        for entry in sorted(base_dir.iterdir()):
+            if entry.is_dir() and entry.name.lower() == "textures":
+                paths.append(str(entry))
+                break
+        return paths
+
+    @classmethod
+    def _texture_search_paths(cls, preset_path: str, texture_path: str = "") -> list[str]:
+        """Directories where projectM should look up sprite textures used by presets.
+
+        Most preset packs (e.g. "cream of the crop") ship without textures —
+        pairing them with the official texture pack
+        (github.com/projectM-visualizer/presets-milkdrop-texture-pack) is the
+        documented way to make texture-dependent presets render correctly
+        instead of falling back to a black/zero texture. `texture_path` is an
+        explicit pointer to such a pack; `preset_path` is also searched since
+        some packs bundle their own textures alongside the .milk files.
+        """
+        paths: list[str] = []
+        for directory in (preset_path, texture_path):
+            for candidate in cls._dir_and_textures_subfolder(directory):
+                if candidate not in paths:
+                    paths.append(candidate)
+        return paths
 
     def _collect_presets(self) -> list[str]:
         """Collect the list of available .milk files."""
@@ -247,6 +319,16 @@ class MilkDropLayer(BaseVisualLayer):
         self._handle = self._lib.projectm_create(None, self.width, self.height)  # type: ignore[union-attr]
         self._lib.projectm_set_window_size(self._handle, self.width, self.height)  # type: ignore[union-attr]
 
+        if self._has_texture_search_api:
+            texture_paths = self._texture_search_paths(self._preset_path, self._texture_path)
+            if texture_paths:
+                encoded = [p.encode("utf-8") for p in texture_paths]
+                paths_array = (ctypes.c_char_p * len(encoded))(*encoded)
+                self._lib.projectm_set_texture_search_paths(  # type: ignore[union-attr]
+                    self._handle, paths_array, len(encoded)
+                )
+                logger.debug("[MilkDropLayer] Texture search paths: %s", texture_paths)
+
         if self._presets:
             logger.info("[MilkDropLayer] Chargement du premier preset : %s", self._presets[0])
             self._lib.projectm_load_preset_file(  # type: ignore[union-attr]
@@ -257,7 +339,29 @@ class MilkDropLayer(BaseVisualLayer):
         self._ctx.clear(0.0, 0.0, 0.0, 1.0)  # type: ignore[union-attr]
         self._live_preset_idx = 0
         self._live_frames_since_cut = 0
+        self._dark_frame_streak = 0
         logger.debug("[MilkDropLayer] _init_gl: terminé")
+
+    @staticmethod
+    def _mean_brightness(image: Image.Image) -> float:
+        """Mean pixel value (0-255) across RGB channels, used for the dark-streak check."""
+        return float(np.asarray(image.convert("RGB"), dtype=np.uint8).mean())
+
+    def _register_frame_brightness(self, mean_brightness: float) -> None:
+        """Update the consecutive-dark-frames streak from one rendered frame."""
+        if mean_brightness < self._DARK_BRIGHTNESS_THRESHOLD:
+            self._dark_frame_streak += 1
+        else:
+            self._dark_frame_streak = 0
+
+    def _dark_streak_exceeded(self, frames_since_cut: int) -> bool:
+        """Whether the current preset has been dark long enough to force an early cut.
+
+        Requires at least 1 second since the last cut too, so a preset that
+        starts dark isn't judged before it has a chance to develop.
+        """
+        streak_limit = int(self._DARK_STREAK_SECONDS * self.fps)
+        return frames_since_cut >= self.fps and self._dark_frame_streak >= streak_limit
 
     def _render_one_frame(self, frame_idx: int) -> Image.Image:
         """Render a single MilkDrop frame and return the RGBA image.
@@ -414,15 +518,30 @@ class MilkDropLayer(BaseVisualLayer):
                         self._handle, self._presets[preset_idx].encode(), False
                     )
                     frames_since_cut = 0
+                    self._dark_frame_streak = 0
                 elif self._presets and frames_since_cut >= int(self._preset_duration * self.fps):
                     preset_idx = (preset_idx + 1) % len(self._presets)
                     self._lib.projectm_load_preset_file(  # type: ignore[union-attr]
                         self._handle, self._presets[preset_idx].encode(), True
                     )
                     frames_since_cut = 0
+                    self._dark_frame_streak = 0
+                elif self._presets and self._dark_streak_exceeded(frames_since_cut):
+                    preset_idx = (preset_idx + 1) % len(self._presets)
+                    self._lib.projectm_load_preset_file(  # type: ignore[union-attr]
+                        self._handle, self._presets[preset_idx].encode(), False
+                    )
+                    logger.info(
+                        "[MilkDropLayer] Preset trop sombre depuis %.1fs, changement anticipé -> %s",
+                        self._DARK_STREAK_SECONDS,
+                        self._presets[preset_idx],
+                    )
+                    frames_since_cut = 0
+                    self._dark_frame_streak = 0
 
                 self._frame_cache[frame_idx] = self._render_one_frame(frame_idx)
                 frames_since_cut += 1
+                self._register_frame_brightness(self._mean_brightness(self._frame_cache[frame_idx]))
 
                 if frame_idx > 0 and frame_idx % self.fps == 0:
                     logger.debug(
@@ -457,19 +576,22 @@ class MilkDropLayer(BaseVisualLayer):
             if self._handle is None or not _is_gl_context_valid(self._ctx) or self._fbo is None:
                 self._init_gl()
 
-            # Preset rotation by duration (crossfade)
-            if self._presets and self._live_frames_since_cut >= int(
-                self._preset_duration * self.fps
+            # Preset rotation by duration (crossfade), or early if stuck too dark
+            if self._presets and (
+                self._live_frames_since_cut >= int(self._preset_duration * self.fps)
+                or self._dark_streak_exceeded(self._live_frames_since_cut)
             ):
                 self._live_preset_idx = (self._live_preset_idx + 1) % len(self._presets)
                 self._lib.projectm_load_preset_file(  # type: ignore[union-attr]
                     self._handle, self._presets[self._live_preset_idx].encode(), True
                 )
                 self._live_frames_since_cut = 0
+                self._dark_frame_streak = 0
 
             img = self._render_one_frame(frame_idx)
 
         self._live_frames_since_cut += 1
+        self._register_frame_brightness(self._mean_brightness(img))
         return img
 
     def shutdown(self) -> None:

@@ -1,6 +1,6 @@
 .PHONY: help install test lint format type-check clean run sync \
         analyze ml-stats ml-compare ml-train \
-        shazamix-index shazamix-stats vjing-playground
+        shazamix-index shazamix-stats vjing-playground quick-export-render
 
 # Model type for ml-train (override with: make ml-train ML_MODEL=xgboost)
 ML_MODEL ?= random_forest
@@ -16,6 +16,7 @@ help:
 	@echo "  make clean           Clean build artifacts"
 	@echo "  make run             Run application"
 	@echo "  make vjing-playground Run the VJing effects playground"
+	@echo "  make quick-export-render Render quick-exported loops (headless TUI)"
 	@echo "  make ci              Run all CI checks"
 	@echo ""
 	@echo "ML (genre classifier):"
@@ -63,6 +64,10 @@ run:
 # Lance le playground VJing (prévisualisation temps réel des effets)
 vjing-playground:
 	uv run python vj/vjing_playground.py
+
+# Render quick-exported loops via the headless TUI
+quick-export-render:
+	uv run quick-export-render
 
 # Run all CI checks locally
 ci: format lint type-check test

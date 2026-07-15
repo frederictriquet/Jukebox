@@ -230,6 +230,7 @@ class FrameRenderer:
                 layer = MilkDropLayer(  # type: ignore[assignment]
                     **common_kwargs,  # type: ignore[arg-type]
                     preset_path=layers_config.get("milkdrop_preset_path", ""),
+                    texture_path=layers_config.get("milkdrop_texture_path", ""),
                     preset_duration=layers_config.get("milkdrop_preset_duration", 8.0),
                     hard_cut_on_beat=layers_config.get("milkdrop_hard_cut_on_beat", True),
                     rng_seed=self.rng_seed,

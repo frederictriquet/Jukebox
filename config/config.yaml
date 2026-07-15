@@ -154,6 +154,10 @@ video_exporter:
   video_background_enabled: false
   milkdrop_enabled: true
   milkdrop_preset_path: "~/Tools/presets-cream-of-the-crop"  # Chemin vers un fichier .milk ou un répertoire de presets
+  # Ce pack de presets ne fournit pas de textures : les presets qui en dépendent (effets "texer")
+  # s'affichent avec une texture noire/zéro sans elles. Pack officiel :
+  # git clone https://github.com/projectM-visualizer/presets-milkdrop-texture-pack ~/Tools/presets-milkdrop-texture-pack
+  milkdrop_texture_path: "~/Tools/presets-milkdrop-texture-pack"
   milkdrop_preset_duration: 8.0  # Durée en secondes avant de passer au preset suivant
   milkdrop_hard_cut_on_beat: true  # Changement de preset sur le beat (coupe franche)
   # Encodage FFmpeg : constrained CRF pour respecter le débit minimum Instagram Reels (3500 kbps)

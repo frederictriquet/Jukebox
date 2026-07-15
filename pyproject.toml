@@ -21,6 +21,7 @@ dependencies = [
     "pyrubberband>=0.4.0",
     "Pillow>=10.0.0",
     "sounddevice>=0.4.6",
+    "questionary>=2.1.1",
 ]
 
 [project.optional-dependencies]
@@ -53,6 +54,7 @@ dev = [
 jukebox = "jukebox.main:main"
 genre-classifier = "ml.genre_classifier.cli:main"
 shazamix = "shazamix.cli:main"
+quick-export-render = "jukebox.tools.quick_export_render_tui:main"
 
 [build-system]
 requires = ["hatchling"]

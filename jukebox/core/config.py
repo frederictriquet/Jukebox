@@ -197,6 +197,11 @@ class VideoExporterConfig(BaseModel):
     video_background_enabled: bool = False
     milkdrop_enabled: bool = False
     milkdrop_preset_path: str = ""
+    # Path to a local checkout of projectM-visualizer/presets-milkdrop-texture-pack
+    # (or any folder with a "textures" subfolder). Presets referencing sprite
+    # textures (e.g. "texer") render with a black/zero texture without it —
+    # most preset packs (including "cream of the crop") ship without textures.
+    milkdrop_texture_path: str = ""
     milkdrop_preset_duration: float = Field(ge=1.0, le=60.0, default=8.0)
     milkdrop_hard_cut_on_beat: bool = True
     # Waveform layer settings
@@ -237,6 +242,7 @@ class VideoExporterConfig(BaseModel):
         "video_clips_folder",
         "intro_video_path",
         "milkdrop_preset_path",
+        "milkdrop_texture_path",
         mode="after",
     )
     @classmethod

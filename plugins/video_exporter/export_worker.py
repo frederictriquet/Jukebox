@@ -176,6 +176,8 @@ class VideoExportWorker(QThread):
             gpu_frames = renderer.prerender_gpu()
             if gpu_frames > 0:
                 logging.info(f"[Video Export Worker] Pre-rendered {gpu_frames} GPU frames")
+        else:
+            self.status.emit("Warming up GPU effects...")
 
         self.status.emit("Starting FFmpeg encoder...")
 
@@ -263,6 +265,16 @@ class VideoExportWorker(QThread):
             return frame_idx, frame
 
         with ThreadPoolExecutor(max_workers=self._num_workers) as executor:
+            if self._num_workers == 1:
+                # MilkDrop (forces num_workers=1) keeps its GL context/projectM
+                # handle thread-local, and renders on demand via render() frame
+                # by frame on this pool's single worker thread. Warming up must
+                # run on that SAME thread — not the thread calling _export_parallel
+                # — otherwise the GL context created during warmup is thread-local
+                # to the wrong thread and using it from here corrupts native state
+                # (silent crash, no Python exception, e.g. a near-empty output file).
+                executor.submit(renderer.warmup_gpu).result()
+
             pending_futures: set = set()
             future_to_idx: dict = {}
             frames_submitted = 0
