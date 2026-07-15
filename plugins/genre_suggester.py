@@ -29,6 +29,7 @@ class PredictionWorker(QThread):
 
     def __init__(self, model: Any, track_id: int) -> None:
         super().__init__()
+        self.setObjectName(f"GenreSuggester-PredictionWorker-{track_id}")
         self._model = model
         self._track_id = track_id
 

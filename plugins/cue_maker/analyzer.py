@@ -62,6 +62,7 @@ class AnalyzeWorker(QThread):
             max_workers: Number of parallel workers for analysis
         """
         super().__init__()
+        self.setObjectName("CueMaker-AnalyzeWorker")
         self.mix_path = mix_path
         self.db_path = db_path
         self.segment_duration = segment_duration
@@ -191,6 +192,7 @@ class TargetedMatchWorker(QThread):
             end_ms: End of the segment to analyse (milliseconds)
         """
         super().__init__()
+        self.setObjectName(f"CueMaker-TargetedMatchWorker-{start_ms}-{end_ms}")
         self.mix_path = mix_path
         self.db_path = db_path
         self.start_ms = start_ms

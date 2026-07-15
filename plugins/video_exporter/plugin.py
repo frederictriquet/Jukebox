@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtWidgets import QPushButton
 
-from jukebox.core.constants import StatusColors
+from jukebox.core.constants import WORKER_WAIT_TIMEOUT_MS, StatusColors
 from jukebox.core.event_bus import Events
 from jukebox.core.settings_sync_mixin import SettingsSyncMixin, SyncedSetting
+from plugins.video_exporter.quick_export_store import QuickExportEntry
+from plugins.video_exporter.quick_export_worker import QuickExportWorker
 
 if TYPE_CHECKING:
     from jukebox.core.protocols import PluginContextProtocol, UIBuilderProtocol
@@ -28,6 +31,8 @@ class VideoExporterPlugin(SettingsSyncMixin):
         """Initialize plugin."""
         self.context: PluginContextProtocol = None  # type: ignore[assignment]
         self.export_button: QPushButton | None = None
+        self.quick_export_button: QPushButton | None = None
+        self._quick_export_worker: QuickExportWorker | None = None
         self.loop_active: bool = False
         self.loop_start: float = 0.0
         self.loop_end: float = 0.0
@@ -62,16 +67,39 @@ class VideoExporterPlugin(SettingsSyncMixin):
         Args:
             ui_builder: UI builder for adding widgets.
         """
-        # Create export button (hidden by default)
-        export_shortcut = "Ctrl+Shift+E"
-        self.export_button = QPushButton("Export Video")
-        self.export_button.setToolTip(f"Export loop as video clip ({export_shortcut})")
-        self.export_button.setMaximumWidth(120)  # @hardcoded-ok: standard button width
+        # Export button (hidden by default) — no shortcut: Ctrl+Shift+E is now
+        # bound to the quick export button below instead.
+        self.export_button = QPushButton("🎬")
+        self.export_button.setToolTip("Export loop as video clip")
+        self.export_button.setMaximumWidth(40)  # @hardcoded-ok: matches loop button width
         self.export_button.clicked.connect(self._show_export_dialog)
         self.export_button.setVisible(False)  # Hidden until loop is active
 
-        # Add to toolbar
-        ui_builder.add_toolbar_widget(self.export_button)
+        # Quick export button: saves loop info to .jsonl for later batch video generation.
+        quick_export_shortcut = "Ctrl+Shift+E"
+        self.quick_export_button = QPushButton("💾")
+        self.quick_export_button.setToolTip(
+            f"Quick export: save loop info for later video generation ({quick_export_shortcut})"
+        )
+        self.quick_export_button.setMaximumWidth(40)  # @hardcoded-ok: matches loop button width
+        self.quick_export_button.clicked.connect(self._quick_export)
+        self.quick_export_button.setVisible(False)  # Hidden until loop is active
+
+        # Both buttons live in the player controls bar (next to the loop button)
+        # rather than the toolbar: that's where the user looks when the loop is
+        # active, and the toolbar (add_toolbar_widget) turned out to render
+        # invisibly in practice. Reuses loop_player's proven "insert before the
+        # stretch" placement; the stretch index is re-read after each insertion
+        # since it shifts by one each time.
+        main_window = self.context.app
+        controls_layout = main_window.controls.layout()
+        if controls_layout:
+            for button in (self.export_button, self.quick_export_button):
+                stretch_index = self._find_stretch_index(controls_layout)
+                if stretch_index >= 0:
+                    ui_builder.insert_widget_in_layout(controls_layout, stretch_index, button)
+                else:
+                    controls_layout.addWidget(button)
 
         # Add menu action
         menu = ui_builder.get_or_create_menu("&Tools")
@@ -79,13 +107,31 @@ class VideoExporterPlugin(SettingsSyncMixin):
             menu,
             "Export Video from Loop...",
             self._show_export_dialog,
-            shortcut=export_shortcut,
+        )
+        ui_builder.add_menu_action(
+            menu,
+            "Quick Export Loop Info...",
+            self._quick_export,
+            shortcut=quick_export_shortcut,
         )
 
         logging.info("[Video Exporter] UI registered")
 
+    @staticmethod
+    def _find_stretch_index(layout: Any) -> int:
+        """Return the index of the spacer in the layout, or -1 if there is none."""
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
+            if item and item.spacerItem():
+                return i
+        return -1
+
     def shutdown(self) -> None:
         """Cleanup when plugin unloads."""
+        if self._quick_export_worker is not None:
+            if self._quick_export_worker.isRunning():
+                self._quick_export_worker.wait(WORKER_WAIT_TIMEOUT_MS)
+            self._quick_export_worker = None
         logging.info("[Video Exporter] Plugin shutdown")
 
     def _on_loop_activated(self, loop_start: float, loop_end: float, filepath: Path) -> None:
@@ -101,9 +147,11 @@ class VideoExporterPlugin(SettingsSyncMixin):
         self.loop_end = loop_end
         self.current_filepath = filepath
 
-        # Show export button
+        # Show export buttons
         if self.export_button:
             self.export_button.setVisible(True)
+        if self.quick_export_button:
+            self.quick_export_button.setVisible(True)
 
         logging.debug(f"[Video Exporter] Loop activated: {loop_start:.1f}s - {loop_end:.1f}s")
 
@@ -111,9 +159,11 @@ class VideoExporterPlugin(SettingsSyncMixin):
         """Handle loop deactivation event."""
         self.loop_active = False
 
-        # Hide export button
+        # Hide export buttons
         if self.export_button:
             self.export_button.setVisible(False)
+        if self.quick_export_button:
+            self.quick_export_button.setVisible(False)
 
         logging.debug("[Video Exporter] Loop deactivated")
 
@@ -131,6 +181,8 @@ class VideoExporterPlugin(SettingsSyncMixin):
 
         if self.export_button:
             self.export_button.setVisible(False)
+        if self.quick_export_button:
+            self.quick_export_button.setVisible(False)
 
     _synced_settings = [
         SyncedSetting("default_resolution", str),
@@ -149,6 +201,7 @@ class VideoExporterPlugin(SettingsSyncMixin):
         SyncedSetting("video_background_enabled", bool),
         SyncedSetting("milkdrop_enabled", bool),
         SyncedSetting("milkdrop_preset_path", str),
+        SyncedSetting("milkdrop_texture_path", str),
         SyncedSetting("milkdrop_preset_duration", float),
         SyncedSetting("milkdrop_hard_cut_on_beat", bool),
     ]
@@ -194,6 +247,73 @@ class VideoExporterPlugin(SettingsSyncMixin):
         if _run_dialog():
             # Dialog handles the export via worker
             logging.info("[Video Exporter] Export initiated from dialog")
+
+    def _quick_export(self) -> None:
+        """Upsert the current loop info into the quick-export .jsonl file.
+
+        Saves only the minimal data needed to regenerate the video later in
+        batch (track_id, filepath, loop bounds): the rest (artist, title,
+        genre...) is re-read from the database at generation time via track_id.
+        Deduped by track_id: re-clicking for the same track replaces its
+        pending entry instead of appending a duplicate line.
+        """
+        if not self.loop_active or not self.current_filepath:
+            logging.warning("[Video Exporter] No active loop to export")
+            self.context.emit(
+                Events.STATUS_MESSAGE,
+                message="No active loop to export",
+                color=StatusColors.WARNING_ALT,
+            )
+            return
+
+        track = self.context.database.tracks.get_by_filepath(self.current_filepath)
+        if not track:
+            logging.warning("[Video Exporter] Track not found in database")
+            return
+
+        record = QuickExportEntry(
+            track_id=track["id"],
+            filepath=str(self.current_filepath),
+            loop_start=self.loop_start,
+            loop_end=self.loop_end,
+            exported_at=datetime.now(UTC).isoformat(),
+        )
+        jsonl_path = (
+            Path(self.context.config.video_exporter.output_directory).expanduser()
+            / "quick_exports.jsonl"
+        )
+
+        # Wait for any in-flight write to finish before reassigning the reference,
+        # otherwise dropping a running QThread crashes with "Destroyed while running".
+        if self._quick_export_worker is not None and self._quick_export_worker.isRunning():
+            self._quick_export_worker.wait(WORKER_WAIT_TIMEOUT_MS)
+
+        self._quick_export_worker = QuickExportWorker(jsonl_path, record)
+        self._quick_export_worker.finished.connect(self._on_quick_export_finished)
+        self._quick_export_worker.error.connect(self._on_quick_export_error)
+        self._quick_export_worker.start()
+
+    def _on_quick_export_finished(self) -> None:
+        """Handle successful quick export write."""
+        logging.info("[Video Exporter] Quick export saved")
+        self.context.emit(
+            Events.STATUS_MESSAGE,
+            message="Loop info saved for video export",
+            color=StatusColors.SUCCESS,
+        )
+
+    def _on_quick_export_error(self, message: str) -> None:
+        """Handle a failed quick export write.
+
+        Args:
+            message: Error message from the worker.
+        """
+        logging.error("[Video Exporter] Quick export failed: %s", message)
+        self.context.emit(
+            Events.STATUS_MESSAGE,
+            message=f"Quick export failed: {message}",
+            color=StatusColors.ERROR,
+        )
 
     def get_settings_schema(self) -> dict[str, Any]:
         """Return settings schema for conf_manager plugin.
@@ -294,6 +414,11 @@ class VideoExporterPlugin(SettingsSyncMixin):
                 "label": "Répertoire de presets .milk",
                 "type": "directory",
                 "default": self.context.config.video_exporter.milkdrop_preset_path,
+            },
+            "milkdrop_texture_path": {
+                "label": "Répertoire de textures MilkDrop (presets-milkdrop-texture-pack)",
+                "type": "directory",
+                "default": self.context.config.video_exporter.milkdrop_texture_path,
             },
             "milkdrop_preset_duration": {
                 "label": "Durée par preset (s)",

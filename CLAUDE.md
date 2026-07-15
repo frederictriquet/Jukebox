@@ -153,6 +153,8 @@ paths + line numbers — open them with `Read`.
 ## Engineering rules
 
 - Les I/O bloquantes (écriture de tags audio, accès disque) ne s'exécutent jamais sur le thread UI ; les déporter sur un worker QThread.
+- Tout QThread DOIT être nommé via `setObjectName(...)` (idéalement dans `__init__`, avec un identifiant utile, ex. `VideoExporter-QuickExportWorker-{track_id}`) ; un thread sans nom apparaît comme `''` dans les warnings Qt et rend le diagnostic impossible.
+- Ne jamais lâcher (mettre à `None` / réassigner) la référence d'un QThread encore en cours (`QThread: Destroyed while thread '' is still running`) : avant de réassigner un worker ou dans `shutdown()`, faire `if worker.isRunning(): worker.wait(WORKER_WAIT_TIMEOUT_MS)` puis relâcher. Ne pas nuller la référence depuis le slot du signal custom `finished`/`error` (émis dans `run()`, avant terminaison réelle). Pattern de référence : `plugins/cue_maker/plugin.py`.
 - Après toute édition de métadonnées d'un morceau, émettre TRACK_METADATA_UPDATED pour rafraîchir les vues abonnées.
 - make type-check (mypy) doit couvrir plugins/ et tests/, pas uniquement jukebox/.
 - Toute nouvelle branche conditionnelle ou comportement limite (fallback, valeur vide/blanche, ordre de tri, chemin d'erreur) DOIT être couvert par un test ; pas de branche non testée.

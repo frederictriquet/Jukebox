@@ -419,7 +419,6 @@ class CueMakerPlugin:
             overlap=cue_config.overlap if cue_config else 15.0,
             max_workers=cue_config.max_workers if cue_config else 4,
         )
-        self._analyzer.setObjectName("CueMaker-AnalyzeWorker")
         self._analyzer.progress.connect(self.main_widget.set_analysis_progress)
         self._analyzer.finished.connect(self._on_analysis_done)
         self._analyzer.error.connect(self.main_widget.on_analysis_error)
@@ -482,7 +481,6 @@ class CueMakerPlugin:
         from plugins.cue_maker.analyzer import TargetedMatchWorker
 
         self._targeted_worker = TargetedMatchWorker(mix_path, db_path, start_ms, end_ms)
-        self._targeted_worker.setObjectName("CueMaker-TargetedWorker")
         self._targeted_worker.progress.connect(self.main_widget.set_analysis_progress)
         self._targeted_worker.finished.connect(self._on_targeted_match_done)
         self._targeted_worker.error.connect(self.main_widget.on_targeted_match_error)

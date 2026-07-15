@@ -40,6 +40,7 @@ class VideoExportWorker(QThread):
             context: Plugin context.
         """
         super().__init__()
+        self.setObjectName("VideoExporter-VideoExportWorker")
         self.config = config
         self.context = context
         self._cancelled = False

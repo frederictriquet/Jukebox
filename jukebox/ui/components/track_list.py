@@ -120,6 +120,7 @@ class BackgroundCheckWorker(QThread):
         track_dicts: list[dict[str, Any]],
     ) -> None:
         super().__init__()
+        self.setObjectName(f"TrackList-BackgroundCheckWorker-{len(track_dicts)}")
         self._duplicate_checker = duplicate_checker
         self._track_dicts = track_dicts
         _live_workers.append(self)
@@ -163,6 +164,7 @@ class WaveformBatchLoader(QThread):
 
     def __init__(self, db_path: Path, track_ids: list[int]) -> None:
         super().__init__()
+        self.setObjectName(f"TrackList-WaveformBatchLoader-{len(track_ids)}")
         self._db_path = db_path
         self._track_ids = track_ids
         self.result: dict[int, tuple[bytes | None, bool]] = {}
